@@ -146,7 +146,7 @@ class Validator:
         if most_used_font_size is None:
             logging.warning("Redaction: nie można określić rozmiaru czcionki")
             return True
-        elif most_used_font_size != self.config.font_size:
+        elif abs(most_used_font_size - self.config.font_size) > 0.1: # dopuszczalna różnica 0.1
             self.issues.append(Issue(
                 category="Czcionka",
                 description=f"Rozmiar czcionki: {most_used_font_size}, oczekiwany: {self.config.font_size}",
@@ -265,5 +265,49 @@ class Validator:
                 return False
         logging.info("Redaction: wszystkie używane czcionki są dozwolone")
         return True
+    
+    def check_justification(self, doc_data: DocumentData) -> bool:
+        expected_justified = self.config.justowanie
+        issues_found = False
 
-        
+        for page in doc_data.pages:
+            for block in page.text_blocks:
+                lines = block.lines
+            
+                if len(lines) <= 1:
+                    continue
+            
+                for i in range(len(lines) - 1):
+                    line = lines[i]
+
+                    if not line.spans:
+                        continue
+
+                    is_justified = (
+                        line.alignement == "justified" 
+                    )
+
+                    if expected_justified and not is_justified:
+                        self.issues.append(Issue(
+                            category="Justowanie",
+                            description=f"Brak justowania w akapicie (linia {i+1})",
+                            page=page.number,
+                            xy=line.bbox[:2]
+                        ))
+                        issues_found = True
+
+                    elif not expected_justified and is_justified:
+                        self.issues.append(Issue(
+                            category="Justowanie",
+                            description=f"Tekst jest wyjustowany, a nie powinien (linia {i+1})",
+                            page=page.number,
+                            xy=line.bbox[:2]
+                        ))
+                        issues_found = True
+
+        if not issues_found:
+            logging.info("Redaction: justowanie zgodne z wymaganiami")
+
+        return not issues_found
+
+	    
