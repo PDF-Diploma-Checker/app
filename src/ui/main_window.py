@@ -1,11 +1,23 @@
+import sys
 import os
+
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+APP_DIR = os.path.join(BASE_DIR, "app")
+COMMON_DIR = os.path.join(BASE_DIR, "common")
+
+if APP_DIR not in sys.path:
+    sys.path.append(APP_DIR)
+
+if COMMON_DIR not in sys.path:
+    sys.path.append(COMMON_DIR)
+
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QScrollArea, QLabel, QPushButton, QSplitter, 
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QScrollArea, QLabel, QPushButton, QSplitter,
     QLineEdit, QStackedWidget, QFileDialog, QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QPointF
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 
@@ -13,6 +25,8 @@ from select_text import SelectablePdfView
 from start_page import StartPage
 from saving_files import saving_files
 import styles
+from entry import run_analysis_for_pdf
+
 
 class PDFReader(QMainWindow):
     def __init__(self):
@@ -21,7 +35,8 @@ class PDFReader(QMainWindow):
         self.resize(1300, 900)
         self.manager = saving_files()
         self.document = QPdfDocument(self)
-        
+        self.current_pdf_path = None
+
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
 
@@ -46,7 +61,7 @@ class PDFReader(QMainWindow):
         layout.addWidget(toolbar)
 
         splitter = QSplitter(Qt.Horizontal)
-        
+
         self.thumb_area = QScrollArea()
         self.thumb_area.setFixedWidth(160)
         self.thumb_area.setWidgetResizable(True)
@@ -65,9 +80,15 @@ class PDFReader(QMainWindow):
         self.right_panel.setFixedWidth(300)
         self.right_panel.setStyleSheet(styles.RIGHT_PANEL_STYLE)
         right_layout = QVBoxLayout(self.right_panel)
+
         v_label = QLabel("Weryfikacja")
         v_label.setStyleSheet(styles.VERIFY_TITLE_STYLE)
         right_layout.addWidget(v_label)
+
+        self.analyze_btn = QPushButton("Analizuj")
+        self.analyze_btn.clicked.connect(self.run_analysis)
+        right_layout.addWidget(self.analyze_btn)
+
         right_layout.addStretch()
 
         splitter.addWidget(self.thumb_area)
@@ -81,7 +102,7 @@ class PDFReader(QMainWindow):
         toolbar.setFixedHeight(50)
         toolbar.setStyleSheet(styles.TOOLBAR_STYLE)
         l = QHBoxLayout(toolbar)
-        
+
         self.back_btn = QPushButton("<")
         self.back_btn.setFixedSize(40, 40)
         self.back_btn.setStyleSheet("font-size: 20px; border: none; background: transparent;")
@@ -98,11 +119,11 @@ class PDFReader(QMainWindow):
         self.page_input.setAlignment(Qt.AlignCenter)
         self.total_pages_label = QLabel(" / 0 ")
         self.zoom_label = QLabel("100%")
-        
+
         btn_in = QPushButton("+")
         btn_in.setFixedSize(30, 30)
         btn_in.clicked.connect(self.zoom_in)
-        
+
         btn_out = QPushButton("-")
         btn_out.setFixedSize(30, 30)
         btn_out.clicked.connect(self.zoom_out)
@@ -115,24 +136,26 @@ class PDFReader(QMainWindow):
         l.addWidget(btn_in)
         l.addStretch(1)
         l.addWidget(QLabel("PL | EN", styleSheet=styles.LANG_BTN_STYLE))
-        
+
         return toolbar
 
     def open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz PDF", "", "PDF Files (*.pdf)")
-        if path: self.load_and_switch(path)
+        if path:
+            self.load_and_switch(path)
 
     def load_and_switch(self, path):
+        self.current_pdf_path = path
+
         nazwa = os.path.basename(path)
         self.manager.dodaj_prace(nazwa, path, "inzynierska")
-        
+
         self.load_pdf(path)
         self.stack.setCurrentIndex(1)
-        
+
         self.refresh_file_list()
 
     def refresh_file_list(self):
-        #Pobiera dane z managera i odświeża widok StartPage.
         pliki = self.manager.data.get("prace", [])
         self.start_page.render_doc_list(pliki)
 
@@ -141,13 +164,9 @@ class PDFReader(QMainWindow):
             QMessageBox.critical(self, "Błąd", f"Nie odnaleziono pliku:\n{path}")
             return
 
-        # Próba załadowania dokumentu
         self.document.load(path)
-        
-        # Sprawdzanie błędów przy użyciu Twoich nazw z listy
         current_error = self.document.error()
-        
-        #sprawdzenie czy haslo
+
         if current_error == QPdfDocument.Error.IncorrectPassword:
             QMessageBox.warning(self, "Plik zabezpieczony", "Ten PDF wymaga hasła (lub podano błędne).")
             return
@@ -165,22 +184,44 @@ class PDFReader(QMainWindow):
     def generate_thumbnails(self):
         for i in reversed(range(self.thumb_layout.count())):
             w = self.thumb_layout.itemAt(i).widget()
-            if w: w.setParent(None)
+            if w:
+                w.setParent(None)
+
         for i in range(self.document.pageCount()):
             btn = QPushButton()
-            btn.setIcon(QPixmap.fromImage(self.document.render(i, QSize(100, 140))))
+            pixmap = QPixmap.fromImage(self.document.render(i, QSize(100, 140)))
+            btn.setIcon(QIcon(pixmap))
             btn.setIconSize(QSize(100, 140))
             btn.setFixedSize(110, 150)
-            btn.clicked.connect(lambda chk, idx=i: self.pdf_view.pageNavigator().jump(idx, QPointF(0,0), self.pdf_view.zoomFactor()))
+            btn.clicked.connect(
+                lambda chk, idx=i: self.pdf_view.pageNavigator().jump(
+                    idx, QPointF(0, 0), self.pdf_view.zoomFactor()
+                )
+            )
             self.thumb_layout.addWidget(btn)
 
     def zoom_in(self):
         self.pdf_view.setZoomFactor(self.pdf_view.zoomFactor() * 1.1)
-        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor()*100)}%")
+        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor() * 100)}%")
 
     def zoom_out(self):
         self.pdf_view.setZoomFactor(self.pdf_view.zoomFactor() / 1.1)
-        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor()*100)}%")
+        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor() * 100)}%")
 
     def update_page_input(self, idx):
         self.page_input.setText(str(idx + 1))
+
+    def run_analysis(self):
+        if not self.current_pdf_path:
+            QMessageBox.warning(self, "Brak pliku", "Najpierw wybierz plik PDF.")
+            return
+
+        try:
+            result = run_analysis_for_pdf(self.current_pdf_path)
+            QMessageBox.information(
+                self,
+                "Sukces",
+                f"Ścieżka została przekazana do app:\n{result}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Błąd", str(e))
