@@ -380,12 +380,11 @@ class PDFMapper:
         # 4. Post-processing (Łączenie nagłówków i podpisy)
         self._merge_adjacent_headings()
         #self._assign_captions_to_visuals(old_doc.pages, new_doc)
+        self._extract_acronyms_to_schema(new_doc)
         self._tag_special_lists(old_doc)
         self._tag_visual_descriptions()
         self._pair_descriptions_with_visuals(new_doc)
 
-        # 5. Wyciąganie akronimów
-        self._extract_acronyms_to_schema(new_doc)
 
         return new_doc
 
@@ -750,8 +749,8 @@ class PDFMapper:
         
         for block in self.logical_blocks:
             
-            header_text = getattr(block, "content", "").strip().upper()
-            block_type = getattr(block, "type", None)
+            header_text = getattr(block, "content", "").strip().upper() if not isinstance(block, dict) else block.get("content", "").strip().upper()
+            block_type = getattr(block, "type", None) if not isinstance(block, dict) else block.get("type", None)
             
             pattern_target = r'\b(ACRONYM|ACRONYMS|SKRÓT|SKRÓTY|SKRÓTÓW|ABBREVIATION|ABBREVIATIONS|OZNACZEŃ|OZNACZENIA|SYMBOL|SYMBOLI|SYMBOLE)\b'
             
@@ -775,6 +774,15 @@ class PDFMapper:
 
             if in_acronym_section:
                 fallback_blocks.append(block)
+                
+                if block_type != "heading":
+                    if isinstance(block, dict):
+                        block["type"] = "acronyms"
+                    else:
+                        try:
+                            block.type = "acronyms"
+                        except Exception:
+                            pass
                 
                 def fetch_words(obj):
                     w = []
@@ -834,8 +842,8 @@ class PDFMapper:
 
             def get_text(w):
                 try:
-                    t = w.get("text") if isinstance(w, dict) else getattr(w, "text", "")
-                    return str(t) if t else ""
+                    if isinstance(w, dict): return str(w.get("text", ""))
+                    return str(getattr(w, "text", ""))
                 except: return ""
 
             unique_words = []
@@ -894,7 +902,6 @@ class PDFMapper:
 
         final_lines = []
         
-        #jeśli w skrócie jest myślnik
         uses_dashes = any(re.search(acr_dash_pattern, l.strip()) for l in reconstructed_lines)
 
         for raw_line in reconstructed_lines:
