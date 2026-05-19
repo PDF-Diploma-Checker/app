@@ -385,6 +385,7 @@ class PDFMapper:
         self._tag_visual_descriptions()
         self._pair_descriptions_with_visuals(new_doc)
 
+        new_doc.metadata["main_font"] = old_doc.get_most_common_font()
 
         return new_doc
 
