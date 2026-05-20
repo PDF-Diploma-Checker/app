@@ -12,7 +12,7 @@ def decimal_check(blocks):
     checked_matches = []
     chapter_numbers = set()
     for block in blocks:
-        if block.block.type in {"math", "code_snippet", "toc", "tot", "tof"}:
+        if block.block.type in {"math", "code_snippet", "toc", "tot", "tof", "acronyms"}:
             continue
         if block.block.type == "list":
             if block.block.is_bibliography == True:
@@ -55,7 +55,7 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
                      "wykres", "wykresu", "wykresom", "wykresowi", "wykresem", "wykresie", "wykresach", "wyk", "rozdziale", "rozdział", "rozdziały", "rozdziału", "rozdziałem", "rozdziałach", "roz", "rozdz", "rozdziałów", 
                      "obraz", "obr", "obrazie", "obrazu", "obrazowi", "obrazach", "obrazem","obrazom", 
                      "wzór", "wzoru", "wzorowi", "wzory", "wzorom", "wzorach", "wzorami", "wzorem", "wzorze"
-                     "równanie", "równaniu", "równaniach", "równaniami", "równaniom", "równania", "równaniem", "rów"}
+                     "równanie", "równaniu", "równaniach", "równaniami", "równaniom", "równania", "równaniem", "rów", "listing"}
     checked_matches = []
     for match in potential_matches: 
         is_error = 1 #0 - brak błędu, 1 - potencjalny błąd, 1 - potencjalny błąd, 2 - pewny błąd.
@@ -73,7 +73,7 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
         following_text = re.findall(r'[^.()\[\]{}:,;\s]+',block.contents[match_end:end_check_idx].lower())
         begin_check_idx = max(match.offset-30, 0)
         previous_text = re.findall(r'[^.()\[\]{}:,;\s]+', block.contents[begin_check_idx:match.offset].lower())
-        if check_quotes(match, block.contents):
+        if check_quotes(match.offset, match.offset + match.error_length, block.contents):
             is_error = 0
         elif check_if_proper(block.block, match, is_diff= True):
             is_error = 0

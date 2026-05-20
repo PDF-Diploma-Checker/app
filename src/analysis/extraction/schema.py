@@ -20,6 +20,7 @@ class WordInfo: # Położenie XY oraz relatywne słowa
     bbox: List[float]
     page_number: int
     line: int = 0
+    incorrect_bibliography: int = 0
     
 @dataclass
 class HeadingInfo: # Informacje o nagłówkach (TODO)
@@ -112,6 +113,7 @@ class AcronymItem:
     pages: str           
     bbox: List[float] = field(default_factory=list)
     words: List[WordInfo] = field(default_factory=list)
+    src_page: int = 0
 
 @dataclass
 class TOCItem: # Informacje o elementach spisu treści (TODO)

@@ -53,6 +53,14 @@ class PDFMapper:
         return abs(last_x0 - curr_x0) < PDFMapper.LIST_CONT_MAX_X_DIFF or curr_x0 > last_x0
     
     @staticmethod
+    def _adjust_item_word_positions(item_words):        
+        if len(item_words) > 1:
+            marker_offset = item_words[1].start_char
+            for word in item_words[1:]:
+                word.start_char -= marker_offset
+                word.end_char -= marker_offset
+    
+    @staticmethod
     def is_header(words: list[WordInfo]) -> bool:
         if not words: return False
         is_bold = all(w.bold for w in words)
@@ -262,6 +270,12 @@ class PDFMapper:
         is_new_paragraph = False
         debug_reason = ""
 
+        finished = True
+        if full_text.strip():
+            finished = full_text.strip()[-1] in {'.', '!', '?', ':', ';'}
+        elif self.paragraph_buffer:
+            finished = self.paragraph_buffer[-1]['content'].strip()[-1] in {'.', '!', '?', ':', ';'}
+
         # Wertykalna przerwa
         if self.last_y1 is not None:
             if current_y0 < self.last_y1 - 10:
@@ -270,16 +284,22 @@ class PDFMapper:
                 vertical_gap = current_y0 - self.last_y1
                 line_height = current_y1 - current_y0
                 if vertical_gap > line_height * 1.5:
-                    is_new_paragraph = True
-                    debug_reason = "zbyt duża wertykalna przerwa"
+                    if not finished:
+                        is_new_paragraph = False 
+                    else:
+                        is_new_paragraph = True
+                        debug_reason = "zbyt duża wertykalna przerwa"
         
         self.last_y1 = current_y1
 
         # Wcięcie akapitowe 
         if not is_new_paragraph:
             if not full_text.strip() and (line_x0 > x0_margin + self.MARGIN_INDENT_THRESH):
-                is_new_paragraph = True
-                debug_reason = "wcięcie na początku bloku/strony"
+                if not finished:
+                    is_new_paragraph = False # Ratujemy! Zignoruj fałszywe wcięcie (np. lustrzane)
+                else:
+                    is_new_paragraph = True
+                    debug_reason = "wcięcie na początku bloku/strony"
 
         if is_valid_list_cont:
             is_new_paragraph = False
@@ -384,12 +404,14 @@ class PDFMapper:
         self._tag_special_lists(old_doc)
         self._tag_visual_descriptions()
         self._pair_descriptions_with_visuals(new_doc)
+        self._verify_bibliography_references()
 
         new_doc.metadata["main_font"] = old_doc.get_most_common_font()
 
         return new_doc
 
     def _process_page(self, page, new_doc):
+        #self.last_y1 = None
         bottom_thresh = page.height - self.BOTTOM_MARGIN_OFFSET
         table_bboxes = [t.bbox for t in page.tables]
         
@@ -442,6 +464,8 @@ class PDFMapper:
                     continue
                 
                 tmp_line_text = "".join(s.text for s in line.spans).strip()
+                if not tmp_line_text:
+                    continue
                 line_type, _ = classify_block_content(tmp_line_text, current_marker)
                 
                 if line_type == "list" and full_text.strip():
@@ -456,6 +480,7 @@ class PDFMapper:
                             'item': ListItem(item_id=block.block_id, marker_type=prev_marker, text=cleaned_text, bbox=list(block.bbox), words=words_info.copy()),
                             'words': words_info.copy(), 'block_id': block.block_id, 'bbox': list(block.bbox), 'original_text': full_text
                         })
+                        self._adjust_item_word_positions(self.list_buffer[-1]['item'].words)
                         full_text, words_info = "", []
 
                 line_x0 = block.bbox[0]
@@ -482,6 +507,7 @@ class PDFMapper:
                                 'item': ListItem(item_id=block.block_id, marker_type=prev_marker, text=cleaned_text, bbox=list(block.bbox), words=words_info.copy()),
                                 'words': words_info.copy(), 'block_id': block.block_id, 'bbox': list(block.bbox), 'original_text': full_text
                             })
+                            self._adjust_item_word_positions(self.list_buffer[-1]['item'].words)
                         else:
                             if self.list_buffer:
                                 self._empty_list_buffer()
@@ -522,9 +548,14 @@ class PDFMapper:
                     'item': ListItem(item_id=block.block_id, marker_type=marker_type, text=cleaned_text, bbox=list(block.bbox), words=words_info),
                     'words': words_info, 'block_id': block.block_id, 'bbox': list(block.bbox), 'original_text': full_text
                 })
+                self._adjust_item_word_positions(self.list_buffer[-1]['item'].words)
             elif is_valid_list_cont: 
                 last_item_data = self.list_buffer[-1]
                 connector = "" if last_item_data['item'].text.rstrip().endswith('-') else " "
+                cont_base = len(last_item_data['item'].text) + len(connector)
+                for word in words_info:
+                    word.start_char += cont_base
+                    word.end_char += cont_base
                 last_item_data['item'].text += connector + full_text
                 last_item_data['item'].words.extend(words_info)
                 b = list(block.bbox)
@@ -733,6 +764,78 @@ class PDFMapper:
                     
             if closest_visual:
                 closest_visual.caption = {"text": block.content.strip()}
+
+    def _verify_bibliography_references(self):
+        """
+        Post-processing: Zbiera poprawne indeksy z sekcji bibliografii,
+        sprawdzając pierwsze słowo (marker) każdego podpunktu.
+        Następnie waliduje odwołania w tekście.
+        Oznacza 'incorrect_bibliography = 1' w obiektach WordInfo dla błędnych odwołań.
+        """
+        valid_bib_numbers = set()
+        
+        # -----------------------------------------------------
+        # KROK 1: Zbieramy klucze z pierwszych słów (markerów) list bibliograficznych
+        # -----------------------------------------------------
+        for block in self.logical_blocks:
+            if getattr(block, "is_bibliography", False) and hasattr(block, "items"):
+                for item in block.items:
+                    # Sprawdzamy, czy podpunkt ma przypisane jakiekolwiek słowa
+                    if item.words:
+                        # Pierwsze słowo to nasz marker (np. "[1]", "1.", "1")
+                        marker_text = item.words[0].text
+                        
+                        # Wyciągamy z niego same cyfry
+                        match = re.search(r'\d+', marker_text)
+                        if match:
+                            valid_bib_numbers.add(match.group())
+
+        citation_pattern = re.compile(r'\[([\d\s,\-]+)\]')
+
+        def extract_numbers_from_citation(cit_str):
+            nums = set()
+            for part in cit_str.split(','):
+                part = part.strip()
+                if '-' in part:  
+                    try:
+                        start_s, end_s = part.split('-')
+                        for i in range(int(start_s), int(end_s) + 1):
+                            nums.add(str(i))
+                    except ValueError:
+                        pass
+                else:
+                    num_match = re.search(r'\d+', part)
+                    if num_match:
+                        nums.add(num_match.group())
+            return nums
+
+        
+        for block in self.logical_blocks:
+            # Pomijamy nagłówki i samą bibliografię
+            if getattr(block, "is_bibliography", False) or getattr(block, "type", None) == "heading" or getattr(block, "type", False) == "code_snippet":
+                continue
+            
+                
+            search_targets = []
+            if hasattr(block, "items"):
+                for item in block.items:
+                    search_targets.append((item.text, item.words))
+            else:
+                search_targets.append((getattr(block, "content", ""), getattr(block, "words", [])))
+
+            for text, words in search_targets:
+                if not text or not words:
+                    continue
+                    
+                for match in citation_pattern.finditer(text):
+                    cit_content = match.group(1)
+                    nums = extract_numbers_from_citation(cit_content)
+                    
+                    if nums and not nums.issubset(valid_bib_numbers):
+                        start_pos, end_pos = match.span()
+                        for word in words:
+                            if word.start_char < end_pos and word.end_char > start_pos:
+                                word.incorrect_bibliography = 1
     
     def _extract_acronyms_to_schema(self, new_doc):
         
@@ -741,6 +844,7 @@ class PDFMapper:
         acr_space_pattern = r'^(?=[A-Za-zĄĆĘŁŃÓŚŹŻ0-9\-/\u0370-\u03FF]*[A-Za-zĄĆĘŁŃÓŚŹŻ\u0370-\u03FF])(?:[A-ZĄĆĘŁŃÓŚŹŻ0-9\u0370-\u03FF]|[a-ząćęłńóśźż][A-ZĄĆĘŁŃÓŚŹŻ\u0370-\u03FF])[A-Za-zĄĆĘŁŃÓŚŹŻ0-9\-/\u0370-\u03FF]{0,20}'
         mc = r'\u0370-\u03FF\u2100-\u214F\u2200-\u22FF\U0001D400-\U0001D7FF'
         
+        # BAZA SYMBOLI
         math_symbol_pattern = r'^([A-Za-zĄĆĘŁŃÓŚŹŻ0-9\-/\^\|_=<>\.,\(\)\*\s' + mc + r']{1,30})\s+[-–—−‐:=]?\s*(?=[a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])'
 
         in_acronym_section = False
@@ -755,7 +859,7 @@ class PDFMapper:
             
             pattern_target = r'\b(ACRONYM|ACRONYMS|SKRÓT|SKRÓTY|SKRÓTÓW|ABBREVIATION|ABBREVIATIONS|OZNACZEŃ|OZNACZENIA|SYMBOL|SYMBOLI|SYMBOLE)\b'
             
-            #sprawdzanie czy blok jest spisem akronimów
+            # sprawdzanie czy blok jest spisem akronimów
             is_header = False
             if block_type == "heading":
                 is_header = True
@@ -776,6 +880,7 @@ class PDFMapper:
             if in_acronym_section:
                 fallback_blocks.append(block)
                 
+                # Nadpisywanie typu bloków na "acronyms"
                 if block_type != "heading":
                     if isinstance(block, dict):
                         block["type"] = "acronyms"
@@ -877,18 +982,31 @@ class PDFMapper:
                     current_line_words.append(word)
                 else:
                     current_line_words.sort(key=get_x0)
-                    reconstructed_lines.append(" ".join([get_text(w) for w in current_line_words]))
+                    line_str = " ".join([get_text(w) for w in current_line_words])
+                    # Zapisywanie tekstu razem z zapamiętaną stroną
+                    reconstructed_lines.append((line_str, current_page))
+                    
                     current_line_words = [word]
                     current_y = y0
                     current_page = page
                     
             if current_line_words:
                 current_line_words.sort(key=get_x0)
-                reconstructed_lines.append(" ".join([get_text(w) for w in current_line_words]))
+                line_str = " ".join([get_text(w) for w in current_line_words])
+                reconstructed_lines.append((line_str, current_page))
                 
         else:
             for block in fallback_blocks:
-                if getattr(block, "type", None) in ["acronyms", "paragraph", "math", "list", "text", "table", "heading"]:
+                b_type = getattr(block, "type", None) if not isinstance(block, dict) else block.get("type", getattr(block, "block_type", None))
+                
+                # Wyciągnięcie numeru strony z bloku, jeśli jest dostępny
+                try:
+                    b_page = block.get("page_number") if isinstance(block, dict) else getattr(block, "page_number", 0)
+                    b_page = int(b_page) if b_page is not None else 0
+                except:
+                    b_page = 0
+                
+                if b_type in ["acronyms", "paragraph", "math", "list", "text", "table", "heading"]:
                     content = getattr(block, "content", "")
                     if not content: continue
                     for raw_line in content.split('\n'):
@@ -899,13 +1017,14 @@ class PDFMapper:
                             if set(raw_line.strip()).issubset({'-', '|', ' '}):
                                 continue
                         raw_line = raw_line.replace('$', '')
-                        reconstructed_lines.append(raw_line)
+                        reconstructed_lines.append((raw_line, b_page))
 
         final_lines = []
         
-        uses_dashes = any(re.search(acr_dash_pattern, l.strip()) for l in reconstructed_lines)
+        # Sprawdzamy myślniki pobierając tylko tekst 
+        uses_dashes = any(re.search(acr_dash_pattern, l[0].strip()) for l in reconstructed_lines)
 
-        for raw_line in reconstructed_lines:
+        for raw_line, line_page in reconstructed_lines:
             raw_line = raw_line.strip()
             if not raw_line: continue
             
@@ -936,11 +1055,14 @@ class PDFMapper:
                             is_new = True
 
                 if is_new or not final_lines:
-                    final_lines.append(part)
+                    final_lines.append([part, line_page])
                 else:
-                    final_lines[-1] += " " + part
+                    final_lines[-1][0] += " " + part
 
-        for line in final_lines:
+        for line_data in final_lines:
+            line = line_data[0]
+            line_page = line_data[1]  # Wyciągamy przechwyconą stronę do zapisu!
+            
             match = None
             if uses_dashes:
                 match = re.match(acr_dash_pattern + r'(.*)$', line)
@@ -982,7 +1104,8 @@ class PDFMapper:
                     definition=definition,
                     pages=pages,
                     bbox=[],  
-                    words=[]  
+                    words=[],
+                    src_page=line_page  
                 )
                 new_doc.reference_sections.acronyms.append(new_item)
 # Funkcje zewnętrzne
@@ -1017,3 +1140,9 @@ def get_plain_text(pdf_path):
 
 def get_acronyms_lut(doc) -> dict:
     return {item.acronym: item.definition for item in doc.reference_sections.acronyms}
+
+def get_acronym_pages(doc) -> list[int]:
+    """Zwraca unikalną posortowaną listę stron, na których znajduje się spis akronimów."""
+    pages = [item.src_page for item in doc.reference_sections.acronyms]
+    valid_pages = sorted(list(set(p for p in pages if p > 0)))
+    return valid_pages
