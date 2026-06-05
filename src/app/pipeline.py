@@ -133,6 +133,7 @@ class AnalysisPipeline:
                 res_id, res_title, res_score, res_method, res_cites, r1, r2, r3 = get_final_sota_report(mapped_doc, language)
         
                 score = get_overall_grade(purpose_score, content_grade_val, res_score)
+                print(f"Purpose Score: {purpose_score}, Content Grade: {content_grade_val}, SOTA Score: {res_score}, Overall Score: {score}")
                 
                 total_sections = len(summaries) if summaries else 1
                 bad_sections = len(off_topic_headings)
