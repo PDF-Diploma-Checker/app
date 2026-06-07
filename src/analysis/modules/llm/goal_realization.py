@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import time
+import gc
 
 from llama_cpp import Llama
 
@@ -86,6 +87,30 @@ def get_llm():
         )
 
     return _LLM
+
+
+def cleanup_goal_realization_llm():
+    """Release goal realization LLM instance to free RAM/VRAM."""
+
+    global _LLM
+
+    llm = _LLM
+    _LLM = None
+
+    if llm is not None:
+        try:
+            close_fn = getattr(llm, "close", None)
+            if callable(close_fn):
+                close_fn()
+        except Exception:
+            pass
+
+        try:
+            del llm
+        except Exception:
+            pass
+
+    gc.collect()
 
 
 def build_goal_realization_prompt(text, purpose, language):
@@ -280,6 +305,9 @@ def check_goal_realization(text, purpose, language):
             "reason": str(e),
             "evidence": "",
         }
+
+    finally:
+        cleanup_goal_realization_llm()
 
 
 def main():
