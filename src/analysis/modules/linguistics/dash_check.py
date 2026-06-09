@@ -3,12 +3,9 @@ from .linguistics_types import Error_type
 from .helpers import get_match_info
 
 def dash_check(blocks):
-    """
-    Analizuje bloki tekstu pod kątem poprawności użycia myślników, półpauz i pauz.
-    """
+    '''Checks text blocks for correct usage of hyphens, en dashes and em dashes in Polish and English.'''
     checked_matches = []
-    dash_counter = 0
-    
+
     for block in blocks:
         if block.block.type in {"keywords", "math", "code_snippet"}:
             continue
@@ -31,7 +28,7 @@ def dash_check(blocks):
                     errors.append(Error_type(
                         content='-',
                         category="PUNCTUATION",
-                        message="Błąd: dywiz zamiast półpauzy w definicji.",
+                        message="Dywiz zamiast półpauzy w definicji.",
                         offset=word.start_char,
                         error_length=1,
                         block_id=unit.block_id,
@@ -43,7 +40,7 @@ def dash_check(blocks):
 
         else:
             #" - " lub " -" lub "- "
-            hyphen_space_regex = r'(\s-\s|\s-|-\s)'
+            hyphen_space_regex = r'(\s-\s|\s-(?=\D|$)|-\s)'
             for m in re.finditer(hyphen_space_regex, text):
                 if unit.type == "heading":
                     pos_before = m.start() - 1
@@ -55,7 +52,7 @@ def dash_check(blocks):
                 errors.append(Error_type(
                     content=m.group(),
                     category="PUNCTUATION",
-                    message="Błąd: Spacje wokół dywizu.",
+                    message="Dywiz zamiast półpauzy lub spacje wokół dywizu w nazwie łączonej.",
                     offset=m.start(),
                     error_length=len(m.group()),
                     block_id=unit.block_id,
@@ -141,7 +138,6 @@ def dash_check(blocks):
                 ))
             
 
-        dash_counter += len(errors)
         checked_matches.extend(errors)
 
-    return checked_matches, dash_counter
+    return checked_matches

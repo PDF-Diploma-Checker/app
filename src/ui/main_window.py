@@ -82,6 +82,7 @@ class AnalysisWorker(QObject):
         except Exception as e:
             self.error.emit(str(e))
 
+
 class PDFReader(QMainWindow):
     """The main window component of the Diploma Checker application. 
     Manages the user interface flow, PDF rendering, background background workers, and view states."""
@@ -277,96 +278,34 @@ class PDFReader(QMainWindow):
             self.load_pdf(path)
             self.manager.add_document(os.path.basename(path), path, "PDF")
             self.refresh_file_list()
-            self.last_report = getattr(dialog, 'final_report', None)
             
-            if hasattr(dialog, 'final_report') and dialog.final_report:
-                errors = dialog.final_report.get("errors", [])
-                report_data = dialog.final_report.get("sota", None)
-
-                self.pdf_view.add_errors(errors)
-                self.update_report_panel(report_data)
-                self.manager.save_errors(path, errors)
-                self.manager.save_ai_result(path, report_data)
-                
-            self.stack.setCurrentIndex(1)
-            print("Analiza zakończona, widok przełączony.")
-    
-    def refresh_file_list(self):
-        """Synchronizes the start page file registry grid with the underlying data store 
-        managed by SavingFiles."""
-        pliki = self.manager.data.get("prace", [])
-        self.start_page.render_doc_list(pliki)
-
-    def delete_document(self, path):
-        """Removes a document from the system index and updates the start page dashboard 
-        to reflect the changes."""
-        reply = QMessageBox.question(
-            self, 'Potwierdzenie', 
-            "Czy na pewno chcesz usunąć ten dokument z listy?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            self.manager.delete_document(path)
-            self.refresh_file_list()
-
-    def load_pdf(self, path):
-        """Opens a PDF file using the QPdfDocument backend, connects rendering signals, 
-        and triggers the generation of page thumbnails."""
-        if not os.path.exists(path):
-            QMessageBox.critical(self, "Błąd", f"Nie odnaleziono pliku:\n{path}")
-            return
-        self.current_pdf_path = path
-        self.document.load(path)
-        current_error = self.document.error()
-        if current_error == QPdfDocument.Error.IncorrectPassword:
-            QMessageBox.warning(self, "Plik zabezpieczony", "Ten PDF wymaga hasła.")
-            return
-        elif self.document.status() == QPdfDocument.Status.Error:
-            QMessageBox.critical(self, "Błąd", "Nie udało się załadować pliku PDF.")
-            return
-
-        if self.document.pageCount() > 0:
-            self.title_label.setText(os.path.basename(path))
-            self.total_pages_label.setText(f" / {self.document.pageCount()} ")
-            self.generate_thumbnails()
-            self.pdf_view.setZoomFactor(1.0)
-            self.zoom_label.setText("100%")
-        
-            self.load_template_errors()
-            self.load_ai_analysis()
-            self.load_custom_comments()
-
-    def load_ai_analysis(self):
-        """Extracts saved advanced AI evaluation details from the storage map matching 
-        the current open file hash path and applies them to the sidebar dashboard panels."""
-        if not hasattr(self, 'current_pdf_path') or not self.current_pdf_path:
-            return
-            
-        try:
+            final_rep_obj = getattr(dialog, 'final_report', None)
+            errors = []
             report_data = None
-            for p in self.manager.data.get("prace", []):
-                if p['sciezka_lokalna'] == self.current_pdf_path:
-                    report_data = p.get("sota_result") 
-                    break
-            self.update_report_panel(report_data)
             
-        except Exception as e:
-            print(f"Błąd podczas wczytywania analizy AI: {e}")
+            if isinstance(final_rep_obj, dict):
+                errors = final_rep_obj.get("errors", [])
+                report_data = final_rep_obj.get("sota", None)
+            elif final_rep_obj is not None:
+                errors = getattr(final_rep_obj, "linguistics_errors", [])
+                report_data = getattr(final_rep_obj, "llm_result", None)
 
-    def load_template_errors(self):
-        """Queries structural layout validation flags and text template compliance anomalies from 
-        the database manager and draws them as highlights in the graphics scene view."""
-        if not hasattr(self, 'current_pdf_path') or not self.current_pdf_path:
-            return
+            self.manager.save_errors(path, errors)
+            self.manager.save_ai_result(path, report_data)
             
-        try:
-            errors = self.manager.get_errors(self.current_pdf_path)
+            self.stack.setCurrentIndex(1)
+            
             if errors:
-                self.pdf_view.add_errors(errors) 
-                self.pdf_view.update_markers_pos() 
-        except Exception as e:
-            print(f"Błąd podczas wczytywania błędów: {e}")
+                self.pdf_view.add_errors(errors)
+                if hasattr(self.pdf_view, 'update_markers_pos'):
+                    self.pdf_view.update_markers_pos()
+                else:
+                    self.pdf_view.update() 
+
+            if report_data:
+                self.update_report_panel(report_data)
+            else:
+                self.load_ai_analysis()
 
     def generate_thumbnails(self):
         """Clears out old page cache containers and renders dynamic thumbnail image previews 
@@ -503,7 +442,7 @@ class PDFReader(QMainWindow):
 
             l.addWidget(cg_frame)
         else:
-            none_label = QLabel("Brak danych analizy merytorycznej (Tryb szybki)")
+            none_label = QLabel("Brak danych analizy merytorycznej")
             none_label.setStyleSheet(styles.AI_NONE_LABEL_STYLE)
             l.addWidget(none_label)
 
@@ -561,19 +500,50 @@ class PDFReader(QMainWindow):
         graphics_header.setStyleSheet(styles.GRAPHICS_HEADER_STYLE)
         graphics_layout.addWidget(graphics_header)
 
-        quality_errors = report_data.get('jakosc_obrazkow', [])
-        font_errors = report_data.get('czcionki_obrazkow', [])
+        img_data = report_data.get("image_analysis", {})
+        has_images_checked = img_data.get('total', 0) > 0 if isinstance(img_data, dict) else False
 
-        if not quality_errors:
-            graphics_layout.addWidget(create_badge_row("Jakość obrazów (rozdzielczość/czytelność)", True))
-        else:
-            graphics_layout.addWidget(create_badge_row(f"Jakość obrazów (Błędy: {len(quality_errors)})", False))
+        if content_grade is not None and has_images_checked:
+            graphics_container = QWidget()
+            graphics_layout = QVBoxLayout(graphics_container)
+            graphics_layout.setContentsMargins(0, 4, 0, 0)
+            graphics_layout.setSpacing(6)
 
-        if not font_errors:
-            graphics_layout.addWidget(create_badge_row("Spójność czcionek na rysunkach", True))
-        else:
-            graphics_layout.addWidget(create_badge_row(f"Spójność czcionek (Błędy: {len(font_errors)})", False))
+            graphics_header = QLabel("Weryfikacja rysunków i grafik")
+            graphics_header.setStyleSheet(styles.GRAPHICS_HEADER_STYLE)
+            graphics_layout.addWidget(graphics_header)
+
+            quality_errors = report_data.get('jakosc_obrazkow', [])
+            font_errors = report_data.get('czcionki_obrazkow', [])
+
+            if not quality_errors:
+                graphics_layout.addWidget(create_badge_row("Jakość obrazów (rozdzielczość/czytelność)", True))
+            else:
+                graphics_layout.addWidget(create_badge_row(f"Jakość obrazów (Błędy: {len(quality_errors)})", False))
+
+            if not font_errors:
+                graphics_layout.addWidget(create_badge_row("Spójność czcionek na rysunkach", True))
+            else:
+                graphics_layout.addWidget(create_badge_row(f"Spójność czcionek (Błędy: {len(font_errors)})", False))
+        img_data = report_data.get("image_analysis", {})
+        raster_nums = img_data.get("image_raster", [])
         
+        if raster_nums:
+            raster_widget = QWidget()
+            raster_box_layout = QVBoxLayout(raster_widget)
+            raster_box_layout.setContentsMargins(5, 5, 5, 5)
+            raster_box_layout.setSpacing(4)
+            
+            raster_title = QLabel("Wykryte rysunki rastrowe w dokumencie:")
+            raster_title.setStyleSheet("color: #555; font-size: 11px; font-weight: bold; background: transparent;")
+            raster_box_layout.addWidget(raster_title)
+
+            for num in raster_nums:
+                num_line = QLabel(f"- Rys. {num}")
+                num_line.setStyleSheet("color: #4A4A4A; font-size: 11px; background: transparent;")
+                raster_box_layout.addWidget(num_line)
+
+            graphics_layout.addWidget(raster_widget)
         l.addWidget(graphics_container)
 
         stats_data = report_data.get("statystyki_zdan")
@@ -655,23 +625,23 @@ class PDFReader(QMainWindow):
         try:
             doc = fitz.open(self.current_pdf_path)
             
-            errors_do_zapisu = []
-            if hasattr(self, 'last_report') and self.last_report:
-                errors_do_zapisu = self.last_report.get("errors", [])
+            errors_do_zapisu = self.manager.get_errors(self.current_pdf_path)
 
             for err in errors_do_zapisu:
                 try:
-                    page_num = int(err.get("strona", 1))
+                    page_num = int(err.get("page", err.get("strona", 1)))
                     if 0 <= page_num < len(doc):
                         page = doc[page_num]
-                        coords = err.get("wspolrzedne", {})
+                        coords = err.get("coords", err.get("wspolrzedne", {}))
                         
-                        x, y = float(coords.get("x", 0)), float(coords.get("y", 0))
-                        w, h = float(coords.get("w", 0)), float(coords.get("h", 0))
+                        x = float(coords.get("x", 0))
+                        y = float(coords.get("y", 0))
+                        w = float(coords.get("w", 0))
+                        h = float(coords.get("h", 0))
                         
-                        kat = str(err.get('kategoria', 'Błąd'))
-                        msg = str(err.get('komentarz', ''))
-                        txt = str(err.get('znaleziony_tekst', ''))
+                        kat = str(err.get('category', err.get('kategoria', 'Błąd')))
+                        msg = str(err.get('comment', err.get('komentarz', '')))
+                        txt = str(err.get('found_text', err.get('znaleziony_tekst', '')))
                         opis = f"[{kat}]\n{msg}\n\nTekst: {txt}"
                         
                         if w > 0 and h > 0:
@@ -688,39 +658,40 @@ class PDFReader(QMainWindow):
                             annot.set_info({"title": "Weryfikacja"})
                             annot.update()
                 except Exception as e:
-                    print(f"Błąd przy eksporcie błędu: {e}")
+                    print(f"Błąd przy eksporcie błędu automatycznego: {e}")
 
-            if hasattr(self.pdf_view, 'comment_markers'):
-                for marker in self.pdf_view.comment_markers:
-                    try:
-                        notatka = marker.data
-                        page_idx = notatka["strona"]
-                        if 0 <= page_idx < len(doc):
-                            page = doc[page_idx]
-                            coords = notatka["wspolrzedne"]
-                            x, y = coords["x"], coords["y"]
-                            w, h = coords.get("w", 0), coords.get("h", 0)
-                            tresc_komentarza = notatka['tekst_komentarza']
+            saved_comments = self.manager.get_comments(self.current_pdf_path)
+            for notatka in saved_comments:
+                try:
+                    page_idx = int(notatka.get("strona", 1))
+                    if 0 <= page_idx < len(doc):
+                        page = doc[page_idx]
+                        coords = notatka.get("wspolrzedne", {})
+                        x = float(coords.get("x", 0))
+                        y = float(coords.get("y", 0))
+                        w = float(coords.get("w", 0))
+                        h = float(coords.get("h", 0))
+                        tresc_komentarza = notatka.get('tekst_komentarza', '')
 
-                            if w > 0 and h > 0:
-                                rect = fitz.Rect(x, y, x + w, y + h)
-                                hl = page.add_highlight_annot(rect)
-                                hl.set_colors(stroke=(0.85, 0.92, 1.0)) 
-                                hl.set_opacity(0.5)
-                                hl.set_info({"title": "Mój komentarz", "content": tresc_komentarza})
-                                hl.update()
-                            else:
-                                point = fitz.Point(x, y - 15)
-                                annot = page.add_text_annot(point, tresc_komentarza, icon="Note")
-                                annot.set_colors(stroke=(1, 1, 1)) 
-                                annot.set_info({"title": "Mój komentarz"})
-                                annot.update()
-                    except Exception as e:
-                        print(f"Błąd przy eksporcie notatki: {e}")
+                        if w > 0 and h > 0:
+                            rect = fitz.Rect(x, y, x + w, y + h)
+                            hl = page.add_highlight_annot(rect)
+                            hl.set_colors(stroke=(0.85, 0.92, 1.0)) 
+                            hl.set_opacity(0.5)
+                            hl.set_info({"title": "Mój komentarz", "content": tresc_komentarza})
+                            hl.update()
+                        else:
+                            point = fitz.Point(x, y - 15)
+                            annot = page.add_text_annot(point, tresc_komentarza, icon="Note")
+                            annot.set_colors(stroke=(0.2, 0.6, 1.0)) 
+                            annot.set_info({"title": "Mój komentarz"})
+                            annot.update()
+                except Exception as e:
+                    print(f"Błąd przy eksporcie notatki użytkownika: {e}")
 
             doc.save(save_path)
             doc.close()
-            QMessageBox.information(self, "Sukces", "PDF został zapisany")
+            QMessageBox.information(self, "Sukces", f"PDF z uwagami został zapisany:\n{save_path}")
                         
         except Exception as e:
             QMessageBox.critical(self, "Błąd", f"Błąd eksportu:\n{str(e)}")
@@ -760,8 +731,8 @@ class PDFReader(QMainWindow):
         TrueType text streams, criteria checkpoints, image tracking logs, and syntax metrics."""
         report_data = None
         if hasattr(self, 'current_pdf_path'):
-            for p in self.manager.data.get("prace", []):
-                if p['sciezka_lokalna'] == self.current_pdf_path:
+            for p in self.manager.data.get("documents", []):
+                if p.get('local_path') == self.current_pdf_path:
                     report_data = p.get("sota_result")
                     break
 
@@ -826,7 +797,6 @@ class PDFReader(QMainWindow):
             page.insert_text((margin, pos_y), f"Dokument: {os.path.basename(self.current_pdf_path)}", 
                              fontsize=12, fontname=f_main, color=(0.2, 0.2, 0.2))
             pos_y += 40
-            
             content_grade = report_data.get('content_grade')
             has_llm_data = content_grade is not None
 
@@ -899,7 +869,6 @@ class PDFReader(QMainWindow):
                     page.insert_text((margin + 20, pos_y), f"{label} {status}", 
                                      fontsize=11, fontname=f_bold if met else f_main, color=color)
                     pos_y += 20
-
             else:
                 page.insert_text((margin, pos_y), "Ogólna ocena merytoryczna (AI)", 
                                  fontsize=14, fontname=f_bold)
@@ -909,8 +878,10 @@ class PDFReader(QMainWindow):
                 pos_y += 25
 
             pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-            img_data = report_data.get("image_analysis")
-            if img_data:
+            img_data = report_data.get("image_analysis", {})
+            has_images_checked = img_data.get('total', 0) > 0
+
+            if has_images_checked:
                 page.insert_text((margin, pos_y), "Analiza spójności grafik i wykresów (AI)", 
                                  fontsize=14, fontname=f_bold)
                 pos_y += 25
@@ -927,7 +898,27 @@ class PDFReader(QMainWindow):
                 page.insert_text((margin, pos_y), f"Rysunki poprawne: {img_data.get('good_count', 0)}", 
                                  fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
                 pos_y += 25
-                
+
+                raster_nums = img_data.get("image_raster", [])
+                if raster_nums:
+                    pos_y, page = check_new_page(pos_y, report_pdf, page)
+                    wrapped_header = wrap_text("Zidentyfikowane grafiki rastrowe podlegające badaniu:", 85)
+                    for line in wrapped_header:
+                        pos_y, page = check_new_page(pos_y, report_pdf, page)
+                        page.insert_text((margin, pos_y), line, fontsize=10, fontname=f_bold, color=(0.05, 0.27, 0.63))
+                        pos_y += 14
+
+                    for n in raster_nums:
+                        wrapped_item = wrap_text(f"- Rys. {n}", 85)
+                        for line in wrapped_item:
+                            pos_y, page = check_new_page(pos_y, report_pdf, page)
+                            page.insert_text((margin + 10, pos_y), line, fontsize=10, fontname=f_main, color=(0.1, 0.1, 0.1))
+                            pos_y += 14
+
+                    if raster_nums:
+                        pos_y, page = check_new_page(pos_y, report_pdf, page)
+                    pos_y += 10
+
                 if img_data.get("details", []):
                     page.insert_text((margin, pos_y), "Lista szczegółowa rozbieżności:", fontsize=12, fontname=f_bold)
                     pos_y += 20
@@ -941,11 +932,6 @@ class PDFReader(QMainWindow):
                             pos_y += 15
                         pos_y += 4
 
-            pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-            img_data = report_data.get("image_analysis", {})
-            has_images_checked = img_data.get('total', 0) > 0
-
-            if has_images_checked:
                 pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
                 page.insert_text((margin, pos_y), "Ocena jakości obrazów (DPI i czytelność)", fontsize=14, fontname=f_bold)
                 pos_y += 25
@@ -975,56 +961,62 @@ class PDFReader(QMainWindow):
                                 page.insert_text((margin + 25, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
                                 pos_y += 14
                         pos_y += 5
-                    pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-            page.insert_text((margin, pos_y), "Spójność czcionek na obrazach", fontsize=14, fontname=f_bold)
-            pos_y += 25
-
-            font_errors = report_data.get('czcionki_obrazkow', [])
-            if not font_errors:
-                page.insert_text((margin, pos_y), "Brak wykrytych problemów ze spójnością czcionek na rysunkach.", 
-                                 fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
+                
+                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
+                page.insert_text((margin, pos_y), "Spójność czcionek na obrazach", fontsize=14, fontname=f_bold)
                 pos_y += 25
-            else:
-                page.insert_text((margin, pos_y), f"Wykryto problemy z czcionkami w {len(font_errors)} elementach:", 
-                                 fontsize=11, fontname=f_main, color=(0.86, 0.2, 0.27))
-                pos_y += 20
-                for err in font_errors:
-                    if isinstance(err, dict):
-                        pos_y, page = check_new_page(pos_y, report_pdf, page)
-                        rys = err.get("rysunek", "Nieznany rysunek")
-                        errors = err.get("errors", err.get("powody_odrzucenia", [str(err)]))
-                        
-                        page.insert_text((margin + 15, pos_y), f"{rys}:", fontsize=11, fontname=f_bold)
-                        pos_y += 16
-                        for b in errors:
-                            wrapped_blad = wrap_text(str(b), 85)
-                            for idx, line in enumerate(wrapped_blad):
+
+                font_errors = report_data.get('czcionki_obrazkow', [])
+                if not font_errors:
+                    page.insert_text((margin, pos_y), "Brak wykrytych problemów ze spójnością czcionek na rysunkach.", 
+                                     fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
+                    pos_y += 25
+                else:
+                    page.insert_text((margin, pos_y), f"Wykryto problemy z czcionkami w {len(font_errors)} elementach:", 
+                                     fontsize=11, fontname=f_main, color=(0.86, 0.2, 0.27))
+                    pos_y += 20
+                    for err in font_errors:
+                        if isinstance(err, dict):
+                            pos_y, page = check_new_page(pos_y, report_pdf, page)
+                            rys = err.get("rysunek", "Nieznany rysunek")
+                            errors = err.get("errors", err.get("powody_odrzucenia", [str(err)]))
+                            
+                            page.insert_text((margin + 15, pos_y), f"{rys}:", fontsize=11, fontname=f_bold)
+                            pos_y += 16
+                            for b in errors:
+                                wrapped_blad = wrap_text(str(b), 85)
+                                for idx, line in enumerate(wrapped_blad):
+                                    pos_y, page = check_new_page(pos_y, report_pdf, page)
+                                    prefix = "- " if idx == 0 else "  "
+                                    page.insert_text((margin + 25, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
+                                    pos_y += 14
+                            pos_y += 5
+                        else:
+                            wrapped_err = wrap_text(str(err), 85)
+                            for idx, line in enumerate(wrapped_err):
                                 pos_y, page = check_new_page(pos_y, report_pdf, page)
                                 prefix = "- " if idx == 0 else "  "
-                                page.insert_text((margin + 25, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
+                                page.insert_text((margin + 15, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
                                 pos_y += 14
-                        pos_y += 5
-                    else:
-                        wrapped_err = wrap_text(str(err), 85)
-                        for idx, line in enumerate(wrapped_err):
-                            pos_y, page = check_new_page(pos_y, report_pdf, page)
-                            prefix = "- " if idx == 0 else "  "
-                            page.insert_text((margin + 15, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
-                            pos_y += 14
-                        pos_y += 5
-
-
-            pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-            page.insert_text((margin, pos_y), "Analiza statystyczna struktury zdań", fontsize=14, fontname=f_bold)
-            pos_y += 22
-
+                            pos_y += 5
+            else:
+                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
+                page.insert_text((margin, pos_y), "Ocena jakości obrazów i czcionek", fontsize=14, fontname=f_bold)
+                pos_y += 25
+                page.insert_text((margin, pos_y), "Analiza została pominięta na życzenie użytkownika lub dokument nie zawiera grafik.", 
+                                 fontsize=11, fontname=f_main, color=(0.5, 0.5, 0.5))
+                pos_y += 25
             stats_data = report_data.get("statystyki_zdan")
+            
             if stats_data:
+                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
+                page.insert_text((margin, pos_y), "Analiza statystyczna struktury zdań", fontsize=14, fontname=f_bold)
+                pos_y += 22
                 page.insert_text((margin + 15, pos_y), "Struktura gramatyczna i stylistyczna badanej pracy dyplomowej:", fontsize=10, fontname=f_main, color=(0.3, 0.3, 0.3))
                 pos_y += 18
 
                 struktura_zdan = [
-                    (f"Zdania w stronie czynnej: {stats_data.get('active_ratio', '0%')}", "Zalecana forma wypowiedzi w tekstach naukowych podnosząca dynamicę wywodu."),
+                    (f"Zdania w stronie czynnej: {stats_data.get('active_ratio', '0%')}", "Zalecana forma wypowiedzi w tekstach naukowych podnosząca dynamikę wywodu."),
                     (f"Zdania w stronie biernej: {stats_data.get('passive_ratio', '0%')}", "Stosowana przy opisie procedur badawczych oraz stanu wiedzy."),
                     (f"Równoważniki zdań: {stats_data.get('verbless_ratio', '0%')}", "Konstrukcje bezorzecznikowe, dopuszczalne głównie w nagłówkach i spisach.")
                 ]
@@ -1037,9 +1029,11 @@ class PDFReader(QMainWindow):
                     page.insert_text((margin + 25, pos_y), opis, fontsize=9, fontname=f_main, color=(0.4, 0.4, 0.4))
                     pos_y += 16
             else:
+                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
+                page.insert_text((margin, pos_y), "Analiza statystyczna struktury zdań", fontsize=14, fontname=f_bold)
+                pos_y += 22
                 page.insert_text((margin + 15, pos_y), "Brak dostępnych danych statystycznych (uruchom analizę w Trybie Dokładnym).", fontsize=10, fontname=f_main, color=(0.5, 0.5, 0.5))
                 pos_y += 20
-
             pos_y, page = check_new_page(810, report_pdf, page)
             page.insert_text((margin, 820), f"Data: {datetime.date.today()}", 
                              fontsize=9, fontname=f_main, color=(0.5, 0.5, 0.5))
@@ -1053,3 +1047,66 @@ class PDFReader(QMainWindow):
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "Blad Eksportu", f"Blad podczas generowania raportu:\n{str(e)}")
+
+    def delete_document(self, path):
+        """Removes a document from the system index and updates the start page dashboard 
+        to reflect the changes."""
+        reply = QMessageBox.question(
+            self, 'Potwierdzenie', 
+            "Czy na pewno chcesz usunąć ten dokument z listy?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.manager.delete_document(path)
+            self.refresh_file_list()
+
+
+    def refresh_file_list(self):
+        """Synchronizes the start page file registry grid with the underlying data store 
+        managed by SavingFiles."""
+        pliki = self.manager.data.get("documents", [])
+        self.start_page.render_doc_list(pliki)
+
+
+    def load_ai_analysis(self):
+        """Extracts saved advanced AI evaluation details from the storage map matching 
+        the current open file hash path and applies them to the sidebar dashboard panels."""
+        if not hasattr(self, 'current_pdf_path') or not self.current_pdf_path:
+            return
+            
+        try:
+            report_data = None
+            for p in self.manager.data.get("documents", []):
+                if p.get('local_path') == self.current_pdf_path:
+                    report_data = p.get("sota_result") 
+                    break
+            self.update_report_panel(report_data)
+            
+        except Exception as e:
+            print(f"Błąd podczas wczytywania analizy AI: {e}")
+
+
+    def load_pdf(self, path):
+        """Loads a PDF document from the specified file path into the QPdfDocument instance,
+        sets up the application tracking variables, and triggers view refreshes."""
+        if not path or not os.path.exists(path):
+            QMessageBox.critical(self, "Błąd", f"Nie można odnaleźć pliku:\n{path}")
+            return
+
+        self.current_pdf_path = path
+        self.document.load(path)
+        
+        if self.document.status() == QPdfDocument.Status.Ready:
+            self.title_label.setText(os.path.basename(path))
+            self.total_pages_label.setText(f" / {self.document.pageCount()}")
+            self.page_input.setText("1")
+            
+            self.pdf_view.clear_markers()
+            self.pdf_view.clear_comments()
+            self.generate_thumbnails()
+            self.load_custom_comments()
+            
+            print(f"Pomyślnie załadowano plik: {os.path.basename(path)}")
+        else:
+            QMessageBox.critical(self, "Błąd", "Nie udało się poprawnie zainicjalizować dokumentu PDF.")
