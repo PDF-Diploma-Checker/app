@@ -114,8 +114,6 @@ class PipelineWorker(QThread):
         """Runs the analysis, downloads language files, parses coordinates/bounding boxes and gives results"""
         try:
             self.progress_update.emit(5, "Sprawdzanie i pobieranie wymagań językowych...")
-            from setup import download_specific_language
-            download_specific_language(self.language)
 
             self.progress_update.emit(10, "Uruchamianie silnika analizy...")
             from app.entry import run_analysis_for_pdf

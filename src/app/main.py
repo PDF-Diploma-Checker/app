@@ -1,5 +1,6 @@
 import sys
 import os
+import subprocess
 
 if getattr(sys, 'frozen', False):
     BASE_DIR = sys._MEIPASS
@@ -18,14 +19,24 @@ for path in [SRC_DIR, UI_DIR, APP_DIR, COMMON_DIR, BASE_DIR]:
 
 from PySide6.QtWidgets import QApplication
 from ui.main_window import PDFReader
-from setup import check_and_download_requirements
+
+def check_installation():
+    config_path = os.path.join(os.path.expanduser("~"), ".pdf_diploma_checker", "app_config.json")
+    
+    if not os.path.exists(config_path):
+        print("Uruchamianie instalatora...")
+        subprocess.run([sys.executable, os.path.join(APP_DIR, "setup.py")])
+        if not os.path.exists(config_path):
+            return False
+    return True
 
 def main():
+    if not check_installation():
+        sys.exit()
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    check = check_and_download_requirements()
-    if not check:
-        sys.exit()
+    
     window = PDFReader()
     window.show()
     sys.exit(app.exec())
