@@ -2,16 +2,21 @@ import re
 import os
 import sys
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image
 except ImportError:
+    logger.exception("Missing required dependency: Pillow")
     raise ImportError("Brak biblioteki Pillow. Uruchom: pip install Pillow")
 
 try:
     import fitz
 except ImportError:
+    logger.exception("Missing required dependency: PyMuPDF")
     raise ImportError("Brak biblioteki PyMuPDF. Uruchom: pip install PyMuPDF")
 
 
@@ -39,8 +44,13 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
                             if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
                                 unique_images[found_id] = {"desc": desc, "path": img_path}
 
-    pdf_doc = fitz.open(str(pdf_path))
-    dpi_map = {} 
+    try:
+        pdf_doc = fitz.open(str(pdf_path))
+    except Exception as e:
+        logger.exception("Failed to open PDF: %s", pdf_path)
+        raise RuntimeError(f"Failed to open PDF: {pdf_path}") from e
+
+    dpi_map = {}
     
     for page in pdf_doc:
         for img_info in page.get_image_info():
@@ -85,6 +95,7 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
                         "wymaganie": f"Minimum {dpi_threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)"
                     })
         except Exception as e:
+            logger.exception("Failed to read image quality data for %s", img_path)
             low_quality_report.append({
                 "rysunek": f"Rys. {img_id}",
                 "format": extension.upper().replace(".", ""),
@@ -109,23 +120,23 @@ if __name__ == "__main__":
     from analysis.modules.llm.config import THESIS_PATH
     from analysis.extraction.extraction_json import extractPDF
     
-    print(f"Szukam pliku PDF pod ścieżką: {THESIS_PATH}")
+    logger.info(f"Szukam pliku PDF pod ścieżką: {THESIS_PATH}")
     if not os.path.exists(str(THESIS_PATH)):
-        print(f"BŁĄD KRYTYCZNY: Plik PDF nie istnieje! Upewnij się, że w config.py masz poprawną ścieżkę absolutną.")
+        logger.info(f"BŁĄD KRYTYCZNY: Plik PDF nie istnieje! Upewnij się, że w config.py masz poprawną ścieżkę absolutną.")
         sys.exit(1)
         
-    print("Rozpoczynam ekstrakcję PDF...")
+    logger.info("Rozpoczynam ekstrakcję PDF...")
     doc_obj = extractPDF(str(THESIS_PATH))
     
     if doc_obj is None:
-        print("BŁĄD KRYTYCZNY: Funkcja 'extractPDF' zwróciła 'None'.")
+        logger.info("BŁĄD KRYTYCZNY: Funkcja 'extractPDF' zwróciła 'None'.")
         sys.exit(1)
     
-    print("\nSprawdzanie zagęszczenia pikseli obrazów (Minimum 75 DPI)...")
+    logger.info("\nSprawdzanie zagęszczenia pikseli obrazów (Minimum 75 DPI)...")
     raport_jakosci = check_image_quality(doc_obj, str(THESIS_PATH), dpi_threshold=75)
     
     if not raport_jakosci:
-        print("Wszystkie obrazy w pracy są idealnie ostre (powyżej wymaganego DPI lub wektory)!")
+        logger.info("Wszystkie obrazy w pracy są idealnie ostre (powyżej wymaganego DPI lub wektory)!")
     else:
-        print(f"Znaleziono {len(raport_jakosci)} obrazków o słabej ostrości:")
-        print(json.dumps(raport_jakosci, indent=4, ensure_ascii=False))
+        logger.info(f"Znaleziono {len(raport_jakosci)} obrazków o słabej ostrości:")
+        logger.info(json.dumps(raport_jakosci, indent=4, ensure_ascii=False))

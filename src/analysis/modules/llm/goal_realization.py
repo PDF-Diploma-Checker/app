@@ -5,6 +5,7 @@ import os
 import json
 import time
 import gc
+import logging
 
 from llama_cpp import Llama
 
@@ -20,6 +21,8 @@ from analysis.modules.llm.config import THESIS_PATH, LANGUAGE, MODEL_PATH, N_GPU
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 from analysis.modules.llm.get_purpose import get_purpose
+
+logger = logging.getLogger(__name__)
 
 
 N_CTX = 4096
@@ -171,14 +174,19 @@ def get_llm():
     global _LLM
 
     if _LLM is None:
-        _LLM = Llama(
-            model_path=str(MODEL_PATH),
-            n_ctx=N_CTX,
-            n_threads=N_THREADS,
-            n_gpu_layers=N_GPU_LAYERS,
-            chat_format="gemma",
-            verbose=False,
-        )
+        logger.info("Loading goal-realization LLM from %s", MODEL_PATH)
+        try:
+            _LLM = Llama(
+                model_path=str(MODEL_PATH),
+                n_ctx=N_CTX,
+                n_threads=N_THREADS,
+                n_gpu_layers=N_GPU_LAYERS,
+                chat_format="gemma",
+                verbose=False,
+            )
+        except Exception as e:
+            logger.exception("Failed to load goal-realization LLM from %s", MODEL_PATH)
+            raise RuntimeError(f"Failed to load goal-realization LLM from {MODEL_PATH}") from e
 
     return _LLM
 
@@ -197,12 +205,12 @@ def cleanup_goal_realization_llm():
             if callable(close_fn):
                 close_fn()
         except Exception:
-            pass
+            logger.exception("Failed to close goal-realization LLM instance")
 
         try:
             del llm
         except Exception:
-            pass
+            logger.exception("Failed to delete goal-realization LLM instance")
 
     gc.collect()
 
@@ -293,9 +301,14 @@ def extract_json_from_response(response_text, language="pl"):
     end = response_text.rfind("}")
 
     if start == -1 or end == -1 or end <= start:
+        logger.error("Model response contained no JSON object: %r", response_text)
         raise ValueError(get_message("invalid_json", language))
 
-    return json.loads(response_text[start:end + 1])
+    try:
+        return json.loads(response_text[start:end + 1])
+    except json.JSONDecodeError as e:
+        logger.exception("Model response contained malformed JSON: %r", response_text)
+        raise ValueError(get_message("invalid_json", language)) from e
 
 
 def normalize_goal_result(data, language):
@@ -339,6 +352,7 @@ def check_goal_realization(text, purpose, language):
     try:
         language = normalize_language(language)
     except Exception as e:
+        logger.exception("Unsupported language passed to check_goal_realization")
         return {
             "score": 0,
             "label": MESSAGES["pl"]["error_label"],
@@ -407,6 +421,7 @@ def check_goal_realization(text, purpose, language):
         return normalize_goal_result(data, language)
 
     except Exception as e:
+        logger.exception("Goal realization evaluation failed")
         return {
             "score": 0,
             "label": get_message("error_label", language),
@@ -442,21 +457,25 @@ def main():
     try:
         language = normalize_language(LANGUAGE)
     except Exception as e:
-        print(e)
+        logger.exception("Unsupported configured language")
+        logger.info(e)
         return
 
     if not pdf_path.exists():
-        print(get_message("file_not_exists", language, path=pdf_path))
+        logger.error("PDF file does not exist: %s", pdf_path)
+        logger.info(get_message("file_not_exists", language, path=pdf_path))
         return
 
     if not MODEL_PATH.exists():
-        print(get_message("model_not_exists", language, path=MODEL_PATH))
+        logger.error("Model file does not exist: %s", MODEL_PATH)
+        logger.info(get_message("model_not_exists", language, path=MODEL_PATH))
         return
 
     raw_doc = extractPDF_llm(str(pdf_path.resolve()))
 
     if raw_doc is None:
-        print(get_message("pdf_extraction_none", language))
+        logger.error("extractPDF_llm returned None for %s", pdf_path)
+        logger.info(get_message("pdf_extraction_none", language))
         return
 
     text = get_plain_text(pdf_path)
@@ -468,11 +487,11 @@ def main():
         language=language,
     )
 
-    print(get_message("purpose_header", language))
-    print(purpose)
-    print()
-    print(get_message("goal_realization_header", language))
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    logger.info(get_message("purpose_header", language))
+    logger.info(purpose)
+    logger.info("")
+    logger.info(get_message("goal_realization_header", language))
+    logger.info(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def get_purpose_grade(text, purpose, language):
@@ -531,4 +550,4 @@ if __name__ == "__main__":
     except Exception:
         language = "pl"
 
-    print(get_message("execution_time", language, seconds=end - start))
+    logger.info(get_message("execution_time", language, seconds=end - start))

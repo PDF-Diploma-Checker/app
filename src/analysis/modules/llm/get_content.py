@@ -1,15 +1,27 @@
 """Utilities for extracting chapter and subtitle content from PDF files."""
 
 import re
+import logging
 import fitz
 from dataclasses import dataclass
 from pathlib import Path
 from collections import Counter
-import fitz
+
+logger = logging.getLogger(__name__)
 
 file_path = Path("src/theses/doju1.pdf")
 output_path = Path("src/llm/wyniki/blocks.txt")
 summaries_path = Path("src/llm/wyniki/subtitles.txt")
+
+
+def _open_pdf(path):
+    """Open a PDF with fitz, raising a clear error on failure."""
+
+    try:
+        return fitz.open(path)
+    except Exception as e:
+        logger.exception("Failed to open PDF: %s", path)
+        raise RuntimeError(f"Failed to open PDF: {path}") from e
 
 
 def get_font_size(pdf_path):
@@ -19,7 +31,7 @@ def get_font_size(pdf_path):
     (assumed body text), and returns the smallest size greater than body text.
     If no larger size exists, it returns the body size.
     """
-    doc = fitz.open(pdf_path)
+    doc = _open_pdf(pdf_path)
     sizes = []
 
     for page in doc:
@@ -72,7 +84,7 @@ class SubtitleBlock:
 def get_text(path):
     """Extract and return full plain text from a PDF as one string."""
 
-    doc = fitz.open(path)
+    doc = _open_pdf(path)
     text_parts = []
 
     for page in doc:
@@ -87,7 +99,7 @@ def get_text(path):
 def get_content(path):
     """Split PDF content into chapter blocks using uppercase bold headers."""
 
-    doc = fitz.open(path)
+    doc = _open_pdf(path)
     blocks = []
 
     current_title = ""
@@ -150,7 +162,7 @@ def get_content(path):
 def split_subtitles(path):
     """Split PDF content into numbered subtitle blocks like 1.2.3 Title."""
 
-    doc = fitz.open(path)
+    doc = _open_pdf(path)
     subtitle_blocks = []
 
     current_number = ""
@@ -224,10 +236,15 @@ def export_blocks(blocks, output_path):
 
     result = "\n".join(formatted_parts).strip()
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(result)
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(result)
+    except OSError as e:
+        logger.exception("Failed to write blocks to %s", output_path)
+        raise RuntimeError(f"Failed to write blocks to {output_path}") from e
 
-    print(f"Saved to: {output_path}")
+    logger.info("Blocks saved to %s", output_path)
+    logger.info(f"Saved to: {output_path}")
 
 
 def export_subtitles(subtitle_blocks, output_path):
@@ -242,10 +259,15 @@ def export_subtitles(subtitle_blocks, output_path):
 
     result = "\n".join(formatted_parts).strip()
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(result)
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(result)
+    except OSError as e:
+        logger.exception("Failed to write subtitles to %s", output_path)
+        raise RuntimeError(f"Failed to write subtitles to {output_path}") from e
 
-    print(f"Saved to: {output_path}")
+    logger.info("Subtitles saved to %s", output_path)
+    logger.info(f"Saved to: {output_path}")
 
 
 if __name__ == "__main__":
