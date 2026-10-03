@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download
@@ -7,6 +8,8 @@ Skrypt pobiera model Gemma 3 12B GGUF używany w projekcie.
 Model zostanie zapisany w ~/models/gemma3_12b.
 Po pobraniu ścieżkę do modelu można wpisać w config.py.
 """
+
+logger = logging.getLogger(__name__)
 
 MODEL_REPO_ID = "bartowski/google_gemma-3-12b-it-GGUF"
 MODEL_FILENAME = "google_gemma-3-12b-it-Q4_K_M.gguf"
@@ -18,14 +21,21 @@ MODEL_DIR = LOCAL_MODELS_DIR / "gemma3_12b"
 def main():
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    model_path = hf_hub_download(
-        repo_id=MODEL_REPO_ID,
-        filename=MODEL_FILENAME,
-        local_dir=str(MODEL_DIR),
-        local_dir_use_symlinks=False,
-    )
+    logger.info("Downloading model %s/%s to %s", MODEL_REPO_ID, MODEL_FILENAME, MODEL_DIR)
 
-    print(f"Model zapisano do: {model_path}")
+    try:
+        model_path = hf_hub_download(
+            repo_id=MODEL_REPO_ID,
+            filename=MODEL_FILENAME,
+            local_dir=str(MODEL_DIR),
+            local_dir_use_symlinks=False,
+        )
+    except Exception as e:
+        logger.exception("Failed to download model %s/%s", MODEL_REPO_ID, MODEL_FILENAME)
+        raise RuntimeError(f"Failed to download model {MODEL_REPO_ID}/{MODEL_FILENAME}") from e
+
+    logger.info("Model saved to %s", model_path)
+    logger.info(f"Model zapisano do: {model_path}")
 
 
 if __name__ == "__main__":

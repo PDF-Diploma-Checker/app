@@ -2,6 +2,7 @@
 
 import sys
 import os
+import logging
 
 from llama_cpp import Llama
 
@@ -16,6 +17,8 @@ from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.modules.llm.get_subtitles import get_subtitles
 
 from analysis.modules.llm.config import THESIS_PATH, MODEL_PATH, LANGUAGE, N_GPU_LAYERS
+
+logger = logging.getLogger(__name__)
 
 MAX_FRAGMENT_CHARS = 1600
 MAX_NEW_TOKENS = 64
@@ -96,14 +99,19 @@ def get_llm():
     global _LLM
 
     if _LLM is None:
-        _LLM = Llama(
-            model_path=str(MODEL_PATH),
-            n_ctx=N_CTX,
-            n_threads=N_THREADS,
-            n_batch=N_BATCH,
-            n_gpu_layers=N_GPU_LAYERS,
-            verbose=False,
-        )
+        logger.info("Loading summary LLM from %s", MODEL_PATH)
+        try:
+            _LLM = Llama(
+                model_path=str(MODEL_PATH),
+                n_ctx=N_CTX,
+                n_threads=N_THREADS,
+                n_batch=N_BATCH,
+                n_gpu_layers=N_GPU_LAYERS,
+                verbose=False,
+            )
+        except Exception as e:
+            logger.exception("Failed to load summary LLM from %s", MODEL_PATH)
+            raise RuntimeError(f"Failed to load summary LLM from {MODEL_PATH}") from e
 
     return _LLM
 
@@ -130,15 +138,19 @@ def get_summary(fragment, language):
     llm = get_llm()
     full_prompt = build_prompt(fragment, language)
 
-    output = llm(
-        full_prompt,
-        max_tokens=MAX_NEW_TOKENS,
-        temperature=0.0,
-        top_p=0.1,
-        repeat_penalty=1.12,
-        stop=["\n\n", "TEKST:", "TEXT:", "WYNIK:", "RESULT:"],
-        echo=False,
-    )
+    try:
+        output = llm(
+            full_prompt,
+            max_tokens=MAX_NEW_TOKENS,
+            temperature=0.0,
+            top_p=0.1,
+            repeat_penalty=1.12,
+            stop=["\n\n", "TEKST:", "TEXT:", "WYNIK:", "RESULT:"],
+            echo=False,
+        )
+    except Exception as e:
+        logger.exception("LLM inference failed while summarizing fragment")
+        raise RuntimeError("LLM inference failed while summarizing fragment") from e
 
     text = output["choices"][0]["text"].strip()
 
@@ -169,16 +181,17 @@ def get_summaries(subtitles, language):
                 "summary": "[BRAK TREŚCI W SEKCJI]",
             }
             summaries.append(item)
-            print(item["display"])
-            print("SUMMARY:")
-            print(item["summary"])
-            print()
-            print("-" * 80)
+            logger.info(item["display"])
+            logger.info("SUMMARY:")
+            logger.info(item["summary"])
+            logger.info("")
+            logger.info("-" * 80)
             continue
 
         try:
             summary = get_summary(content, language)
         except Exception as e:
+            logger.exception("Failed to generate summary for section %r", display)
             summary = f"[BŁĄD GENEROWANIA: {e}]"
 
         item = {
@@ -190,11 +203,11 @@ def get_summaries(subtitles, language):
             "summary": summary,
         }
         summaries.append(item)
-        print(item["display"])
-        print("SUMMARY:")
-        print(item["summary"])
-        print()
-        print("-" * 80)
+        logger.info(item["display"])
+        logger.info("SUMMARY:")
+        logger.info(item["summary"])
+        logger.info("")
+        logger.info("-" * 80)
 
     return summaries
 
@@ -215,15 +228,15 @@ def print_summaries(summaries):
     """Print summaries in a readable console format."""
 
     if not summaries:
-        print("Brak")
+        logger.info("Brak")
         return
 
     for item in summaries:
-        print(item["display"])
-        print("SUMMARY:")
-        print(item["summary"])
-        print()
-        print("-" * 80)
+        logger.info(item["display"])
+        logger.info("SUMMARY:")
+        logger.info(item["summary"])
+        logger.info("")
+        logger.info("-" * 80)
 
 
 def main():
@@ -233,26 +246,30 @@ def main():
     language = LANGUAGE
 
     if not pdf_path.exists():
-        print(f"Błąd: plik nie istnieje: {pdf_path}")
+        logger.error("PDF file does not exist: %s", pdf_path)
+        logger.info(f"Błąd: plik nie istnieje: {pdf_path}")
         return
 
     if not MODEL_PATH.exists():
-        print(f"Błąd: model nie istnieje: {MODEL_PATH}")
+        logger.error("Model file does not exist: %s", MODEL_PATH)
+        logger.info(f"Błąd: model nie istnieje: {MODEL_PATH}")
         return
 
     raw_doc = extractPDF_llm(str(pdf_path.resolve()))
 
     if raw_doc is None:
-        print("Błąd: ekstrakcja PDF zwróciła None.")
+        logger.error("PDF extraction returned None for %s", pdf_path)
+        logger.info("Błąd: ekstrakcja PDF zwróciła None.")
         return
 
     subtitles = get_subtitles(raw_doc)
 
     if not subtitles:
-        print("Nie udało się wyciągnąć nagłówków / fragmentów z PDF.")
+        logger.warning("No headings/fragments extracted from PDF: %s", pdf_path)
+        logger.info("Nie udało się wyciągnąć nagłówków / fragmentów z PDF.")
         return
 
-    print("Podgląd subtitles po ekstrakcji (format jak w get_subtitles):")
+    logger.info("Podgląd subtitles po ekstrakcji (format jak w get_subtitles):")
     for sub in subtitles:
         display = normalize_text(sub.get("display") or "")
         content = normalize_text(sub.get("content") or "")
@@ -261,11 +278,11 @@ def main():
         preview = content[:250]
         if len(content) > 250:
             preview += "..."
-        print(display)
-        print(preview)
-        print("-" * 80)
+        logger.info(display)
+        logger.info(preview)
+        logger.info("-" * 80)
 
-    print(f"Wykryto nagłówków: {len(subtitles)}")
+    logger.info(f"Wykryto nagłówków: {len(subtitles)}")
 
     get_summaries(subtitles, language)
 

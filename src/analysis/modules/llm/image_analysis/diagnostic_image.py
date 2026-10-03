@@ -1,7 +1,10 @@
 import sys
 import os
 import re
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Wymuszenie kodowania UTF-8 dla terminala, aby uniknąć błędów Unicode przy symbolach matematycznych
 if sys.stdout.encoding != 'utf-8':
@@ -18,7 +21,7 @@ sys.path.append(str(current_dir.parents[3]))
 import config 
 from reference_matcher import ReferenceMatcher
 def run_diagnostics(pdf_path):
-    print(f"Rozpoczynam zoptymalizowaną diagnostykę dla: {pdf_path}")
+    logger.info(f"Rozpoczynam zoptymalizowaną diagnostykę dla: {pdf_path}")
     
     from analysis.extraction.extraction_json import extractPDF
     from analysis.extraction.converter_linguistics_clean import PDFMapper
@@ -56,27 +59,25 @@ def run_diagnostics(pdf_path):
                         #     with open(img_path, "rb") as f:
                         #         unique_images[found_id]["bytes"] = f.read()
                     else:
-                        # Jeśli mamy duplikat (jak ten felerny 8.5), wybierzmy ten lepszy!
-                        # Jeśli stary opis nie zaczyna się od "Rys", a nowy tak, nadpisz stary!
                         old_desc = unique_images[found_id]["desc"]
                         if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
                              unique_images[found_id]["desc"] = desc
                              # Oraz nadpisz bajty nowym obrazkiem z dysku (w run_image.py)
 
     # --- DRUKOWANIE STATYSTYK ---
-    print("\n" + "="*50)
-    print("--- STATYSTYKI TEKSTU (AKAPITÓW) ---")
-    print("="*50)
-    print(f"Liczba bloków tekstu po mapowaniu: {len(paragraphs)}")
+    logger.info("\n" + "="*50)
+    logger.info("--- STATYSTYKI TEKSTU (AKAPITÓW) ---")
+    logger.info("="*50)
+    logger.info(f"Liczba bloków tekstu po mapowaniu: {len(paragraphs)}")
     if paragraphs:
         lengths = [len(p) for p in paragraphs]
-        print(f"Najdłuższy akapit: {max(lengths)} znaków")
-        print(f"Średnia długość: {sum(lengths)//len(lengths)} znaków")
+        logger.info(f"Najdłuższy akapit: {max(lengths)} znaków")
+        logger.info(f"Średnia długość: {sum(lengths)//len(lengths)} znaków")
 
-    print("\n" + "="*50)
-    print("--- STATYSTYKI OBRAZKÓW I FILTROWANIA ---")
-    print("="*50)
-    print(f"Liczba unikalnych obrazków (po deduplikacji): {len(unique_images)}")
+    logger.info("\n" + "="*50)
+    logger.info("--- STATYSTYKI OBRAZKÓW I FILTROWANIA ---")
+    logger.info("="*50)
+    logger.info(f"Liczba unikalnych obrazków (po deduplikacji): {len(unique_images)}")
     
     matcher = ReferenceMatcher()
     total_llm_calls = 0
@@ -103,26 +104,26 @@ def run_diagnostics(pdf_path):
         total_filtered_out += filtered_count
         total_llm_calls += len(filtered_refs)
         
-        print(f"\n[Rysunek {img_id}]")
-        print(f" -> Surowych odwołań: {len(raw_refs)}")
-        print(f" -> Odrzuconych (podpisy/krótkie): {filtered_count}")
-        print(f" -> Prawdziwych akapitów do analizy: {len(filtered_refs)}")
+        logger.info(f"\n[Rysunek {img_id}]")
+        logger.info(f" -> Surowych odwołań: {len(raw_refs)}")
+        logger.info(f" -> Odrzuconych (podpisy/krótkie): {filtered_count}")
+        logger.info(f" -> Prawdziwych akapitów do analizy: {len(filtered_refs)}")
         
         for i, ref in enumerate(filtered_refs):
             snippet = ref.replace("\n", " ")[:120]
-            print(f"    {i+1}. (Dł: {len(ref)}) {snippet}...")
+            logger.info(f"    {i+1}. (Dł: {len(ref)}) {snippet}...")
 
-    print("\n" + "="*50)
-    print("--- PODSUMOWANIE ZYSKÓW ---")
-    print("="*50)
-    print(f"1. LLaVA (Obrazy) uruchomi się: {len(unique_images)} razy (Zredukowano z {sum(1 for p in doc_obj.pages for _ in p.images)})")
-    print(f"2. Sędzia (Tekst) uruchomi się: {total_llm_calls} razy (Odrzucono {total_filtered_out} zbędnych wywołań)")
-    print("="*50)
+    logger.info("\n" + "="*50)
+    logger.info("--- PODSUMOWANIE ZYSKÓW ---")
+    logger.info("="*50)
+    logger.info(f"1. LLaVA (Obrazy) uruchomi się: {len(unique_images)} razy (Zredukowano z {sum(1 for p in doc_obj.pages for _ in p.images)})")
+    logger.info(f"2. Sędzia (Tekst) uruchomi się: {total_llm_calls} razy (Odrzucono {total_filtered_out} zbędnych wywołań)")
+    logger.info("="*50)
     
     # Realistyczne szacowanie czasu (RTX 4070 SUPER)
     # LLaVA: ~10s, Sędzia: ~25s (przy kontekście 4096 tokenów)
     est_seconds = (len(unique_images) * 10) + (total_llm_calls * 25)
-    print(f"Przewidywany czas wykonania: ok. {est_seconds // 60} min {est_seconds % 60} sek.")
+    logger.info(f"Przewidywany czas wykonania: ok. {est_seconds // 60} min {est_seconds % 60} sek.")
 
 if __name__ == "__main__":
     run_diagnostics(config.THESIS_PATH)

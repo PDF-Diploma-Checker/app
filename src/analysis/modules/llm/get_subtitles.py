@@ -2,6 +2,7 @@
 
 import re
 import os
+import logging
 from pathlib import Path
 import sys
 
@@ -15,6 +16,8 @@ from common.path import resource_path
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import PDFMapper_llm
 from analysis.modules.llm.config import THESIS_PATH
+
+logger = logging.getLogger(__name__)
 
 file_path = THESIS_PATH
 
@@ -105,7 +108,12 @@ def get_level(number: str) -> int:
 def load_logical_blocks_from_pdf(raw_doc):
     """Map raw extraction output to logical blocks."""
 
-    mapped_doc = PDFMapper_llm.map_to_schema(raw_doc)
+    try:
+        mapped_doc = PDFMapper_llm.map_to_schema(raw_doc)
+    except Exception as e:
+        logger.exception("Failed to map raw PDF extraction output to schema")
+        raise RuntimeError("Failed to map raw PDF extraction output to schema") from e
+
     return mapped_doc.logical_blocks
 
 
@@ -254,19 +262,25 @@ def export_subtitles_to_txt(subtitles, txt_path: Path):
             lines.append(one_line_content)
         lines.append("")
 
-    txt_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    try:
+        txt_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except OSError as e:
+        logger.exception("Failed to write subtitles to %s", txt_path)
+        raise RuntimeError(f"Failed to write subtitles to {txt_path}") from e
+
+    logger.info("Subtitles exported to %s", txt_path)
 
 
 def print_subtitles(subtitles, max_chars: int = 250):
     """Print subtitle titles with truncated content previews."""
 
     for sub in subtitles:
-        print(sub["display"])
+        logger.info(sub["display"])
         preview = sub["content"][:max_chars].strip()
         if len(sub["content"]) > max_chars:
             preview += "..."
-        print(preview)
-        print("-" * 80)
+        logger.info(preview)
+        logger.info("-" * 80)
 
 
 def get_subtitles(raw_doc, txt_path: Path | None = None):
@@ -287,6 +301,11 @@ def main():
     txt_path = Path(resource_path(os.path.join("llm", "wyniki", "subtitles.txt")))
 
     raw_doc = extractPDF_llm(str(pdf_path))
+
+    if raw_doc is None:
+        logger.error("extractPDF_llm returned None for %s", pdf_path)
+        logger.info(f"Błąd: ekstrakcja PDF zwróciła None dla {pdf_path}.")
+        return
 
     subtitles = get_subtitles(raw_doc)
     print_subtitles(subtitles)

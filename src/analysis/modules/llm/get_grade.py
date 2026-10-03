@@ -3,6 +3,7 @@
 import sys
 import os
 import time
+import logging
 
 _src_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 for _p in (os.path.dirname(_src_dir), _src_dir):
@@ -21,6 +22,7 @@ from analysis.modules.llm.similarity import compute_similarity_for_summaries
 from analysis.modules.llm.goal_realization import get_purpose_grade
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, LANGUAGE
 
+logger = logging.getLogger(__name__)
 
 threshold = 0.785
 
@@ -115,18 +117,20 @@ def main():
     pdf_path = THESIS_PATH
     language = LANGUAGE
 
-    print(f"PDF_PATH: {pdf_path}")
-    print(f"PDF_EXISTS: {pdf_path.exists()}")
-    print(f"PDF_ABSOLUTE: {pdf_path.resolve()}")
+    logger.info(f"PDF_PATH: {pdf_path}")
+    logger.info(f"PDF_EXISTS: {pdf_path.exists()}")
+    logger.info(f"PDF_ABSOLUTE: {pdf_path.resolve()}")
 
     if not pdf_path.exists():
-        print(f"Error: file does not exist: {pdf_path}")
+        logger.error("PDF file does not exist: %s", pdf_path)
+        logger.info(f"Error: file does not exist: {pdf_path}")
         return
 
     raw_doc = extractPDF_llm(str(pdf_path.resolve()))
 
     if raw_doc is None:
-        print("Error: extractPDF_llm returned None.")
+        logger.error("extractPDF_llm returned None for %s", pdf_path)
+        logger.info("Error: extractPDF_llm returned None.")
         return
 
     plain_text = get_plain_text(pdf_path)
@@ -143,13 +147,13 @@ def main():
 
     purpose_score, purpose_reason = get_purpose_grade(plain_text, purpose, LANGUAGE)
 
-    print("THESIS PURPOSE:")
-    print(purpose)
-    print()
-    print("EMBEDDING SCORE:")
-    print(f"Score: {grade}")
-    print(f"PURPOSE REALIZATION SCORE: {purpose_score} - {purpose_reason}")
-    print(f"Off-topic headings indices: {off_topic_headings}")
+    logger.info("THESIS PURPOSE:")
+    logger.info(purpose)
+    logger.info("")
+    logger.info("EMBEDDING SCORE:")
+    logger.info(f"Score: {grade}")
+    logger.info(f"PURPOSE REALIZATION SCORE: {purpose_score} - {purpose_reason}")
+    logger.info(f"Off-topic headings indices: {off_topic_headings}")
 
 
 
@@ -157,4 +161,4 @@ if __name__ == "__main__":
     start = time.perf_counter()
     main()
     end = time.perf_counter()
-    print(f"Program runtime: {end - start:.2f} s")
+    logger.info(f"Program runtime: {end - start:.2f} s")

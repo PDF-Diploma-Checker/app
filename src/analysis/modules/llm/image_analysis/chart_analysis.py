@@ -4,6 +4,7 @@ import json
 import gc
 import base64
 import re
+import logging
 from pathlib import Path
 from llama_cpp import Llama, LlamaGrammar
 from llama_cpp.llama_chat_format import Llava15ChatHandler
@@ -13,6 +14,9 @@ sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
 import config
+
+logger = logging.getLogger(__name__)
+
 
 def extract_images(doc_obj):
     # Potężny Regex łapiący różnorodne podpisy (Rys., rys., Wykres, Schemat, Fot., wys., Wys.)
@@ -46,26 +50,37 @@ def extract_images(doc_obj):
                 else:
                     label = f"Obrazek {idx}" # Fallback dla obrazków bez widocznego podpisu
                 
-                with open(img_path, "rb") as f:
-                    unique_images[img_path] = {
-                        "bytes": f.read(),
-                        "label": label
-                    }
+                try:
+                    with open(img_path, "rb") as f:
+                        image_bytes = f.read()
+                except OSError:
+                    logger.exception("Failed to read image file %s", img_path)
+                    continue
+
+                unique_images[img_path] = {
+                    "bytes": image_bytes,
+                    "label": label
+                }
                 idx += 1
                 
     return [{"label": v["label"], "bytes": v["bytes"]} for v in unique_images.values()]
 
 class LlavaChartEngine:
     def __init__(self, model_path=str(config.LLAVA_MODEL_PATH), mmproj_path=str(config.LLAVA_MMPROJ_PATH)):
-        self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-        self.llm = Llama(
-            model_path=model_path,
-            chat_handler=self.chat_handler,
-            n_ctx=4096,
-            n_gpu_layers=-1,
-            logits_all=True,
-            verbose=False 
-        )
+        logger.info("Loading chart-analysis LLaVA model from %s", model_path)
+        try:
+            self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
+            self.llm = Llama(
+                model_path=model_path,
+                chat_handler=self.chat_handler,
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                logits_all=True,
+                verbose=False
+            )
+        except Exception as e:
+            logger.exception("Failed to load chart-analysis LLaVA model from %s", model_path)
+            raise RuntimeError(f"Failed to load chart-analysis LLaVA model from {model_path}") from e
 
     def analyze_chart(self, image_bytes):
         base64_img = base64.b64encode(image_bytes).decode('utf-8')
@@ -101,6 +116,7 @@ class LlavaChartEngine:
             )
             return json.loads(response["choices"][0]["message"]["content"].strip())
         except Exception:
+            logger.exception("Chart analysis inference failed")
             return None
 
 def get_chart_correctness_report(doc_obj):
@@ -146,4 +162,4 @@ if __name__ == "__main__":
     doc_obj = extractPDF(str(config.THESIS_PATH))
     raport_json = get_chart_correctness_report(doc_obj)
     
-    print(raport_json)
+    logger.info(raport_json)

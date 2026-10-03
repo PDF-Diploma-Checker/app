@@ -4,6 +4,7 @@ import json
 import re
 import gc
 import base64
+import logging
 from pathlib import Path
 from llama_cpp import Llama
 from llama_cpp.llama_chat_format import Llava15ChatHandler
@@ -12,6 +13,9 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 from analysis.modules.llm import config
+
+logger = logging.getLogger(__name__)
+
 
 def extract_images_for_quality(doc_obj, mapped_doc):
     paragraphs = []
@@ -34,30 +38,41 @@ def extract_images_for_quality(doc_obj, mapped_doc):
                         unique_images[found_id] = {"desc": desc, "bytes": None}
                         img_path = Path(getattr(img, "path", ""))
                         if img_path.exists():
-                            with open(img_path, "rb") as f: 
-                                unique_images[found_id]["bytes"] = f.read()
+                            try:
+                                with open(img_path, "rb") as f:
+                                    unique_images[found_id]["bytes"] = f.read()
+                            except OSError:
+                                logger.exception("Failed to read image file %s", img_path)
                     else:
                         old_desc = unique_images[found_id]["desc"]
                         if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
                             unique_images[found_id]["desc"] = desc
                             img_path = Path(getattr(img, "path", ""))
                             if img_path.exists():
-                                with open(img_path, "rb") as f: 
-                                    unique_images[found_id]["bytes"] = f.read()
+                                try:
+                                    with open(img_path, "rb") as f:
+                                        unique_images[found_id]["bytes"] = f.read()
+                                except OSError:
+                                    logger.exception("Failed to read image file %s", img_path)
                                     
     return [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
 
 class LlavaQualityEngine:
     def __init__(self, model_path=str(config.LLAVA_MODEL_PATH), mmproj_path=str(config.LLAVA_MMPROJ_PATH)):
-        self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-        self.llm = Llama(
-            model_path=model_path, 
-            chat_handler=self.chat_handler, 
-            n_ctx=4096, 
-            n_gpu_layers=config.N_GPU_LAYERS, 
-            logits_all=True, 
-            verbose=False
-        )
+        logger.info("Loading quality-assessment LLaVA model from %s", model_path)
+        try:
+            self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
+            self.llm = Llama(
+                model_path=model_path,
+                chat_handler=self.chat_handler,
+                n_ctx=4096,
+                n_gpu_layers=config.N_GPU_LAYERS,
+                logits_all=True,
+                verbose=False
+            )
+        except Exception as e:
+            logger.exception("Failed to load quality-assessment LLaVA model from %s", model_path)
+            raise RuntimeError(f"Failed to load quality-assessment LLaVA model from {model_path}") from e
 
     def assess_quality(self, image_bytes):
         base64_img = base64.b64encode(image_bytes).decode('utf-8')
@@ -90,6 +105,7 @@ class LlavaQualityEngine:
                 return {"czytelny": True, "powod": "OK"}
                 
         except Exception as e:
+            logger.exception("Image quality assessment inference failed")
             return {"czytelny": False, "powod": f"Błąd weryfikacji wizualnej AI: {str(e)}"}
 
 def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
@@ -100,13 +116,13 @@ def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
         return bad_images_report
         
     if verbose: 
-        print("[AI] Ladowanie modelu do oceny wizualnej...")
+        logger.info("[AI] Ladowanie modelu do oceny wizualnej...")
         
     llava = LlavaQualityEngine()
     
     for img in images:
         if verbose: 
-            print(f" -> LLaVA ocenia Rysunek {img['id']}...")
+            logger.info(f" -> LLaVA ocenia Rysunek {img['id']}...")
             
         assessment = llava.assess_quality(img["bytes"])
         czytelny = assessment.get("czytelny", True)
@@ -118,7 +134,7 @@ def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
             })
             
     if verbose: 
-        print("[AI] Zwalnianie VRAM.")
+        logger.info("[AI] Zwalnianie VRAM.")
         
     del llava
     gc.collect()

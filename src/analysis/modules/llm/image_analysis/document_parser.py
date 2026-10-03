@@ -1,12 +1,21 @@
 import fitz
 import re
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DocumentParser:
     def __init__(self, file_path):
         self.file_path = file_path
 
     def parse(self):
-        doc = fitz.open(self.file_path)
+        try:
+            doc = fitz.open(self.file_path)
+        except Exception as e:
+            logger.exception("Failed to open PDF: %s", self.file_path)
+            raise RuntimeError(f"Failed to open PDF: {self.file_path}") from e
+
         paragraphs = []
         images = []
 
@@ -22,10 +31,14 @@ class DocumentParser:
 
             for img in page.get_images(full=True):
                 xref = img[0]
-                base_image = doc.extract_image(xref)
+                try:
+                    base_image = doc.extract_image(xref)
+                except Exception:
+                    logger.exception("Failed to extract image xref=%s on page %s", xref, page_num)
+                    continue
                 image_bytes = base_image["image"]
-                
-            
+
+
                 rects = page.get_image_rects(xref)
                 if not rects:
                     continue

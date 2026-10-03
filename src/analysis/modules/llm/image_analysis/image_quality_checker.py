@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 from pathlib import Path
 
 current_dir = Path(__file__).resolve().parent
@@ -9,15 +10,17 @@ sys.path.append(str(current_dir.parents[3]))
 from .quality_analysis import check_image_quality
 from .llava_quality_checker import get_llava_quality_report
 
+logger = logging.getLogger(__name__)
+
 def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
     """
     Czysta funkcja do użycia w Twoim głównym pipeline.
     Zwraca ostateczny raport jako listę słowników (JSON).
     """
-    if verbose: print("[1/2] Test matematyczny DPI (próg 75)...")
+    if verbose: logger.info("[1/2] Test matematyczny DPI (próg 75)...")
     dpi_report = check_image_quality(doc_obj, str(pdf_path), dpi_threshold=75)
     
-    if verbose: print("[2/2] Test wizualny LLaVA (czytelność)...")
+    if verbose: logger.info("[2/2] Test wizualny LLaVA (czytelność)...")
     llava_report = get_llava_quality_report(doc_obj, mapped_doc, verbose=verbose)
     
     merged_results = {}
@@ -50,8 +53,9 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
     try:
         final_list.sort(key=lambda x: float(x["rysunek"].replace("Rys. ", "")))
     except Exception:
-        pass 
-        
+        logger.exception("Failed to sort image quality report entries by figure number")
+
+
     return final_list
 
 if __name__ == "__main__":
@@ -61,14 +65,14 @@ if __name__ == "__main__":
     from analysis.extraction.extraction_json import extractPDF
     from analysis.extraction.converter_linguistics_clean import PDFMapper
     
-    print("Rozpoczynam ekstrakcję do testu scalania...")
+    logger.info("Rozpoczynam ekstrakcję do testu scalania...")
     doc_obj = extractPDF(str(THESIS_PATH))
     mapped_doc = PDFMapper().map_to_schema(doc_obj)
     
     final_report = get_full_image_quality_json(doc_obj, mapped_doc, THESIS_PATH, verbose=True)
     
-    print("\n--- OSTATECZNY JSON DLA PIPELINE ---")
-    print(json.dumps(final_report, indent=4, ensure_ascii=False))
+    logger.info("\n--- OSTATECZNY JSON DLA PIPELINE ---")
+    logger.info(json.dumps(final_report, indent=4, ensure_ascii=False))
 
 # PRZYKŁADOWY OUTPUT GDY ZNAJDZIE BŁĄD, GDY NIE MA BLĘDÓW FUNKCJA ZWRACA PUSTĄ LISTE
 #     [

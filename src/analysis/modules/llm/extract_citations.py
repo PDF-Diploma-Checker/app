@@ -1,5 +1,8 @@
 import re
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 NUMERIC_PATTERN = r'\[\s*\d+\s*(?:[,;\-–]\s*\d+\s*)*\]'
 HARVARD_PATTERN = r'\([A-ZŚĆŻŹŁ][^()0-9]+(?:19|20)\d{2}[^()]*\)'
@@ -68,15 +71,20 @@ def analyze_sota_citations(blocks, pdf_path, sota_ids, output_dir="."):
     output_lines.append(f"Łączna liczba unikalnych przypisów w tych rozdziałach: {len(global_unique)}")
 
     summary_text = "\n".join(output_lines)
-    print(summary_text)
+    logger.info(summary_text)
 
     out_folder = Path(output_dir)
     out_folder.mkdir(parents=True, exist_ok=True)
-    
+
     pdf_stem = Path(pdf_path).stem
     output_filename = out_folder / f"cytowania_{pdf_stem}.txt"
-    
-    with open(output_filename, "w", encoding="utf-8") as f:
-        f.write(summary_text)
-        
-    print(f"\nZapisano wyniki do pliku: {output_filename.absolute()}")
+
+    try:
+        with open(output_filename, "w", encoding="utf-8") as f:
+            f.write(summary_text)
+    except OSError as e:
+        logger.exception("Failed to write citations report to %s", output_filename)
+        raise RuntimeError(f"Failed to write citations report to {output_filename}") from e
+
+    logger.info("Citations report written to %s", output_filename.absolute())
+    logger.info(f"\nZapisano wyniki do pliku: {output_filename.absolute()}")

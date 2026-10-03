@@ -618,6 +618,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pl-core-news-lg" },
+    { name = "platformdirs" },
     { name = "pymupdf" },
     { name = "pyside6" },
     { name = "pyspellchecker" },
@@ -664,6 +665,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.3.4" },
     { name = "pillow", specifier = "==12.2.0" },
     { name = "pl-core-news-lg", url = "https://github.com/explosion/spacy-models/releases/download/pl_core_news_lg-3.8.0/pl_core_news_lg-3.8.0-py3-none-any.whl" },
+    { name = "platformdirs", specifier = ">=4.12.3" },
     { name = "pymupdf", specifier = "==1.26.6" },
     { name = "pyside6", specifier = "==6.8.2" },
     { name = "pyspellchecker", specifier = "==0.9.0" },
@@ -726,6 +728,15 @@ version = "3.8.0"
 source = { url = "https://github.com/explosion/spacy-models/releases/download/pl_core_news_lg-3.8.0/pl_core_news_lg-3.8.0-py3-none-any.whl" }
 wheels = [
     { url = "https://github.com/explosion/spacy-models/releases/download/pl_core_news_lg-3.8.0/pl_core_news_lg-3.8.0-py3-none-any.whl", hash = "sha256:3bc7296cd4d67fa9ee0904b25401b0e9a9a772d5c4756edf54143a2ff4c9dcc0" },
+]
+
+[[package]]
+name = "platformdirs"
+version = "4.12.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/23/4a86fc741c38c5b69792a4ef954b281afa69bea9f083f881de1b0d23bc07/platformdirs-4.12.3.tar.gz", hash = "sha256:427fc0bb321ae0c5b037fa03238ca74820437be162e78b4848c4d4055b9b766c", size = 59538, upload-time = "2026-10-03T23:40:46.595Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/9b/6ce1ead737fe496611bda600c263b9a11ae7bd8f41bb13f9bd7e0a2c37a4/platformdirs-4.12.3-py3-none-any.whl", hash = "sha256:080f3b39423b5abfca9a23d84c4e9795f54d395cd8459867a8ded44084fcd5f8", size = 32493, upload-time = "2026-10-03T23:40:45.104Z" },
 ]
 
 [[package]]

@@ -41,8 +41,36 @@ BLUE_BUTTON_STYLE = """
         font-weight: bold;
         font-size: 13px;
     }
-    QPushButton:hover { 
-        background-color: #1976D2; 
+    QPushButton:hover {
+        background-color: #1976D2;
+    }
+"""
+
+RED_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #D32F2F;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 15px;
+        font-weight: bold;
+        font-size: 13px;
+    }
+    QPushButton:hover {
+        background-color: #B71C1C;
+    }
+"""
+
+GRAY_BUTTON_STYLE = """
+    QPushButton {
+        background-color: #757575;
+        color: white;
+        border-radius: 4px;
+        padding: 6px 15px;
+        font-weight: bold;
+        font-size: 13px;
+    }
+    QPushButton:hover {
+        background-color: #616161;
     }
 """
 

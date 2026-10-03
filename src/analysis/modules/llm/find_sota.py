@@ -1,6 +1,9 @@
 import json
+import logging
 from extract_citations import extract_citations
 from evaluate_sota import get_llm
+
+logger = logging.getLogger(__name__)
 
 PROMPT_EVALUATE_PL = """Jesteś ekspertem analizującym strukturę prac naukowych... [treść promptu]"""
 PROMPT_EVALUATE_EN = """You are an expert analyzing the structure of academic papers... [treść promptu]"""
@@ -42,10 +45,11 @@ def get_sota_chapter(blocks: list, language: str = "pl"):
             valid_blocks.sort(key=lambda b: len(b.content), reverse=True)
             top_candidates = valid_blocks[:3]
 
-        print(f"\n[AI] Szukam SOTA. Analizuję tylko {len(top_candidates)} najbardziej prawdopodobnych kandydatów...")
+        logger.info("Searching for SOTA chapter among %d candidate blocks", len(top_candidates))
+        logger.info(f"\n[AI] Szukam SOTA. Analizuję tylko {len(top_candidates)} najbardziej prawdopodobnych kandydatów...")
         llm = get_llm()
         llm_candidates = []
-        
+
         for block in top_candidates:
             truncated_content = block.content[:4000]
             prompt = PROMPT_EVALUATE_PL.format(title=block.title or "Brak", content=truncated_content) if language == "pl" else PROMPT_EVALUATE_EN.format(title=block.title or "None", content=truncated_content)
@@ -58,7 +62,11 @@ def get_sota_chapter(blocks: list, language: str = "pl"):
                 score = data.get("pewnosc_procentowa", 0)
                 if score >= 90 and data.get("czy_sota"):
                     llm_candidates.append({"block": block, "score": score})
-            except: 
+            except json.JSONDecodeError:
+                logger.exception("LLM returned invalid JSON while scoring candidate block %r", block.title)
+                continue
+            except Exception:
+                logger.exception("LLM scoring failed for candidate block %r", block.title)
                 continue
         
         if llm_candidates:
