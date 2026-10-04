@@ -35,7 +35,7 @@ def _init_language_tools():
     global _TOOL_EN, _TOOL_PL
     
     if _TOOL_EN is None:
-        _TOOL_EN = language_tool_python.LanguageTool('en-GB')
+        _TOOL_EN = language_tool_python.LanguageTool('en-GB', language_tool_download_version="6.6")
         _TOOL_EN.disabled_categories.add('BRE_STYLE_OXFORD_SPELLING')
         _TOOL_EN.disabled_categories.add('MULTITOKEN_SPELLING')
         _TOOL_EN.disabled_categories.add('CONFUSED_WORDS')
@@ -58,7 +58,7 @@ def _init_language_tools():
         _TOOL_EN.disabled_categories.add('CREATIVE_WRITING')
     
     if _TOOL_PL is None:
-        _TOOL_PL = language_tool_python.LanguageTool('pl-PL')
+        _TOOL_PL = language_tool_python.LanguageTool('pl-PL', language_tool_download_version="6.6")
         _TOOL_PL.disabled_rules.add('NIETYPOWA_KOMBINACJA_DUZYCH_I_MALYCH_LITER')
         _TOOL_PL.disabled_rules.add('PL_UNPAIRED_BRACKETS')
         _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
