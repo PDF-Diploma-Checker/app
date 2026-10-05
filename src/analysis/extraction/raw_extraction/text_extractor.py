@@ -6,13 +6,7 @@ from analysis.extraction.raw_extraction.bare_struct import (
     TextLine,
     TextSpan,
 )
-from analysis.extraction.raw_extraction.geometry import (
-    calculate_margins,
-    line_spacing,
-    check_page_format,
-    is_footer,
-    analyze_line_alignment,
-)
+from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 
 def fix_latex(text):
     replace = {  # Słownik znaków do podmiany.
@@ -60,6 +54,7 @@ def parse_text_block(
     lines = []
     block_words = []
     prev_bottomline = last_block_btmline
+    geometry_classifier = GeometryClassifier()
 
     # Sprawdzanie, które słowa są w środk danego bloku, żeby nie sprawdzać każdego słowa
     # na stronie czy nie należy do danego spana
@@ -203,7 +198,7 @@ def parse_text_block(
             spacing = None
             curr_bottomline = raw_line["bbox"][3]
             if prev_bottomline is not None:
-                spacing = line_spacing(curr_bottomline, prev_bottomline, max_font_size)
+                spacing = geometry_classifier.line_spacing(curr_bottomline, prev_bottomline, max_font_size)
                 if not is_ftr:
                     if spacing > 0.5 and spacing < 3.0:
                         all_spacings.append(spacing)
@@ -220,7 +215,7 @@ def parse_text_block(
             )
             prev_bottomline = curr_bottomline
             # analiza justowania
-            alignment, consistent, gap_toright = analyze_line_alignment(
+            alignment, consistent, gap_toright = geometry_classifier.analyze_line_alignment(
                 curr_line, page_width, margins
             )
             curr_line.alignement = alignment

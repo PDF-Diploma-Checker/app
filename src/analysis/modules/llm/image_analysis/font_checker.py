@@ -128,7 +128,7 @@ if __name__ == "__main__":
     import time
     from analysis.modules.llm.config import THESIS_PATH
     from analysis.extraction.main_extractor import extractPDF
-    from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     print("MODUŁ: SPÓJNOŚĆ CZCIONEK NA OBRAZKACH")
     

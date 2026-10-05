@@ -113,7 +113,7 @@ def main():
         sys.path.insert(0, BASE_DIR)
         
     from analysis.extraction.main_extractor import extractPDF
-    from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     start_time = time.time()
     doc_data = extractPDF(str(THESIS_PATH))

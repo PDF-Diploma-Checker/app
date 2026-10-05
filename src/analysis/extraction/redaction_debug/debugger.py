@@ -22,7 +22,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from analysis.extraction.main_extractor import extractPDF
-from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 from src.analysis.modules.redaction.redaction_validator import RedactionValidator
 
 def run_debugger(pdf_path, debug_mode=False, debug_type="toc"):

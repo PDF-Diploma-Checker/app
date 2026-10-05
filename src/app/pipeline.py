@@ -2,6 +2,10 @@ import os
 import sys
 import concurrent.futures
 import threading
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
 
 if getattr(sys, "frozen", False):
     BASE_DIR = sys._MEIPASS
@@ -34,7 +38,7 @@ class AnalysisPipeline:
 
     def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True):
         def cleanup_text_llm_instances():
-            """Zwalnia instancje LLM z modułów tekstowych, by ograniczyć użycie VRAM przed SOTA."""
+            """Frees LLM instances from text modules to limit VRAM usage before SOTA."""
             try:
                 from analysis.modules.llm import get_summary as _get_summary_mod
                 from analysis.modules.llm import goal_realization as _goal_realization_mod
@@ -72,14 +76,14 @@ class AnalysisPipeline:
                 progress_callback(value, text)
 
         if input_document is None:
-            raise ValueError("Nie przekazano dokumentu wejściowego.")
+            raise ValueError("Input document was not provided.")
 
         pdf_path = getattr(input_document, "pdf_path", None)
 
         if not pdf_path or not os.path.exists(pdf_path):
-            raise FileNotFoundError(f"Nie znaleziono pliku: {pdf_path}")
+            raise FileNotFoundError(f"File not found: {pdf_path}")
 
-        report_progress(10, "Rozpoczynam ekstrakcję tekstu z PDF...")
+        report_progress(10, "Starting text extraction from PDF...")
 
         from analysis.extraction.main_extractor import extractPDF
         from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers
@@ -95,7 +99,7 @@ class AnalysisPipeline:
         extraction_result = ModuleResult(
             module_name="extraction",
             status="done",
-            comments=["Ekstrakcja dokumentu zakończona poprawnie."],
+            comments=["Document extraction completed successfully."],
             details={"page_count": doc_obj.get_page_count()},
         )
 
@@ -115,24 +119,21 @@ class AnalysisPipeline:
                 )
 
             except Exception as e:
-                print(f"[PIPELINE] Błąd skryptu LLM: {e}")
-                import traceback
-                traceback.print_exc()
-                return None, None, "Błąd analizy LLM."
+                logger.error(f"[PIPELINE] LLM script execution error: {e}", exc_info=True)
+                return None, None, "LLM analysis error."
 
         def task_linguistics():
             _tool = None
             original_lt = None
             try:
                 import language_tool_python
-
             except Exception as e:
-                print(f"[PIPELINE] Ostrzeżenie przy starcie LanguageTool: {e}")
+                logger.warning(f"[PIPELINE] Warning during LanguageTool startup: {e}")
             finally:
                 ling_ready_event.set()
 
             try:
-                from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+                from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
                 import importlib.util
 
                 mapper = PDFMapper()
@@ -154,7 +155,7 @@ class AnalysisPipeline:
 
                 ling_matches, sentence_analysis = ling_module.run_linguistics(raw_blocks)
 
-                print(f"[PIPELINE] Znaleziono {len(ling_matches)} błędów lingwistycznych.")
+                logger.info(f"[PIPELINE] Found {len(ling_matches)} linguistic issues.")
 
                 stats = {
                     "active_ratio": getattr(sentence_analysis, "active_ratio", "0%"),
@@ -165,9 +166,7 @@ class AnalysisPipeline:
                 return ling_matches, stats
 
             except Exception as e:
-                print(f"[PIPELINE] Błąd analizy lingwistycznej: {e}")
-                import traceback
-                traceback.print_exc()
+                logger.error(f"[PIPELINE] Linguistic analysis error: {e}", exc_info=True)
 
                 return [], {
                     "active_ratio": "0%",
@@ -187,7 +186,7 @@ class AnalysisPipeline:
         def task_redaction():
             try:
                 from analysis.modules.redaction.redaction_validator import RedactionValidator
-                from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+                from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 
                 mapper = PDFMapper()
 
@@ -206,21 +205,19 @@ class AnalysisPipeline:
 
                 redaction_errors = validator.validate()
 
-                print(f"[PIPELINE] Znaleziono {len(redaction_errors)} błędów redakcyjnych.")
+                logger.info(f"[PIPELINE] Found {len(redaction_errors)} redaction errors.")
 
                 return redaction_errors
 
-            except Exception:
-                import traceback
-                traceback.print_exc()
-
+            except Exception as e:
+                logger.error(f"[PIPELINE] Redaction validation error: {e}", exc_info=True)
                 return []
 
-        report_progress(30, "Rozpoczynam analizy...")
+        report_progress(30, "Starting analyses...")
 
         redaction_errors = task_redaction()
 
-        report_progress(50, "Redakcja zakończona. Uruchamiam pozostałe analizy...")
+        report_progress(50, "Redaction completed. Running remaining analyses...")
 
         workers_count = 2 if use_llm else 1
 
@@ -237,11 +234,11 @@ class AnalysisPipeline:
             else:
                 llm_result = None
                 content_grade_result = None
-                llm_summary_text = "Analiza LLM została pominięta."
+                llm_summary_text = "LLM analysis was skipped."
 
-        report_progress(100, "Generowanie raportu końcowego...")
+        report_progress(100, "Generating final report...")
 
-        wszystkie_bledy = ling_matches + redaction_errors
+        all_errors = ling_matches + redaction_errors
 
         final_report = FinalReport(
             document_name=os.path.basename(pdf_path),
@@ -249,11 +246,11 @@ class AnalysisPipeline:
             extraction_result=extraction_result,
             llm_result=llm_result,
             summary=[
-                "Ekstrakcja zakończona.",
-                "Analiza językowa zakończona.",
-                "Analiza redakcyjna zakończona.",
+                "Extraction completed.",
+                "Linguistic analysis completed.",
+                "Redaction analysis completed.",
                 llm_summary_text,
-                f"Znaleziono {len(wszystkie_bledy)} błędów do wyświetlenia na ekranie.",
+                f"Found {len(all_errors)} errors to display on screen.",
             ],
             recommendations=[],
         )
@@ -276,6 +273,6 @@ class AnalysisPipeline:
         
         final_report.llm_result["language"] = language 
         
-        final_report.linguistics_errors = wszystkie_bledy
+        final_report.linguistics_errors = all_errors
 
         return final_report

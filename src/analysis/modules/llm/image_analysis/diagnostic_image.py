@@ -20,7 +20,7 @@ def run_diagnostics(pdf_path):
     print(f"Rozpoczynam zoptymalizowaną diagnostykę dla: {pdf_path}")
     
     from analysis.extraction.main_extractor import extractPDF
-    from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     # 1. Ekstrakcja i mapowanie lingwistyczne
     doc_obj = extractPDF(str(pdf_path))

@@ -14,7 +14,7 @@ from .first_definition import check_first_definition
 from .check_acronym import check_if_was_defined
 from .bibliography_check import check_bibliography
 from analysis.extraction.main_extractor import extractPDF
-from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 from common.path import resource_path
 import os
 

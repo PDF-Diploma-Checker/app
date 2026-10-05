@@ -10,7 +10,7 @@ from analysis.modules.linguistics.first_definition import check_first_definition
 from analysis.modules.linguistics.check_acronym import check_if_was_defined
 from analysis.extraction.main_extractor import extractPDF
 from analysis.modules.linguistics.bibliography_check import check_bibliography
-from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 import json
 from common.path import resource_path
 import os

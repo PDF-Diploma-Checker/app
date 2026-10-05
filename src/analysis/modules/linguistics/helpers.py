@@ -3,7 +3,7 @@ import dataclasses
 import json
 import morfeusz2
 from lingua import Language, LanguageDetectorBuilder
-from analysis.extraction.linguistics_extraction.schema import *
+from analysis.extraction.linguistics_conversion.schema import *
 from .linguistics_types import Block_context, Error_type
 from collections import defaultdict
 import functools

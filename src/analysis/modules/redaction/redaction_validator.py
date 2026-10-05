@@ -6,8 +6,8 @@ pdf'a pod względem błędów z redakcji i "zaawansowanej" redakcji.
 """
 
 from analysis.extraction.raw_extraction.bare_struct import DocumentData
-from analysis.extraction.linguistics_extraction.schema import FinalDocument
-from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper, get_acronym_pages
+from analysis.extraction.linguistics_conversion.schema import FinalDocument
+from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper, get_acronym_pages
 from common.errors.error_struct import Error, FileError, Module
 from dataclasses import dataclass
 from typing import List

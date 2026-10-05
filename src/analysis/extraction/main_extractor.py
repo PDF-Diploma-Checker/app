@@ -12,11 +12,7 @@ from analysis.extraction.raw_extraction.bare_struct import (
     PageData,
 )
 
-from analysis.extraction.raw_extraction.geometry import (
-    calculate_margins,
-    check_page_format,
-    is_footer,
-)
+from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 
 from analysis.extraction.raw_extraction.image_extractor import (
     extract_raster_images,
@@ -58,10 +54,11 @@ def extractPDF(file_path: str) -> DocumentData:
         print("plik nie istnieje")
         return
 
-    # sprawdzenie czy mamy folder "images", jeśli nie to tworzymy taki
+    geometry_classifier = GeometryClassifier()
+    #Chceck for 'images' folder existance
     os.makedirs("images", exist_ok=True)
 
-    # usuwanie obrazów z poprzedniego sprawdzania, żeby nie było chaosu
+    #Remove images from previous PDF extraction
     for filename in os.listdir("images"):
         file_to_delete = os.path.join("images", filename)
         try:
@@ -87,7 +84,7 @@ def extractPDF(file_path: str) -> DocumentData:
         p_width = page.rect.width
         p_height = page.rect.height
 
-        page_format, page_orientation = check_page_format(p_width, p_height)
+        page_format, page_orientation = geometry_classifier.check_page_format(p_width, p_height)
 
         blank_page = True
 
@@ -95,7 +92,7 @@ def extractPDF(file_path: str) -> DocumentData:
             number=page_index,  # + 1 zostało usunięte, jako że strona tytułowa nie powinna być wliczana do numeracji
             width=p_width,
             height=p_height,
-            margins=calculate_margins(raw_dict["blocks"], p_width, p_height),
+            margins=geometry_classifier.calculate_margins(raw_dict["blocks"], p_width, p_height),
             text_blocks=[],
             images=[],
             orientation=page_orientation,
@@ -111,7 +108,7 @@ def extractPDF(file_path: str) -> DocumentData:
         for block in raw_dict["blocks"]:
             # typ 0 to tekst, typ 1 to obraz
             if block["type"] == 0:
-                is_ftr = is_footer(block, p_height, page_index + 1)
+                is_ftr = geometry_classifier.is_footer(block, p_height, page_index + 1)
                 text_block, last_block_btmline, current_span_id = parse_text_block(
                     block,
                     word_list,

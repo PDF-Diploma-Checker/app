@@ -8,6 +8,9 @@ from analysis.extraction.raw_extraction.bare_struct import (
     ImageInfo,
 )
 
+MIN_PHYSICAL_WIDTH = 40
+MIN_PHYSICAL_HEIGHT = 20
+
 
 def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
     """
@@ -273,9 +276,6 @@ def extract_vector_graphics(
                     i += 1
             new_merged.append(current)
         merged_bboxes = new_merged
-
-    MIN_PHYSICAL_WIDTH = 40
-    MIN_PHYSICAL_HEIGHT = 20
 
     for i in range(len(merged_bboxes)):
         bbox = merged_bboxes[i]

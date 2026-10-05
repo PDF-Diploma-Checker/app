@@ -130,7 +130,7 @@ if __name__ == "__main__":
     print(f"Plik: {config.THESIS_PATH}")
     
     from analysis.extraction.main_extractor import extractPDF
-    from analysis.extraction.linguistics_extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     start_time = time.time()
     

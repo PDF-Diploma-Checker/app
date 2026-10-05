@@ -7,7 +7,7 @@ import re
 import statistics
 
 
-from analysis.extraction.linguistics_extraction.schema import (
+from analysis.extraction.linguistics_conversion.schema import (
     FinalDocument,
     ParagraphBlock,
     ListBlock,
@@ -24,9 +24,9 @@ from analysis.extraction.linguistics_extraction.schema import (
 from analysis.extraction.main_extractor import (
     DocumentData,
     extractPDF,
-    calculate_margins,
+    GeometryClassifier
 )
-from analysis.extraction.linguistics_extraction.schema import (
+from analysis.extraction.linguistics_conversion.schema import (
     PageArtifact,
     is_acronym,
     is_widow_func,
@@ -654,8 +654,8 @@ class PDFMapper:
             r"^(rysunek|rys\.|fot\.|schemat)\s*(?:\d+|[IVX]+)", re.IGNORECASE
         )
         tab_pattern = re.compile(r"^(tabela|tab\.)\s*(?:\d+|[IVX]+)", re.IGNORECASE)
-
-        margins = calculate_margins(
+        geometry_classifier = GeometryClassifier()
+        margins = geometry_classifier.calculate_margins(
             [{"bbox": b.bbox} for b in page.text_blocks], page.width, page.height
         )
         x0_margin = margins["left"]
