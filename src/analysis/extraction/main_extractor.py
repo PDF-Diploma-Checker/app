@@ -32,9 +32,9 @@ from analysis.extraction.raw_extraction.table_extractor import (
 
 from analysis.extraction.raw_extraction.text_extractor import (parse_text_block)
 from analysis.extraction.raw_extraction.front_and_back_matter import (
-    extract_TOC, 
-    extract_TOF, 
-    extract_TOT
+    TableOfContentsExtractor, 
+    TableOfFiguresExtractor, 
+    TableOfTablesExtractor
 )
 
 
@@ -173,11 +173,16 @@ def extractPDF(file_path: str) -> DocumentData:
             blank_page = False
         cur_page.is_blank = blank_page
         document_data.pages.append(cur_page)
-    document_data.toc = extract_TOC(doc, document_data.pages)
-    document_data.tof = extract_TOF(
+
+    toc_extractor = TableOfContentsExtractor()
+    tof_extractor = TableOfFiguresExtractor()
+    tot_extractor = TableOfTablesExtractor()
+
+    document_data.toc = toc_extractor.extract(doc, document_data.pages)
+    document_data.tof = tof_extractor.extract(
         document_data.pages, document_data.toc.page_nums if document_data.toc else []
     )
-    document_data.tot = extract_TOT(
+    document_data.tot = tot_extractor.extract(
         document_data.pages, document_data.toc.page_nums if document_data.toc else []
     )
     doc.close()
