@@ -3,12 +3,18 @@ from .linguistics_types import Error_type
 from .helpers import get_match_info
 from .exeptions_check import check_quotes
 from .proper_check import check_if_proper
+import logging
+
+logger = logging.getLogger(__name__)
 
 def decimal_check(blocks, chapter_nums):
     '''Function uses regexes to find wrongly used decimal separators in Polish or English.
     Matches are passed to be checked by check_defimal_matches.'''
+    logger.info("Starting decimal separator check")
     checked_matches = []
     chapter_numbers = set()
+    pl_candidates = 0
+    en_candidates = 0
     for block in blocks:
         if block.block.type in {"math", "code_snippet", "toc", "tot", "tof", "acronyms"}:
             continue
@@ -22,6 +28,10 @@ def decimal_check(blocks, chapter_nums):
         potential_matches = []
         text = block.contents
         regexes = list(re.finditer(regex, text))
+        if block.language == 'pl':
+            pl_candidates += len(regexes)
+        else:
+            en_candidates += len(regexes)
         for reg in regexes:
             start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, reg.start(), reg.end()- reg.start())
             potential_matches.append(Error_type(
@@ -43,6 +53,12 @@ def decimal_check(blocks, chapter_nums):
             checked_match = check_decimal_matches(potential_matches, block, chapter_numbers, 2, chapter_nums)
             checked_matches.extend(checked_match)
 
+    certain_errors = sum(1 for m in checked_matches if "Niepoprawny" in m.message or "Wrong" in m.message)
+    possible_errors = len(checked_matches) - certain_errors
+    logger.info("Decimal check complete:")
+    logger.info("  PL candidates: %d, EN candidates: %d", pl_candidates, en_candidates)
+    logger.info("  Confirmed errors: %d, possible errors: %d", certain_errors, possible_errors)
+    logger.info("  Total matches: %d", len(checked_matches))
     return checked_matches
 
 def check_decimal_matches(potential_matches, block, chapter_numbers, error_tolerance, chapter_nums):

@@ -1,4 +1,7 @@
 from models import ModuleResult
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LinguisticsService:

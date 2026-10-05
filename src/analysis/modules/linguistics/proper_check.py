@@ -1,5 +1,8 @@
 import re
 from .helpers import lemmatization
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def check_if_proper(block, match, proper_names=None, lemma=None, is_diff=None):

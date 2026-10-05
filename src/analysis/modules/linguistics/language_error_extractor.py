@@ -7,6 +7,10 @@ from .linguistics_types import Error_type
 from analysis.extraction.schema import *
 from .helpers import get_match_info, morf, spell
 import string
+import logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 # Stały katalog LanguageTool, aby uniknąć wielokrotnego pobierania przy kolejnych uruchomieniach.
 os.environ.setdefault("LTP_PATH", str(Path.home() / ".cache" / "language_tool_python"))
@@ -33,50 +37,61 @@ atexit.register(_close_language_tools)
 def _init_language_tools():
     '''Inicialize language tools only once during first boot.'''
     global _TOOL_EN, _TOOL_PL
-    
+
     if _TOOL_EN is None:
-        _TOOL_EN = language_tool_python.LanguageTool('en-GB', language_tool_download_version="6.6")
-        _TOOL_EN.disabled_categories.add('BRE_STYLE_OXFORD_SPELLING')
-        _TOOL_EN.disabled_categories.add('MULTITOKEN_SPELLING')
-        _TOOL_EN.disabled_categories.add('CONFUSED_WORDS')
-        _TOOL_EN.disabled_rules.add('EN_UNPAIRED_BRACKETS')
-        _TOOL_EN.disabled_rules.add('COMMA_PERIOD_CONFUSION')
-        _TOOL_EN.disabled_rules.add('EN_UNPAIRED_QUOTES')
-        _TOOL_EN.disabled_categories.add('TON_ACADEMIC')
-        _TOOL_EN.disabled_categories.add('CONFUSED_WORDS')
-        _TOOL_EN.disabled_categories.add('NONSTANDARD_PHRASES')
-        _TOOL_EN.disabled_categories.add('REPETITIONS_STYLE')
-        _TOOL_EN.disabled_categories.add('STYLE')
-        _TOOL_EN.disabled_categories.add('MISC')
-        _TOOL_EN.disabled_rules.add('COMMA_PARENTHESIS_WHITESPACE')
-        _TOOL_EN.disabled_rules.add('WHITESPACE_RULE')
-        _TOOL_EN.disabled_categories.add('CONSECUTIVE_SPACES')
-        _TOOL_EN.disabled_categories.add('CASING')
-        _TOOL_EN.disabled_categories.add('DASH_RULE')
-        _TOOL_EN.disabled_categories.add('WIKIPEDIA')
-        _TOOL_EN.disabled_categories.add('TEXT_ANALYSIS')
-        _TOOL_EN.disabled_categories.add('CREATIVE_WRITING')
+        try:
+            logger.info("Initializing LanguageTool EN (en-GB)")
+            _TOOL_EN = language_tool_python.LanguageTool('en-GB', language_tool_download_version="6.6")
+            _TOOL_EN.disabled_categories.add('BRE_STYLE_OXFORD_SPELLING')
+            _TOOL_EN.disabled_categories.add('MULTITOKEN_SPELLING')
+            _TOOL_EN.disabled_categories.add('CONFUSED_WORDS')
+            _TOOL_EN.disabled_rules.add('EN_UNPAIRED_BRACKETS')
+            _TOOL_EN.disabled_rules.add('COMMA_PERIOD_CONFUSION')
+            _TOOL_EN.disabled_rules.add('EN_UNPAIRED_QUOTES')
+            _TOOL_EN.disabled_categories.add('TON_ACADEMIC')
+            _TOOL_EN.disabled_categories.add('CONFUSED_WORDS')
+            _TOOL_EN.disabled_categories.add('NONSTANDARD_PHRASES')
+            _TOOL_EN.disabled_categories.add('REPETITIONS_STYLE')
+            _TOOL_EN.disabled_categories.add('STYLE')
+            _TOOL_EN.disabled_categories.add('MISC')
+            _TOOL_EN.disabled_rules.add('COMMA_PARENTHESIS_WHITESPACE')
+            _TOOL_EN.disabled_rules.add('WHITESPACE_RULE')
+            _TOOL_EN.disabled_categories.add('CONSECUTIVE_SPACES')
+            _TOOL_EN.disabled_categories.add('CASING')
+            _TOOL_EN.disabled_categories.add('DASH_RULE')
+            _TOOL_EN.disabled_categories.add('WIKIPEDIA')
+            _TOOL_EN.disabled_categories.add('TEXT_ANALYSIS')
+            _TOOL_EN.disabled_categories.add('CREATIVE_WRITING')
+        except Exception as e:
+            logger.exception("Failed to initialize LanguageTool EN")
+            _TOOL_EN = None
     
     if _TOOL_PL is None:
-        _TOOL_PL = language_tool_python.LanguageTool('pl-PL', language_tool_download_version="6.6")
-        _TOOL_PL.disabled_rules.add('NIETYPOWA_KOMBINACJA_DUZYCH_I_MALYCH_LITER')
-        _TOOL_PL.disabled_rules.add('PL_UNPAIRED_BRACKETS')
-        _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
-        _TOOL_PL.disabled_rules.add('ADJ_SUBST_ADJ_UNIFY')
-        _TOOL_PL.disabled_rules.add('FORMAT_DZIESIETNY')
-        _TOOL_PL.disabled_rules.add('SPACJA_ZA_PRZECINKIEM_DZIESITNYM')
-        _TOOL_PL.disabled_rules.add('ZDANIE_PODRZEDNE_Z_KTORY_LUB_JAKI')
-        _TOOL_PL.disabled_categories.add('MISC')
-        _TOOL_PL.disabled_rules.add('COMMA_PARENTHESIS_WHITESPACE')
-        _TOOL_PL.disabled_rules.add('WHITESPACE_RULE')
-        _TOOL_PL.disabled_rules.add('BRAK_SPACJI_NAWIAS')
-        _TOOL_PL.disabled_rules.add('PRZEDROSTKI')
-        _TOOL_PL.disabled_rules.add('ZBIEG_NAWIASOW')
-        _TOOL_PL.disabled_categories.add('CASING')
-        _TOOL_PL.disabled_rules.add('DYWIZ')
+        try:
+            logger.info("Initializing LanguageTool PL (pl-PL)")
+            _TOOL_PL = language_tool_python.LanguageTool('pl-PL', language_tool_download_version="6.6")
+            _TOOL_PL.disabled_rules.add('NIETYPOWA_KOMBINACJA_DUZYCH_I_MALYCH_LITER')
+            _TOOL_PL.disabled_rules.add('PL_UNPAIRED_BRACKETS')
+            _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
+            _TOOL_PL.disabled_rules.add('ADJ_SUBST_ADJ_UNIFY')
+            _TOOL_PL.disabled_rules.add('FORMAT_DZIESIETNY')
+            _TOOL_PL.disabled_rules.add('SPACJA_ZA_PRZECINKIEM_DZIESITNYM')
+            _TOOL_PL.disabled_rules.add('ZDANIE_PODRZEDNE_Z_KTORY_LUB_JAKI')
+            _TOOL_PL.disabled_categories.add('MISC')
+            _TOOL_PL.disabled_rules.add('COMMA_PARENTHESIS_WHITESPACE')
+            _TOOL_PL.disabled_rules.add('WHITESPACE_RULE')
+            _TOOL_PL.disabled_rules.add('BRAK_SPACJI_NAWIAS')
+            _TOOL_PL.disabled_rules.add('PRZEDROSTKI')
+            _TOOL_PL.disabled_rules.add('ZBIEG_NAWIASOW')
+            _TOOL_PL.disabled_categories.add('CASING')
+            _TOOL_PL.disabled_rules.add('DYWIZ')
+        except Exception as e:
+            logger.exception("Failed to initialize LanguageTool PL")
+            _TOOL_PL = None
 
 def language_tool_analisys(blocks):
     '''Finds mistakes in text: grammar, style, typos, punctuation in paragraphs and more.'''
+    logger.info("Starting LanguageTool analysis on %d blocks", len(blocks))
     errors = []
 
     polish_messages = {
@@ -178,6 +193,10 @@ def language_tool_analisys(blocks):
                     error_coordinate=error_coordinate,
                 ))
 
+    category_counts = Counter(e.category for e in errors)
+    logger.info("LanguageTool analysis complete: %d errors found", len(errors))
+    for cat, count in category_counts.most_common():
+        logger.info("  LT category '%s': %d", cat, count)
     return errors
 
 def typo_check(typo_text):

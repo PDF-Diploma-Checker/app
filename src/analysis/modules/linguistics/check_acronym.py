@@ -1,6 +1,9 @@
 from .helpers import add_match
 import re
 from .language_error_extractor import typo_check
+import logging
+
+logger = logging.getLogger(__name__)
 
 def potential_acronym(text):
     """
@@ -49,6 +52,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
     """
     Iterates over document blocks and identifies acronyms that were used without a prior definition.
     """
+    logger.info("Starting undefined acronym check")
 
     
     global_acronyms = {
@@ -124,4 +128,5 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                         matches.append(add_match(word.text, block.block_id, page, page, [word.word_index], [{"page": page, "coordinates": list(word.bbox)}], category, message))
                 prev_word = word
     proper_names = set(proper_names)
+    logger.info("Undefined acronym check done: %d matches", len(matches))
     return matches, proper_names

@@ -4,10 +4,14 @@ from .helpers import lemmatization
 from .proper_check import check_if_proper
 from .typos_final_filter import refine_typos
 import string
+import logging
+
+logger = logging.getLogger(__name__)
 
 def check_exeptions(matches, blocks, proper_names, main_font):
     '''Filters raw language-tool matches to drop false positives and keep actual errors, passes 
     typing errors for secondary check.'''
+    logger.info("Starting exception filtering: %d raw matches to filter", len(matches))
     potential_exeptions = defaultdict(list)
     valid_errors = []
     blocks_to_check = defaultdict(list)
@@ -39,8 +43,8 @@ def check_exeptions(matches, blocks, proper_names, main_font):
                                 continue
                             elif match.offset + len(match.content) < len(text) and text[match.offset + len(match.content)] == '-':
                                 continue
-                        except:
-                            pass
+                        except Exception:
+                            logger.exception("Failed to check adjacent characters for dash")
                         lemma = lemmatization(word, block.language)
                         if check_if_proper(block.block, match, proper_names, lemma):
                             continue
@@ -51,13 +55,22 @@ def check_exeptions(matches, blocks, proper_names, main_font):
                 if not inside_quotes and not potential_exeption:
                     valid_errors.append(match)
     exeptions = []  
+    before_typo_refine = len(valid_errors)
     valid_errors = refine_typos(valid_errors, blocks) #fallback od redakcji
+    after_typo_refine = len(valid_errors)
+    repeated_words_dropped = 0
     for lemma, match_list in potential_exeptions.items():
         if len(match_list) > 2:
             exeptions.extend(match_list)
+            repeated_words_dropped += len(match_list)
         else:
             valid_errors.extend(match_list)
 
+    logger.info("Exception filtering complete:")
+    logger.info("  Input: %d, output: %d", len(matches), len(valid_errors))
+    logger.info("  Potential typos checked: %d unique lemmas", len(potential_exeptions))
+    logger.info("  Repeated words dropped (>2 occurrences): %d", repeated_words_dropped)
+    logger.info("  Typo refinement: %d -> %d", before_typo_refine, after_typo_refine)
     return valid_errors
 
 

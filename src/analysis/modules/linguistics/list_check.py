@@ -1,6 +1,10 @@
 from .check_item_in_list import check_item, has_verb, is_upper_and_dot
 from .helpers import add_match
 import re
+import logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 def add_list_error(items_by_id, num, block_id, category, lang):
     """
@@ -46,6 +50,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
     """
     Analyses document blocks to find inconsistencies in list casing, endings, and coherence.
     """
+    logger.info("Starting list coherence check")
     matches = []
     #symbols = set(r"""`~!@#$%^&*()_-+={[}}|\:;"'<,>.?/""")
     quote_marks = {'"', '„', '”', '«', '»', '('}
@@ -53,6 +58,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
     definition_search = re.compile(r'^[A-Z]+\s?\(.*?\)\s[' + dash_chars + r']\s')
     definition_sep_pattern = re.compile(r'^(\S+(?:\s+\S+){0,3})\s+[' + dash_chars + r':]\s')
     current_heading = ""
+    list_count = 0
     for b in blocks:
         block = b.block
         if block.type == "list" and block.is_bibliography: 
@@ -65,7 +71,8 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
             continue
         language = b.language
         msg_language = getattr(block, 'language', None) or language
-        if block.type == "list":            
+        if block.type == "list":
+            list_count += 1
             casing_error_ids = []
             ending_error_ids = []
             items_by_id = {}
@@ -233,4 +240,10 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                 if error:
                     matches.append(error)
 
+    cat_counts = Counter(m.category for m in matches)
+    logger.info("List coherence check complete: %d matches across %d lists", len(matches), list_count)
+    if list_count == 0:
+        logger.warning("No lists found to check.")
+    for cat, count in cat_counts.most_common():
+        logger.info("  List error type '%s': %d", cat, count)
     return matches

@@ -1,9 +1,14 @@
 import re
 from .linguistics_types import Error_type
-from .helpers import get_match_info
+from .helpers import get_match_info 
+import logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 def dash_check(blocks):
     '''Checks text blocks for correct usage of hyphens, en dashes and em dashes in Polish and English.'''
+    logger.info("Starting dash check")
     checked_matches = []
 
     for block in blocks:
@@ -163,5 +168,20 @@ def dash_check(blocks):
             
 
         checked_matches.extend(errors)
-
+        
+    msg_counts = Counter()
+    for m in checked_matches:
+        if "Dywiz zamiast" in m.message or "Hyphen instead" in m.message:
+            msg_counts["hyphen_as_dash"] += 1
+        elif "Niekonsekwencja" in m.message or "Inconsistency" in m.message:
+            msg_counts["inconsistent_dash"] += 1
+        elif "Brak spacji" in m.message or "Missing space" in m.message:
+            msg_counts["missing_space"] += 1
+        elif "datach" in m.message or "dates" in m.message.lower() or "zakresach" in m.message or "ranges" in m.message.lower():
+            msg_counts["date_range"] += 1
+        else:
+            msg_counts["other"] += 1
+    logger.info("Dash check complete: %d matches", len(checked_matches))
+    for error_type, count in msg_counts.most_common():
+        logger.info("  Dash error type '%s': %d", error_type, count)
     return checked_matches

@@ -5,6 +5,9 @@ Nie uwzględniony w pipeline linguistic.
 import json
 import os
 from common.path import resource_path
+import logging
+
+logger = logging.getLogger(__name__)
 
 def normalize_word_idxs(item):
 
@@ -71,7 +74,7 @@ def metrics(tp, fp, fn):
     return {"precision": precision, "recall": recall, "f1": f1}
 
 if __name__ == "__main__":
-    
+    logging.basicConfig(level=logging.INFO)
     #temporary file for testing
 
     base_dir = resource_path(os.path.join("analysis", "modules", "linguistics", "evaluation"))
@@ -99,3 +102,4 @@ if __name__ == "__main__":
                 f"{'-' * 30}\n"
             )
             out_file.write(result_str)
+            logger.info("Evaluation result:\n%s", result_str)

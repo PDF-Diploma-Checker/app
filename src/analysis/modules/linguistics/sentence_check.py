@@ -4,6 +4,10 @@ from .helpers import get_match_info, morf, nlp_pl, nlp_en
 from .linguistics_types import Error_type, Analisys_type
 from .proper_check import check_if_proper
 import re
+import logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 #ostateczny fallback przy edge case złego wykrycia podpisów, aby nie tworzyć FP z NO_VERB, NO_SUBJECT.
 DESCRIPTION_WHITELIST= {"wersja", "wersji", "wersjom", "wersjach", "wersję", "wer","wersją", "wersje", "wersjami", "rys", "rysunek", "rysunkom", "rysunkach", "rysunku", "tabela", "tabeli", "tabelom", "tabelach", "tab",
@@ -17,6 +21,7 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
     Parses paragraph sentences. Marks usage of first person as error when it is not excluded in user JSON, 
     Marks sentences with no verb or no subject as an error, creates statistics of each sentence form usage across paragraphs.
     '''
+    logger.info("Starting sentence check (check_first_person=%s)", check_first_person)
     sentence_count = 0
     passive_count = 0
     active_count = 0
@@ -174,6 +179,15 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
         passive_ratio= f"{passive_ratio}%",
         verbless_ratio= f"{verbless_ratio}%"
     )
+    match_cats = Counter(m.category for m in checked_matches)
+    logger.info("Sentence check complete: %d matches", len(checked_matches))
+    logger.info("  Total sentences: %d", sentence_count)
+    logger.info("  Active: %d (%s)", active_count, analisys.active_ratio)
+    logger.info("  Passive: %d (%s)", passive_count, analisys.passive_ratio)
+    logger.info("  Verbless: %d (%s)", verbless_count, analisys.verbless_ratio)
+    logger.info("  Impersonal: %d", impersonal_count)
+    for cat, count in match_cats.most_common():
+        logger.info("  Sentence error type '%s': %d", cat, count)
     return checked_matches, analisys
 
 def morfeusz_check(text):
