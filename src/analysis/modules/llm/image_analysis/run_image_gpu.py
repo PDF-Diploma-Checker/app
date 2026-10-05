@@ -1,5 +1,4 @@
 import sys
-import os
 import json
 import re
 import gc
@@ -136,8 +135,8 @@ if __name__ == "__main__":
     logger.info("==================================================")
     logger.info(f"Plik: {config.THESIS_PATH}")
     
-    from analysis.extraction.extraction_json import extractPDF
-    from analysis.extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.main_extractor import extractPDF
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     start_time = time.time()
     

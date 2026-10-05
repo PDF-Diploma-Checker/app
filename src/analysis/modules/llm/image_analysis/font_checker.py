@@ -1,5 +1,4 @@
 import sys
-import os
 import json
 import re
 import gc
@@ -144,8 +143,8 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
 if __name__ == "__main__":
     import time
     from analysis.modules.llm.config import THESIS_PATH
-    from analysis.extraction.extraction_json import extractPDF
-    from analysis.extraction.converter_linguistics_clean import PDFMapper
+    from analysis.extraction.main_extractor import extractPDF
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
     logger.info("MODUŁ: SPÓJNOŚĆ CZCIONEK NA OBRAZKACH")
     

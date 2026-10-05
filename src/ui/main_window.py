@@ -30,12 +30,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QStackedWidget, QFileDialog, QMessageBox
 )
 import os
-import json
 import fitz
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QScrollArea, QLabel, QPushButton, QSplitter, 
-    QLineEdit, QStackedWidget, QFileDialog, QMessageBox,
     QDialog, QInputDialog
 )
 from PySide6.QtCore import Qt, QSize, QPointF, QObject, Signal, QThread
@@ -44,10 +40,9 @@ from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
-from select_text import SelectablePdfView, CommentMarker, HighlightBox
+from select_text import SelectablePdfView, CommentMarker
 from start_page import StartPage
 from saving_files import SavingFiles
 import styles
@@ -57,8 +52,6 @@ from report_bug import send_report
 from log_window import LogWindow
 
 from PySide6.QtWidgets import QFrame
-from entry import run_analysis_for_pdf
-from common.path import resource_path
 
 class AnalysisWorker(QObject):
     """A worker class that handles the execution of the document analysis pipeline"""
