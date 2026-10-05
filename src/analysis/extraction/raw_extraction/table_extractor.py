@@ -1,5 +1,5 @@
-
 import fitz  # PyMuPDF
+import logging
 
 from analysis.extraction.raw_extraction.bare_struct import (
     PageData,
@@ -73,7 +73,6 @@ def find_table_description(table_bbox, text_blocks, priority_side=None):
     return "", priority_side
 
 
-
 def extract_tables(
     page: fitz.Page, drawings: list, cur_page: PageData, priority_side=None
 ) -> tuple[list, str]:
@@ -94,7 +93,11 @@ def extract_tables(
     # znajdowanie tabel, wyciąganie danych i zapisywanie do list
     tabs = page.find_tables(strategy="lines_strict")
     for tab in tabs.tables:
-        extracted_data = tab.extract()
+        try:
+            extracted_data = tab.extract()
+        except Exception as e:
+            logging.error(f"Failed to extract table data: {e}")
+            continue
 
         if tab.col_count < 2:
             continue
@@ -159,6 +162,7 @@ def extract_tables(
                 data=cleaned_data,
             )
         )
+        logging.info("Extracted standard table successfully.")
 
     return table_bboxes, priority_side
 
@@ -219,124 +223,128 @@ def extract_apa_tables(
             grouped_table_rects.append(apa_rect)
 
     for apa_rect in grouped_table_rects:
-        is_duplicate = False
-        for existing_rect in existing_table_bboxes:
-            intersect = apa_rect & existing_rect
-            if intersect.is_valid and not intersect.is_empty:
-                overlap_area = intersect.width * intersect.height
-                if (
-                    overlap_area
-                    / min(
-                        apa_rect.width * apa_rect.height,
-                        existing_rect.width * existing_rect.height + 0.001,
-                    )
-                    > 0.15
-                ):
-                    is_duplicate = True
-                    break
-        if is_duplicate:
-            continue
-
-        words = page.get_text("words", clip=apa_rect)
-        if not words:
-            continue
-
-        words.sort(key=lambda w: w[1])
-        top_y = words[0][1]
-        header_words = [w for w in words if w[1] < top_y + 15]
-        header_words.sort(key=lambda w: w[0])
-
-        col_dividers = [apa_rect.x0 - 10]
-        last_x1 = -999
-        is_first = True
-        for w in header_words:
-            if is_first:
-                is_first = False
-                last_x1 = w[2]
-                continue
-
-            if w[0] > last_x1 + 15:
-                col_dividers.append(w[0] - 5)
-            last_x1 = max(last_x1, w[2])
-        col_dividers.append(apa_rect.x1 + 10)
-
-        num_cols = len(col_dividers) - 1
-        if num_cols < 2:
-            continue
-
-        words.sort(key=lambda w: (w[1], w[0]))
-        lines = []
-        current_line = []
-        last_y = -999
-        for w in words:
-            if abs(w[1] - last_y) > 4:
-                if current_line:
-                    current_line.sort(key=lambda x: x[0])
-                    lines.append(current_line)
-                current_line = [w]
-                last_y = w[1]
-            else:
-                current_line.append(w)
-        if current_line:
-            current_line.sort(key=lambda x: x[0])
-            lines.append(current_line)
-
-        grid = []
-        for line in lines:
-            row_data = [""] * num_cols
-            for w in line:
-                c_idx = num_cols - 1
-                for c in range(num_cols):
-                    if w[0] < col_dividers[c + 1]:
-                        c_idx = c
+        try:
+            is_duplicate = False
+            for existing_rect in existing_table_bboxes:
+                intersect = apa_rect & existing_rect
+                if intersect.is_valid and not intersect.is_empty:
+                    overlap_area = intersect.width * intersect.height
+                    if (
+                        overlap_area
+                        / min(
+                            apa_rect.width * apa_rect.height,
+                            existing_rect.width * existing_rect.height + 0.001,
+                        )
+                        > 0.15
+                    ):
+                        is_duplicate = True
                         break
-                row_data[c_idx] += fix_latex(w[4]) + " "
-            grid.append([cell.strip() for cell in row_data])
-
-        final_data = []
-        for row in grid:
-            if not any(row):
-                continue
-            if not final_data:
-                final_data.append(row)
+            if is_duplicate:
                 continue
 
-            if row[0] == "":
-                for c in range(num_cols):
-                    if row[c]:
-                        prev = final_data[-1][c]
-                        if prev and prev.endswith("-"):
-                            final_data[-1][c] = prev[:-1] + row[c]
-                        elif prev:
-                            final_data[-1][c] = prev + " " + row[c]
-                        else:
-                            final_data[-1][c] = row[c]
-            else:
-                final_data.append(row)
-
-        total_cells = len(final_data) * num_cols if final_data else 0
-        if total_cells > 0:
-            filled_cells = sum(1 for row in final_data for cell in row if cell != "")
-            if (filled_cells / total_cells) < 0.20:
+            words = page.get_text("words", clip=apa_rect)
+            if not words:
                 continue
 
-        description, found_side = find_table_description(
-            apa_rect, cur_page.text_blocks, priority_side
-        )
-        if description and priority_side is None:
-            priority_side = found_side
+            words.sort(key=lambda w: w[1])
+            top_y = words[0][1]
+            header_words = [w for w in words if w[1] < top_y + 15]
+            header_words.sort(key=lambda w: w[0])
 
-        apa_bboxes.append(apa_rect)
-        cur_page.tables.append(
-            TableInfo(
-                bbox=(apa_rect.x0, apa_rect.y0, apa_rect.x1, apa_rect.y1),
-                row_count=len(final_data),
-                col_count=num_cols,
-                description=description,
-                data=final_data,
-                table_type="apa",
+            col_dividers = [apa_rect.x0 - 10]
+            last_x1 = -999
+            is_first = True
+            for w in header_words:
+                if is_first:
+                    is_first = False
+                    last_x1 = w[2]
+                    continue
+
+                if w[0] > last_x1 + 15:
+                    col_dividers.append(w[0] - 5)
+                last_x1 = max(last_x1, w[2])
+            col_dividers.append(apa_rect.x1 + 10)
+
+            num_cols = len(col_dividers) - 1
+            if num_cols < 2:
+                continue
+
+            words.sort(key=lambda w: (w[1], w[0]))
+            lines = []
+            current_line = []
+            last_y = -999
+            for w in words:
+                if abs(w[1] - last_y) > 4:
+                    if current_line:
+                        current_line.sort(key=lambda x: x[0])
+                        lines.append(current_line)
+                    current_line = [w]
+                    last_y = w[1]
+                else:
+                    current_line.append(w)
+            if current_line:
+                current_line.sort(key=lambda x: x[0])
+                lines.append(current_line)
+
+            grid = []
+            for line in lines:
+                row_data = [""] * num_cols
+                for w in line:
+                    c_idx = num_cols - 1
+                    for c in range(num_cols):
+                        if w[0] < col_dividers[c + 1]:
+                            c_idx = c
+                            break
+                    row_data[c_idx] += fix_latex(w[4]) + " "
+                grid.append([cell.strip() for cell in row_data])
+
+            final_data = []
+            for row in grid:
+                if not any(row):
+                    continue
+                if not final_data:
+                    final_data.append(row)
+                    continue
+
+                if row[0] == "":
+                    for c in range(num_cols):
+                        if row[c]:
+                            prev = final_data[-1][c]
+                            if prev and prev.endswith("-"):
+                                final_data[-1][c] = prev[:-1] + row[c]
+                            elif prev:
+                                final_data[-1][c] = prev + " " + row[c]
+                            else:
+                                final_data[-1][c] = row[c]
+                else:
+                    final_data.append(row)
+
+            total_cells = len(final_data) * num_cols if final_data else 0
+            if total_cells > 0:
+                filled_cells = sum(1 for row in final_data for cell in row if cell != "")
+                if (filled_cells / total_cells) < 0.20:
+                    continue
+
+            description, found_side = find_table_description(
+                apa_rect, cur_page.text_blocks, priority_side
             )
-        )
+            if description and priority_side is None:
+                priority_side = found_side
+
+            apa_bboxes.append(apa_rect)
+            cur_page.tables.append(
+                TableInfo(
+                    bbox=(apa_rect.x0, apa_rect.y0, apa_rect.x1, apa_rect.y1),
+                    row_count=len(final_data),
+                    col_count=num_cols,
+                    description=description,
+                    data=final_data,
+                    table_type="apa",
+                )
+            )
+            logging.info("Extracted APA table successfully.")
+        except Exception as e:
+            logging.error(f"Failed to process potential APA table: {e}")
 
     return apa_bboxes, priority_side
 
@@ -445,117 +453,121 @@ def extract_lineless_tables(
             if table_rect.height < 20:
                 continue
 
-            raw_words = page.get_text("words", clip=table_rect)
-            if not raw_words:
-                continue
-
-            words = []
-            for w in raw_words:
-                center_y = (w[1] + w[3]) / 2
-                if table_rect.y0 <= center_y <= table_rect.y1:
-                    words.append(w)
-
-            if not words:
-                continue
-
-            words.sort(key=lambda w: w[1])
-            top_y = words[0][1]
-            header_words = [w for w in words if w[1] < top_y + 15]
-            header_words.sort(key=lambda w: w[0])
-
-            col_dividers = [0]
-            last_x1 = -999
-            is_first = True
-            for w in header_words:
-                if is_first:
-                    is_first = False
-                    last_x1 = w[2]
+            try:
+                raw_words = page.get_text("words", clip=table_rect)
+                if not raw_words:
                     continue
 
-                if w[0] > last_x1 + 10:
-                    col_dividers.append(w[0] - 5)
-                last_x1 = max(last_x1, w[2])
-            col_dividers.append(cur_page.width)
+                words = []
+                for w in raw_words:
+                    center_y = (w[1] + w[3]) / 2
+                    if table_rect.y0 <= center_y <= table_rect.y1:
+                        words.append(w)
 
-            num_cols = len(col_dividers) - 1
-            if num_cols < 2:
-                continue
-
-            words.sort(key=lambda w: (w[1], w[0]))
-            lines = []
-            current_line = []
-            last_y = -999
-            for w in words:
-                if abs(w[1] - last_y) > 5:
-                    if current_line:
-                        current_line.sort(key=lambda x: x[0])
-                        lines.append(current_line)
-                    current_line = [w]
-                    last_y = w[1]
-                else:
-                    current_line.append(w)
-            if current_line:
-                current_line.sort(key=lambda x: x[0])
-                lines.append(current_line)
-
-            grid = []
-            for line in lines:
-                row_data = [""] * num_cols
-                for w in line:
-                    c_idx = num_cols - 1
-                    for c in range(num_cols):
-                        if w[0] < col_dividers[c + 1]:
-                            c_idx = c
-                            break
-                    row_data[c_idx] += fix_latex(w[4]) + " "
-                grid.append([cell.strip() for cell in row_data])
-
-            final_data = []
-            for row in grid:
-                if not any(row):
-                    continue
-                if not final_data:
-                    final_data.append(row)
+                if not words:
                     continue
 
-                if row[0] == "":
-                    for c in range(num_cols):
-                        if row[c]:
-                            prev = final_data[-1][c]
-                            if prev and prev.endswith("-"):
-                                final_data[-1][c] = prev[:-1] + row[c]
-                            elif prev:
-                                final_data[-1][c] = prev + " " + row[c]
-                            else:
-                                final_data[-1][c] = row[c]
-                else:
-                    final_data.append(row)
+                words.sort(key=lambda w: w[1])
+                top_y = words[0][1]
+                header_words = [w for w in words if w[1] < top_y + 15]
+                header_words.sort(key=lambda w: w[0])
 
-            total_cells = len(final_data) * num_cols if final_data else 0
-            if total_cells > 0:
-                filled_cells = sum(
-                    1 for row in final_data for cell in row if cell != ""
+                col_dividers = [0]
+                last_x1 = -999
+                is_first = True
+                for w in header_words:
+                    if is_first:
+                        is_first = False
+                        last_x1 = w[2]
+                        continue
+
+                    if w[0] > last_x1 + 10:
+                        col_dividers.append(w[0] - 5)
+                    last_x1 = max(last_x1, w[2])
+                col_dividers.append(cur_page.width)
+
+                num_cols = len(col_dividers) - 1
+                if num_cols < 2:
+                    continue
+
+                words.sort(key=lambda w: (w[1], w[0]))
+                lines = []
+                current_line = []
+                last_y = -999
+                for w in words:
+                    if abs(w[1] - last_y) > 5:
+                        if current_line:
+                            current_line.sort(key=lambda x: x[0])
+                            lines.append(current_line)
+                        current_line = [w]
+                        last_y = w[1]
+                    else:
+                        current_line.append(w)
+                if current_line:
+                    current_line.sort(key=lambda x: x[0])
+                    lines.append(current_line)
+
+                grid = []
+                for line in lines:
+                    row_data = [""] * num_cols
+                    for w in line:
+                        c_idx = num_cols - 1
+                        for c in range(num_cols):
+                            if w[0] < col_dividers[c + 1]:
+                                c_idx = c
+                                break
+                        row_data[c_idx] += fix_latex(w[4]) + " "
+                    grid.append([cell.strip() for cell in row_data])
+
+                final_data = []
+                for row in grid:
+                    if not any(row):
+                        continue
+                    if not final_data:
+                        final_data.append(row)
+                        continue
+
+                    if row[0] == "":
+                        for c in range(num_cols):
+                            if row[c]:
+                                prev = final_data[-1][c]
+                                if prev and prev.endswith("-"):
+                                    final_data[-1][c] = prev[:-1] + row[c]
+                                elif prev:
+                                    final_data[-1][c] = prev + " " + row[c]
+                                else:
+                                    final_data[-1][c] = row[c]
+                    else:
+                        final_data.append(row)
+
+                total_cells = len(final_data) * num_cols if final_data else 0
+                if total_cells > 0:
+                    filled_cells = sum(
+                        1 for row in final_data for cell in row if cell != ""
+                    )
+                    if (filled_cells / total_cells) < 0.20:
+                        continue
+
+                actual_y0 = min(w[1] for w in words)
+                actual_y1 = max(w[3] for w in words)
+                actual_x0 = min(w[0] for w in words)
+                actual_x1 = max(w[2] for w in words)
+                found_bbox = fitz.Rect(actual_x0, actual_y0, actual_x1, actual_y1)
+
+                lineless_bboxes.append(found_bbox)
+                cur_page.tables.append(
+                    TableInfo(
+                        bbox=(found_bbox.x0, found_bbox.y0, found_bbox.x1, found_bbox.y1),
+                        row_count=len(final_data),
+                        col_count=num_cols,
+                        description=cap["text"],
+                        data=final_data,
+                        table_type="lineless",
+                    )
                 )
-                if (filled_cells / total_cells) < 0.20:
-                    continue
-
-            actual_y0 = min(w[1] for w in words)
-            actual_y1 = max(w[3] for w in words)
-            actual_x0 = min(w[0] for w in words)
-            actual_x1 = max(w[2] for w in words)
-            found_bbox = fitz.Rect(actual_x0, actual_y0, actual_x1, actual_y1)
-
-            lineless_bboxes.append(found_bbox)
-            cur_page.tables.append(
-                TableInfo(
-                    bbox=(found_bbox.x0, found_bbox.y0, found_bbox.x1, found_bbox.y1),
-                    row_count=len(final_data),
-                    col_count=num_cols,
-                    description=cap["text"],
-                    data=final_data,
-                    table_type="lineless",
-                )
-            )
-            table_extracted = True
+                table_extracted = True
+                logging.info("Extracted lineless table successfully.")
+            except Exception as e:
+                logging.error(f"Failed to process potential lineless table: {e}")
 
     return lineless_bboxes, priority_side

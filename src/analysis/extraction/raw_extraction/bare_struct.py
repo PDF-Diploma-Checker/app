@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any
 import json
+import logging
 
 
 @dataclass
@@ -126,134 +127,178 @@ class DocumentData:
 
     def _to_dict(self):
         """This function converts the entire data structure to a dictionary, which can then be easily saved to JSON."""
-        return asdict(self)
+        try:
+            return asdict(self)
+        except Exception as e:
+            logging.error(f"Error converting DocumentData to dictionary: {e}")
+            raise
 
     def to_json(self, file_path: str, indent: int = 4) -> None:
         """This function saves the document data to a JSON file."""
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(self._to_dict(), f, ensure_ascii=False, indent=indent)
-
+            logging.info(f"Successfully saved document data to {file_path}.")
         except Exception as e:
             # TODO: tutaj tez jakis wyjatek, trzeba ustalic standard zglaszania bledow
-            print(f"blad zapisu do pliku json: {e}")
+            logging.error(f"Error while saving data to json file: {e}")
 
     def get_page_count(self) -> int:
         """This function returns the number of pages in the document, excluding the title page."""
-        return (
-            len(self.pages) - 1
-        )  # -1, jako że strona tytułowa ma się nie zaliczać do licznika stron.
+        try:
+            return (
+                len(self.pages) - 1
+            )  # -1, jako że strona tytułowa ma się nie zaliczać do licznika stron.
+        except Exception as e:
+            logging.error(f"Error calculating page count: {e}")
+            return max(0, len(self.pages) - 1)
 
     # zwraca słownik z nazwami czcionek i ich ilością wystąpień
     def get_font_usage(self) -> Dict[str, int]:
         """This function returns a dictionary with font names as keys and their occurrence counts as values."""
-        font_usage = {}
-        for page in self.pages:
-            for block in page.text_blocks:
-                for line in block.lines:
-                    for span in line.spans:
-                        font_usage[span.font] = font_usage.get(span.font, 0) + 1
-        return font_usage
+        try:
+            font_usage = {}
+            for page in self.pages:
+                for block in page.text_blocks:
+                    for line in block.lines:
+                        for span in line.spans:
+                            font_usage[span.font] = font_usage.get(span.font, 0) + 1
+            return font_usage
+        except Exception as e:
+            logging.error(f"Error getting font usage: {e}")
+            return {}
 
     # zwraca słownik z rozmiarami czcionek i ich ilością wystąpień
     def get_font_size_usage(self) -> Dict[float, int]:
         """This function returns a dictionary with font sizes as keys and their occurrence counts as values."""
-        font_usage = {}
-        for page in self.pages:
-            for block in page.text_blocks:
-                for line in block.lines:
-                    for span in line.spans:
-                        font_usage[span.size] = font_usage.get(span.size, 0) + 1
-        return font_usage
-
-    def get_most_common_font(self) -> str | None:
-        """This function returns the most common font in the document."""
-        font_usage = self.get_font_usage()
-        if not font_usage:
-            return None
-        most_common_font = max(font_usage, key=font_usage.get)
-        return most_common_font
-
-    def get_most_common_font_size(self) -> float | None:
-        """This function returns the most common font size in the document."""
-        font_size_usage = self.get_font_size_usage()
-        if not font_size_usage:
-            return None
-        most_common_font_size = max(font_size_usage, key=font_size_usage.get)
-        return most_common_font_size
-
-    def get_margins(self) -> Dict[str, float]:
-        """This function returns a dictionary with page numbers as keys and their margins as values."""
-        margins = {}
-        for page in self.pages:
-            margins[page.number] = page.margins
-        return margins
-
-    def get_page_dimensions(self) -> Dict[int, tuple]:
-        """This function returns a dictionary with page numbers as keys and their dimensions as values."""
-        dimensions = {}
-        for page in self.pages:
-            dimensions[page.number] = (page.width, page.height)
-        return dimensions
-
-    def get_dominant_line_spacing(self) -> float | None:
-        """This function returns the most common line spacing in the document."""
-        spacing_counts = {}
-        for page in self.pages:
-            for block in page.text_blocks:
-                for line in block.lines:
-                    if line.line_spacing is not None:
-                        spacing_counts[line.line_spacing] = (
-                            spacing_counts.get(line.line_spacing, 0) + 1
-                        )
-
-        if not spacing_counts:
-            return None
-
-        dominant_spacing = max(spacing_counts, key=spacing_counts.get)
-        return dominant_spacing
-
-    def get_span_by_id(self, span_id: int) -> tuple | None:
-        """This function returns the span with the given span_id along with its associated line, block, and page."""
-        first_idx_in_page = []
-        for page in self.pages:
-            if page.text_blocks:
-                first_idx_in_page.append(page.text_blocks[0].lines[0].spans[0].span_id)
-            else:
-                first_idx_in_page.append(
-                    first_idx_in_page[-1] if first_idx_in_page else 0
-                )
-        for page in self.pages:
-            first = first_idx_in_page[page.number]
-            last = (
-                first_idx_in_page[page.number + 1]
-                if page.number + 1 < len(first_idx_in_page)
-                else float("inf")
-            )
-            if first <= span_id < last:
+        try:
+            font_usage = {}
+            for page in self.pages:
                 for block in page.text_blocks:
                     for line in block.lines:
                         for span in line.spans:
-                            if span.span_id == span_id:
-                                return span, line, block, page
-        return None
+                            font_usage[span.size] = font_usage.get(span.size, 0) + 1
+            return font_usage
+        except Exception as e:
+            logging.error(f"Error getting font size usage: {e}")
+            return {}
+
+    def get_most_common_font(self) -> str | None:
+        """This function returns the most common font in the document."""
+        try:
+            font_usage = self.get_font_usage()
+            if not font_usage:
+                return None
+            most_common_font = max(font_usage, key=font_usage.get)
+            return most_common_font
+        except Exception as e:
+            logging.error(f"Error getting most common font: {e}")
+            return None
+
+    def get_most_common_font_size(self) -> float | None:
+        """This function returns the most common font size in the document."""
+        try:
+            font_size_usage = self.get_font_size_usage()
+            if not font_size_usage:
+                return None
+            most_common_font_size = max(font_size_usage, key=font_size_usage.get)
+            return most_common_font_size
+        except Exception as e:
+            logging.error(f"Error getting most common font size: {e}")
+            return None
+
+    def get_margins(self) -> Dict[str, float]:
+        """This function returns a dictionary with page numbers as keys and their margins as values."""
+        try:
+            margins = {}
+            for page in self.pages:
+                margins[page.number] = page.margins
+            return margins
+        except Exception as e:
+            logging.error(f"Error getting margins: {e}")
+            return {}
+
+    def get_page_dimensions(self) -> Dict[int, tuple]:
+        """This function returns a dictionary with page numbers as keys and their dimensions as values."""
+        try:
+            dimensions = {}
+            for page in self.pages:
+                dimensions[page.number] = (page.width, page.height)
+            return dimensions
+        except Exception as e:
+            logging.error(f"Error getting page dimensions: {e}")
+            return {}
+
+    def get_dominant_line_spacing(self) -> float | None:
+        """This function returns the most common line spacing in the document."""
+        try:
+            spacing_counts = {}
+            for page in self.pages:
+                for block in page.text_blocks:
+                    for line in block.lines:
+                        if line.line_spacing is not None:
+                            spacing_counts[line.line_spacing] = (
+                                spacing_counts.get(line.line_spacing, 0) + 1
+                            )
+
+            if not spacing_counts:
+                return None
+
+            dominant_spacing = max(spacing_counts, key=spacing_counts.get)
+            return dominant_spacing
+        except Exception as e:
+            logging.error(f"Error getting dominant line spacing: {e}")
+            return None
+
+    def get_span_by_id(self, span_id: int) -> tuple | None:
+        """This function returns the span with the given span_id along with its associated line, block, and page."""
+        try:
+            first_idx_in_page = []
+            for page in self.pages:
+                if page.text_blocks:
+                    first_idx_in_page.append(page.text_blocks[0].lines[0].spans[0].span_id)
+                else:
+                    first_idx_in_page.append(
+                        first_idx_in_page[-1] if first_idx_in_page else 0
+                    )
+            for page in self.pages:
+                first = first_idx_in_page[page.number]
+                last = (
+                    first_idx_in_page[page.number + 1]
+                    if page.number + 1 < len(first_idx_in_page)
+                    else float("inf")
+                )
+                if first <= span_id < last:
+                    for block in page.text_blocks:
+                        for line in block.lines:
+                            for span in line.spans:
+                                if span.span_id == span_id:
+                                    return span, line, block, page
+            return None
+        except Exception as e:
+            logging.error(f"Error getting span by ID {span_id}: {e}")
+            return None
 
     def is_rect_intersecting(
         self, rect: tuple, page: PageData, ignore: List[int] = None
     ) -> List[tuple]:
         """This function checks which spans intersects with the given rectangle and returns a list of those spans along with their associated lines, blocks, and pages.
         The ignore parameter can be used to specify span_ids that should be ignored during the intersection check."""
-        if ignore is None:
-            ignore = []
-        intersecting_spans = []
-        rx0, ry0, rx1, ry1 = rect
-        for block in page.text_blocks:
-            for line in block.lines:
-                for span in line.spans:
-                    if span.span_id in ignore:
-                        continue
-                    sx0, sy0, sx1, sy1 = span.bbox
+        try:
+            if ignore is None:
+                ignore = []
+            intersecting_spans = []
+            rx0, ry0, rx1, ry1 = rect
+            for block in page.text_blocks:
+                for line in block.lines:
+                    for span in line.spans:
+                        if span.span_id in ignore:
+                            continue
+                        sx0, sy0, sx1, sy1 = span.bbox
 
-                    if rx0 <= sx1 and sx0 <= rx1 and ry0 <= sy1 and sy0 <= ry1:
-                        intersecting_spans.append((span, line, block, page))
-        return intersecting_spans
+                        if rx0 <= sx1 and sx0 <= rx1 and ry0 <= sy1 and sy0 <= ry1:
+                            intersecting_spans.append((span, line, block, page))
+            return intersecting_spans
+        except Exception as e:
+            logging.error(f"Error checking rect intersection: {e}")
+            return []

@@ -1,6 +1,7 @@
 import fitz  # PyMuPDF
 from typing import List
 import re
+import logging
 
 from analysis.extraction.raw_extraction.bare_struct import (
     DocumentData,
@@ -8,17 +9,8 @@ from analysis.extraction.raw_extraction.bare_struct import (
     ImageInfo,
 )
 
-MIN_PHYSICAL_WIDTH = 40
-MIN_PHYSICAL_HEIGHT = 20
-
 
 def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
-    """
-    Zwraca listę numerów rysunków dla grafik rastrowych (np. ["1.2", "1.3"]).
-
-    Numer jest wyciągany z pola `description` obrazów o `image_type == "raster"`.
-    Obsługiwane prefiksy: rys, rys., rysunek, fig, fig., figure, wykres, fot, foto, photo, image.
-    """
     if not document_data or not getattr(document_data, "pages", None):
         return []
 
@@ -51,21 +43,7 @@ def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
 
 
 def find_image_description(image_bbox, text_blocks, priority_side=None):
-    """
-    Locates the caption or description for an image by analyzing the spatial relationship
-    of surrounding text blocks relative to the image's bounding box. Groups potential
-    matches by their position (above or below) and specific keywords.
-
-    Args:
-        image_bbox (list): The bounding box of the image [x0, y0, x1, y1].
-        text_blocks (list): A list of text blocks to evaluate as potential captions.
-        priority_side (str, optional): The preferred side to check first ('above' or 'below').
-            Defaults to None.
-
-    Returns:
-        tuple[str, str]: A tuple containing the extracted description text and the
-        side it was found on ('above' or 'below').
-    """
+    # ... (bez zmian)
     x0, y0, x1, y1 = image_bbox
     kw_matches = {"above": [], "below": []}
     other_matches = {"above": [], "below": []}
@@ -86,7 +64,6 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
             side = "above" if is_close_above else "below"
 
-            # Słowa kluczowe dla obrazów
             img_keywords = (
                 "rysunek",
                 "rys.",
@@ -277,10 +254,14 @@ def extract_vector_graphics(
             new_merged.append(current)
         merged_bboxes = new_merged
 
+
+    min_physical_width = 40
+    min_physical_width = 20
+
     for i in range(len(merged_bboxes)):
         bbox = merged_bboxes[i]
 
-        if bbox.width > MIN_PHYSICAL_WIDTH and bbox.height > MIN_PHYSICAL_HEIGHT:
+        if bbox.width > min_physical_width and bbox.height > min_physical_width:
             changed_text = True
             while changed_text:
                 changed_text = False
@@ -319,7 +300,7 @@ def extract_vector_graphics(
             merged_bboxes[i] = bbox + (-5, -5, 5, 5)
 
     for i, bbox in enumerate(merged_bboxes):
-        if bbox.width > MIN_PHYSICAL_WIDTH and bbox.height > MIN_PHYSICAL_HEIGHT:
+        if bbox.width > min_physical_width and bbox.height > min_physical_width:
             aspect_ratio = bbox.width / bbox.height
 
             if aspect_ratio < 25.0 and aspect_ratio > 0.05:
@@ -354,9 +335,14 @@ def extract_vector_graphics(
                 if description and priority_side is None:
                     priority_side = found_side
 
-                pix = page.get_pixmap(clip=bbox)
-                img_path = f"images/p{page_index}_vec_{i}.png"
-                pix.save(img_path)
+                try:
+                    pix = page.get_pixmap(clip=bbox)
+                    img_path = f"images/p{page_index}_vec_{i}.png"
+                    pix.save(img_path)
+                    logging.info(f"Successfully saved vector image: {img_path}")
+                except Exception as e:
+                    logging.error(f"Failed to save vector image for page {page_index}, rect {i}: {e}")
+                    continue
 
                 cur_page.images.append(
                     ImageInfo(
@@ -403,10 +389,10 @@ def extract_raster_images(
             phys_height = y1 - y0
             img_rect = fitz.Rect(block["bbox"])
 
-            MIN_PHYSICAL_WIDTH = 20
-            MIN_PHYSICAL_HEIGHT = 20
+            min_physical_width = 20
+            min_physical_width = 20
 
-            if phys_width < MIN_PHYSICAL_WIDTH or phys_height < MIN_PHYSICAL_HEIGHT:
+            if phys_width < min_physical_width or phys_height < min_physical_width:
                 continue
 
             if phys_width < 40 and phys_height < 40:
@@ -446,7 +432,8 @@ def extract_raster_images(
                 pix = fitz.Pixmap(block["image"])
                 if pix.is_unicolor:
                     continue
-            except Exception:
+            except Exception as e:
+                logging.warning(f"Failed to create Pixmap for block {block.get('number')} on page {page_index}: {e}")
                 pass
 
             is_background = False
@@ -476,9 +463,13 @@ def extract_raster_images(
             ext = block.get("ext", "png")
             img_path = f"images/p{page_index}_b{block['number']}.{ext}"
 
-            # zapisywanie obrazów
-            with open(img_path, "wb") as img_file:
-                img_file.write(block["image"])
+            try:
+                with open(img_path, "wb") as img_file:
+                    img_file.write(block["image"])
+                logging.info(f"Successfully saved raster image: {img_path}")
+            except Exception as e:
+                logging.error(f"Failed to save raster image {img_path}: {e}")
+                continue
 
             cur_page.images.append(
                 ImageInfo(
@@ -492,4 +483,3 @@ def extract_raster_images(
             )
 
     return priority_side
-
