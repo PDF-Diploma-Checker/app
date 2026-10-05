@@ -1,11 +1,15 @@
 from .helpers import nlp_pl, nlp_en, lemmatization
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def get_proper_names(blocks):
     """
     Extracts proper names, entities, acronyms, and keywords from document blocks.
     """
+    logger.info("Starting proper names extraction")
 
     TITLE_PAGE_PHRASES = {
     "PRACA", "MAGISTERSKA", "INŻYNIERSKA", "DYPLOMOWA",
@@ -135,4 +139,6 @@ def get_proper_names(blocks):
                     text = word.text
                     word_lemma = lemmatization(text, block.language)
                     proper_names.append((text, word_lemma))
+                    
+    logger.info("Proper names extraction done: %d proper names found", len(proper_names))
     return proper_names, bibliography
