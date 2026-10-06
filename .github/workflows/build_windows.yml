@@ -1,0 +1,35 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ exe ] 
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Odbierz kod z repozytorium
+      uses: actions/checkout@v4
+
+    - name: Konfiguracja Pythona
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+        cache: 'pip'
+
+    - name: Instalacja zależności
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Budowanie aplikacji .exe za pomocą PyInstallera
+      run: |
+        pyinstaller --noconsole --onedir --name="DiplomaChecker" --add-data "src/ui/assets;ui/assets" src/app/main.py
+
+    - name: Przechowanie gotowego pliku .exe (Artifact)
+      uses: actions/upload-artifact@v4
+      with:
+        name: DiplomaChecker-Windows
+        path: dist/DiplomaChecker/
