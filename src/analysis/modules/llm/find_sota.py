@@ -1,7 +1,7 @@
 import json
 import logging
-from extract_citations import extract_citations
-from evaluate_sota import get_llm
+from .extract_citations import extract_citations
+from .evaluate_sota import get_llm
 
 logger = logging.getLogger(__name__)
 

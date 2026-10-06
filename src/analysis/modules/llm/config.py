@@ -1,19 +1,16 @@
 import sys
+import os
 import json
 import logging
 from pathlib import Path
-from common.path import resource_path
-import os
+import subprocess
+import spacy
+from huggingface_hub import hf_hub_download
 
 logger = logging.getLogger(__name__)
 
 
 def get_app_dir():
-    """
-    Return the directory containing the application configuration.
-    In development mode, this returns the project root directory.
-    In a PyInstaller build, this returns the directory containing the executable.
-    """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     else:
@@ -21,68 +18,137 @@ def get_app_dir():
 
 APP_DIR = get_app_dir()
 APP_CONFIG_PATH = APP_DIR / "app_config.json"
-
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
 THESIS_DIR = Path.home() / "theses"
 
-MODEL_PATH = Path.home() / "models" / "gemma3_12b" / "google_gemma-3-12b-it-Q4_K_M.gguf"
-N_GPU_LAYERS = 25
-LLAVA_MODEL_PATH = Path.home() / "models" / "llava-v1.6-mistral-7b.Q4_K_M.gguf"
-LLAVA_MMPROJ_PATH = Path.home() / "models" / "mmproj-model-f16.gguf"
-THESIS_PATH = THESIS_DIR / "jost2.pdf"
-LANGUAGE = "en"
-
-
-def load_app_config():
-    """
-    Load app_config.json from the application directory.
-    """
+def ensure_and_load_config():
     if not APP_CONFIG_PATH.exists():
-        logger.error("Missing app_config.json: %s", APP_CONFIG_PATH)
-        raise FileNotFoundError(f"Missing app_config.json: {APP_CONFIG_PATH}")
+        default_config = {
+            "device": "cuda",
+            "n_gpu_layers": 25,
+            "model_dir": str(Path.home() / "models"),
+            "language": "pl",
+            "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
+            "thesis_path": str(THESIS_DIR / "jost2.pdf"),
+            "output_dir": str(APP_DIR / "output")
+        }
+        try:
+            APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with APP_CONFIG_PATH.open("w", encoding="utf-8") as file:
+                json.dump(default_config, file, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[CONFIG] Nie udało się utworzyć app_config.json: {e}")
 
     try:
         with APP_CONFIG_PATH.open("r", encoding="utf-8") as file:
             config = json.load(file)
-    except json.JSONDecodeError as e:
-        logger.exception("Failed to parse app_config.json at %s", APP_CONFIG_PATH)
-        raise ValueError(f"app_config.json is not valid JSON: {APP_CONFIG_PATH}") from e
+            if isinstance(config, dict):
+                return config
+    except Exception as e:
+        print(f"[CONFIG] Błąd odczytu app_config.json: {e}")
 
-    if not isinstance(config, dict):
-        logger.error("app_config.json did not contain a JSON object: %s", APP_CONFIG_PATH)
-        raise ValueError("app_config.json must contain a JSON object.")
+    return {
+        "device": "cuda",
+        "n_gpu_layers": 25,
+        "model_dir": str(Path.home() / "models"),
+        "language": "pl"
+    }
 
-    return config
+_CONFIG = ensure_and_load_config()
 
-_CONFIG = load_app_config()
+DEVICE = str(_CONFIG.get("device", "cuda")).lower().strip()
+N_GPU_LAYERS = int(_CONFIG.get("n_gpu_layers", 25))
 
-try:
-    DEVICE = str(_CONFIG["device"]).lower().strip()
-    N_GPU_LAYERS = int(_CONFIG["n_gpu_layers"])
-except KeyError as e:
-    logger.exception("Missing required key in app_config.json: %s", APP_CONFIG_PATH)
-    raise ValueError(f"Missing required key {e} in app_config.json: {APP_CONFIG_PATH}") from e
-
-logger.info("N_GPU_LAYERS = %s", N_GPU_LAYERS)
-
-try:
-    MODEL_DIR = Path(str(_CONFIG["model_dir"])).expanduser()
-except KeyError as e:
-    logger.exception("Missing required key in app_config.json: %s", APP_CONFIG_PATH)
-    raise ValueError(f"Missing required key {e} in app_config.json: {APP_CONFIG_PATH}") from e
-
+MODEL_DIR = Path(str(_CONFIG.get("model_dir", Path.home() / "models"))).expanduser()
 LANGUAGE = str(_CONFIG.get("language", "pl")).lower().strip()
 
-MODEL_PATH = MODEL_DIR / "gemma3_12b" / "google_gemma-3-12b-it-Q4_K_M.gguf"
+MODEL_PATH = MODEL_DIR / "gemma3_12b" / "gemma-3-12b-it-Q4_K_M.gguf"
 LLAVA_MODEL_PATH = MODEL_DIR / "llava-v1.6-mistral-7b.Q4_K_M.gguf"
 LLAVA_MMPROJ_PATH = MODEL_DIR / "mmproj-model-f16.gguf"
 
 THESIS_PATH = Path(str(_CONFIG.get("thesis_path", THESIS_DIR / "jost2.pdf"))).expanduser()
 OUTPUT_DIR = Path(str(_CONFIG.get("output_dir", APP_DIR / "output"))).expanduser()
+EMBEDDING_MODEL = str(_CONFIG.get("embedding_model", "paraphrase-multilingual-MiniLM-L12-v2"))
 
-EMBEDDING_MODEL = str(
-    _CONFIG.get(
-        "embedding_model",
-        "paraphrase-multilingual-MiniLM-L12-v2",
-    )
-)
+
+def are_ai_models_downloaded():
+    """Sprawdza, czy wszystkie wymagane pliki modeli AI fizycznie istnieją na dysku."""
+    return MODEL_PATH.exists() and LLAVA_MODEL_PATH.exists() and LLAVA_MMPROJ_PATH.exists()
+
+
+def download_specific_language(lang_code=None):
+    """Zapewnia obecność pakietów językowych SpaCy."""
+    os.environ["TQDM_DISABLE"] = "True"
+    try:
+        import pl_core_news_lg
+    except ImportError:
+        try:
+            spacy.cli.download("pl_core_news_lg")
+        except Exception:
+            pass
+        
+    try:
+        import en_core_web_lg
+    except ImportError:
+        try:
+            spacy.cli.download("en_core_web_lg")
+        except Exception:
+            pass
+
+
+def check_and_download_requirements(parent=None):
+    """
+    Sprawdza Javę i pakiety SpaCy. NIE pobiera ciężkich modeli AI automatycznie bez pytania!
+    """
+    os.environ["TQDM_DISABLE"] = "True"
+    
+    try:
+        subprocess.run(["java", "-version"], check=True, capture_output=True)
+    except Exception:
+        print("[SETUP] Ostrzeżenie: Java nie została zainstalowana w systemie.")
+
+    try:
+        download_specific_language()
+    except Exception as e:
+        print(f"[SETUP] Błąd pobierania języków SpaCy: {e}")
+
+    return True
+
+
+def download_ai_models_with_progress(progress_callback=None):
+    """Pobiera modele AI z Hugging Face z opcjonalnym raportowaniem postępu (tylko na żądanie)."""
+    try:
+        if progress_callback:
+            progress_callback(15, "Pobieranie modelu Gemma 3 (ok. 8GB)...")
+            
+        if not MODEL_PATH.exists():
+            MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            hf_hub_download(
+                repo_id="nocturne23/gemma-3-12b-it-Q4_K_M-GGUF",
+                filename="gemma-3-12b-it-q4_k_m.gguf",
+                local_dir=str(MODEL_DIR / "gemma3_12b")
+            )
+
+        if progress_callback:
+            progress_callback(50, "Pobieranie modeli LLaVA...")
+
+        if not LLAVA_MODEL_PATH.exists():
+            LLAVA_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            hf_hub_download(
+                repo_id="cjpais/llava-1.6-mistral-7b-gguf",
+                filename="llava-v1.6-mistral-7b.Q4_K_M.gguf",
+                local_dir=str(MODEL_DIR)
+            )
+
+        if not LLAVA_MMPROJ_PATH.exists():
+            LLAVA_MMPROJ_PATH.parent.mkdir(parents=True, exist_ok=True)
+            hf_hub_download(
+                repo_id="cjpais/llava-1.6-mistral-7b-gguf",
+                filename="mmproj-model-f16.gguf",
+                local_dir=str(MODEL_DIR)
+            )
+            
+        if progress_callback:
+            progress_callback(90, "Modele AI zostały pobrane pomyślnie.")
+            
+    except Exception as e:
+        raise RuntimeError(f"Błąd pobierania modeli: {str(e)}")
