@@ -4,7 +4,7 @@ import logging
 from typing import Dict, Any, List
 from llama_cpp import Llama
 
-from config import MODEL_PATH, N_GPU_LAYERS
+from .config import MODEL_PATH, N_GPU_LAYERS
 
 logger = logging.getLogger(__name__)
 

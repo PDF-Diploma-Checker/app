@@ -1,10 +1,25 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('src/ui/assets', 'ui/assets'), ('/home/natalia/Desktop/app/venv/lib/python3.12/site-packages/pl_core_news_lg', 'pl_core_news_lg'), ('/home/natalia/Desktop/app/venv/lib/python3.12/site-packages/en_core_web_lg', 'en_core_web_lg')]
+datas = [('src/ui/assets', 'ui/assets'), ('src/analysis/modules/linguistics', 'analysis/modules/linguistics')]
 binaries = []
-hiddenimports = ['PySide6', 'styles', 'spacy']
+hiddenimports = ['PySide6', 'styles', 'spacy', 'find_sota']
+datas += collect_data_files('pl_core_news_lg')
+datas += collect_data_files('en_core_web_lg')
 tmp_ret = collect_all('spacy')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('llama_cpp')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('morfeusz2')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('lingua')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('spellchecker')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('find_sota')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('analysis.modules.llm')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 

@@ -139,7 +139,6 @@ class SetupWizard(QDialog):
             self.btn_run.setEnabled(True)
             return
 
-        # Sprawdzamy czy brakuje modeli AI na dysku i pytamy użytkownika
         should_download = False
         if not are_ai_models_downloaded():
             reply = QMessageBox.question(

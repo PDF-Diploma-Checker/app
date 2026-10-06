@@ -35,7 +35,6 @@ class AnalysisPipeline:
 
     def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True):
         def cleanup_text_llm_instances():
-            """Zwalnia instancje LLM z modułów tekstowych, by ograniczyć użycie VRAM przed SOTA."""
             try:
                 from analysis.modules.llm import get_summary as _get_summary_mod
                 from analysis.modules.llm import goal_realization as _goal_realization_mod
@@ -125,7 +124,6 @@ class AnalysisPipeline:
             original_lt = None
             try:
                 import language_tool_python
-
             except Exception as e:
                 print(f"[PIPELINE] Ostrzeżenie przy starcie LanguageTool: {e}")
             finally:
@@ -137,7 +135,10 @@ class AnalysisPipeline:
 
                 mapper = PDFMapper()
 
-                ling_path = os.path.join(LINGUISTICS_DIR, "run_linguistics.py")
+                ling_path = resource_path("src/analysis/modules/linguistics/run_linguistics.py")
+                if not os.path.exists(ling_path):
+                    ling_path = resource_path("analysis/modules/linguistics/run_linguistics.py")
+
                 spec = importlib.util.spec_from_file_location(
                     "analysis.modules.linguistics.run_linguistics",
                     ling_path,
