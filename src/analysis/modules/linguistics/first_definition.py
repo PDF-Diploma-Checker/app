@@ -271,9 +271,4 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     logger.info("First definition check complete: %d acronyms with definitions found, %d proper names",
                 len(acronyms_with_definitions), len(proper_names))
 
-    # debug: lista wszystkich wykrytych akronimów
-    print(f"[DEBUG] Wykryte akronimy ({len(acronyms_with_definitions)}):")
-    for acronym, (definition, source, page, _) in acronyms_with_definitions.items():
-        print(f"  {acronym} = {definition!r} (str. {page}, źródło: {source})")
-
     return acronyms_with_definitions, proper_names
