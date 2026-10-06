@@ -1,14 +1,13 @@
 import sys
 import json
 from pathlib import Path
-from common.path import resource_path
 import os
 
 def get_app_dir():
     """
-    Return the directory containing the application configuration.
-    In development mode, this returns the project root directory.
-    In a PyInstaller build, this returns the directory containing the executable.
+    Zwraca katalog zawierający konfigurację aplikacji.
+    W trybie deweloperskim zwraca główny katalog projektu.
+    W spakowanej wersji PyInstaller zwraca folder, w którym znajduje się plik wykonywalny.
     """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
@@ -18,40 +17,54 @@ def get_app_dir():
 APP_DIR = get_app_dir()
 APP_CONFIG_PATH = APP_DIR / "app_config.json"
 
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
 THESIS_DIR = Path.home() / "theses"
 
-MODEL_PATH = Path.home() / "models" / "gemma3_12b" / "google_gemma-3-12b-it-Q4_K_M.gguf"
-N_GPU_LAYERS = 25
-LLAVA_MODEL_PATH = Path.home() / "models" / "llava-v1.6-mistral-7b.Q4_K_M.gguf"
-LLAVA_MMPROJ_PATH = Path.home() / "models" / "mmproj-model-f16.gguf"
-THESIS_PATH = THESIS_DIR / "jost2.pdf"
-LANGUAGE = "en"
-
-
-def load_app_config():
+def ensure_and_load_config():
     """
-    Load app_config.json from the application directory.
+    Sprawdza, czy app_config.json istnieje. 
+    Jeśli go nie ma, tworzy domyślny plik konfiguracyjny z bazowymi ustawieniami.
+    Następnie wczytuje i zwraca zawartość słownika JSON.
     """
     if not APP_CONFIG_PATH.exists():
-        raise FileNotFoundError(f"Missing app_config.json: {APP_CONFIG_PATH}")
+        default_config = {
+            "device": "cuda",
+            "n_gpu_layers": 25,
+            "model_dir": str(Path.home() / "models"),
+            "language": "pl",
+            "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
+            "thesis_path": str(THESIS_DIR / "jost2.pdf"),
+            "output_dir": str(APP_DIR / "output")
+        }
+        try:
+            APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with APP_CONFIG_PATH.open("w", encoding="utf-8") as file:
+                json.dump(default_config, file, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"[CONFIG] Nie udało się utworzyć domyślnego app_config.json: {e}")
 
-    with APP_CONFIG_PATH.open("r", encoding="utf-8") as file:
-        config = json.load(file)
+    try:
+        with APP_CONFIG_PATH.open("r", encoding="utf-8") as file:
+            config = json.load(file)
+            if isinstance(config, dict):
+                return config
+    except Exception as e:
+        print(f"[CONFIG] Błąd odczytu app_config.json: {e}")
 
-    if not isinstance(config, dict):
-        raise ValueError("app_config.json must contain a JSON object.")
+    return {
+        "device": "cuda",
+        "n_gpu_layers": 25,
+        "model_dir": str(Path.home() / "models"),
+        "language": "pl"
+    }
 
-    return config
+_CONFIG = ensure_and_load_config()
 
-_CONFIG = load_app_config()
-
-DEVICE = str(_CONFIG["device"]).lower().strip()
-N_GPU_LAYERS = int(_CONFIG["n_gpu_layers"])
+DEVICE = str(_CONFIG.get("device", "cuda")).lower().strip()
+N_GPU_LAYERS = int(_CONFIG.get("n_gpu_layers", 25))
 
 print("[CONFIG] N_GPU_LAYERS =", N_GPU_LAYERS)
 
-MODEL_DIR = Path(str(_CONFIG["model_dir"])).expanduser()
+MODEL_DIR = Path(str(_CONFIG.get("model_dir", Path.home() / "models"))).expanduser()
 LANGUAGE = str(_CONFIG.get("language", "pl")).lower().strip()
 
 MODEL_PATH = MODEL_DIR / "gemma3_12b" / "google_gemma-3-12b-it-Q4_K_M.gguf"

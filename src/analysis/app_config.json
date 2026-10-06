@@ -1,0 +1,9 @@
+{
+  "device": "cuda",
+  "n_gpu_layers": 25,
+  "model_dir": "/home/natalia/models",
+  "language": "pl",
+  "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
+  "thesis_path": "/home/natalia/theses/jost2.pdf",
+  "output_dir": "/home/natalia/Desktop/app/src/analysis/output"
+}
