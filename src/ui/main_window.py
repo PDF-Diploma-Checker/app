@@ -52,7 +52,8 @@ from .start_page import StartPage
 from .saving_files import SavingFiles
 from . import styles
 from .analysis_dialog import AnalysisDialog
-
+from report_bug import send_report
+from log_window import LogWindow
 from PySide6.QtWidgets import QFrame
 from common.path import resource_path
 
