@@ -2,6 +2,10 @@ import re
 from .linguistics_types import Bibliography_context, Bib_item_context
 from .exeptions_check import check_quotes
 from .iso_and_bibtex_check import check_coherence_iso, check_bibtex
+import logging
+from collections import Counter
+
+logger = logging.getLogger(__name__)
 
 LINKER_KEYWORDS = {
     'a', 'an', 'the', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'but',
@@ -107,6 +111,7 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
     '''Uses only heuristics to match parts of each biblliography entry to its type, 
     quickly in fast mode. (authors, title, publisher, date, pages, volume, DOI, access date, URL).
     Fields are later passed to ISO check.'''
+    logger.info("Starting bibliography check (producer=%s, bibtex_check=%s)", producer, bibtex_check_bool)
     matches = []
     authors = bibliography_dict["people"].union(bibliography_dict["organizations"])
     bib_context = Bibliography_context(block_id=0)
@@ -196,9 +201,29 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
             for list_item in block.block.items:
                 bib_blocks[list_item.item_id] = block.block
 
+    logger.info("Parsed %d bibliography items", len(bib_context.items))
+    # Field statistics
+    items_with_authors = sum(1 for it in bib_context.items if it.authors)
+    items_with_title = sum(1 for it in bib_context.items if it.title)
+    items_with_date = sum(1 for it in bib_context.items if it.date)
+    items_with_url = sum(1 for it in bib_context.items if it.url)
+    items_with_doi = sum(1 for it in bib_context.items if it.doi)
+    items_with_publisher = sum(1 for it in bib_context.items if it.publisher)
+    items_with_pages = sum(1 for it in bib_context.items if it.pages)
+    logger.info("  Bib field stats: authors=%d, title=%d, date=%d, publisher=%d, pages=%d, url=%d, doi=%d",
+                items_with_authors, items_with_title, items_with_date, items_with_publisher, items_with_pages, items_with_url, items_with_doi)
+
     matches = check_coherence_iso(matches, bib_context, bib_blocks)
     if producer and re.search(r'latex|tex', producer, re.IGNORECASE) and bibtex_check_bool:
+        logger.info("LaTeX detected, running BibTeX check")
         matches = check_bibtex(matches, bib_context, bib_blocks)
+
+    cat_counts = Counter(m.category for m in matches)
+    logger.info("Bibliography check complete: %d matches", len(matches))
+    if not bib_context.items:
+        logger.warning("No bibliography items found to check.")
+    for cat, count in cat_counts.most_common():
+        logger.info("  Bib error type '%s': %d", cat, count)
     return matches
 
 def first_match(content, patterns):

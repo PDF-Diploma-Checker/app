@@ -1,11 +1,14 @@
 import json
 import re
+import logging
 from typing import Dict, Any, List
 from llama_cpp import Llama
 
 from config import MODEL_PATH, N_GPU_LAYERS
 
-CHUNK_SIZE = 2500 
+logger = logging.getLogger(__name__)
+
+CHUNK_SIZE = 2500
 
 _llm_instance = None
 
@@ -13,12 +16,17 @@ def get_llm():
     """Return LLM instance."""
     global _llm_instance
     if _llm_instance is None:
-        _llm_instance = Llama(
-            model_path=str(MODEL_PATH),
-            n_ctx=4096,
-            n_gpu_layers=N_GPU_LAYERS,
-            verbose=False
-        )
+        logger.info("Loading SOTA evaluation LLM from %s", MODEL_PATH)
+        try:
+            _llm_instance = Llama(
+                model_path=str(MODEL_PATH),
+                n_ctx=4096,
+                n_gpu_layers=N_GPU_LAYERS,
+                verbose=False
+            )
+        except Exception as e:
+            logger.exception("Failed to load SOTA evaluation LLM from %s", MODEL_PATH)
+            raise RuntimeError(f"Failed to load SOTA evaluation LLM from {MODEL_PATH}") from e
     return _llm_instance
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE) -> List[str]:
@@ -59,14 +67,16 @@ def ask_llm(prompt: str, content: str) -> bool:
             return bool(wynik)
             
         except json.JSONDecodeError:
-            print("  [Ostrzeżenie] Czyszczenie JSON nie pomogło, analizuję tekst regexem...")
+            logger.warning("LLM returned non-JSON response, falling back to regex parsing")
+            logger.info("  [Ostrzeżenie] Czyszczenie JSON nie pomogło, analizuję tekst regexem...")
             surowy_tekst = result_text.lower()
             if re.search(r'"wynik"\s*:\s*"?true"?', surowy_tekst) or re.search(r'wynik\s*:\s*"?true"?', surowy_tekst):
                 return True
             return False
-            
+
     except Exception as e:
-        print(f"Błąd krytyczny LLM: {e}")
+        logger.exception("Critical LLM error while evaluating chunk")
+        logger.info(f"Błąd krytyczny LLM: {e}")
         return False
 
 def evaluate_condition_over_chunks(prompt: str, chunks: List[str]) -> int:
@@ -113,6 +123,7 @@ def calculate_sota_percentage(score: int) -> int:
 def analyze_sota_chapter(chapter_title: str, content: str) -> Dict[str, Any]:
     """Return a complete SOTA assessment dictionary for a chapter."""
     if not content:
+        logger.error("No content provided for chapter: %s", chapter_title)
         raise ValueError(f"Nie przekazano treści dla rozdziału: {chapter_title}")
 
     chunks = chunk_text(content)
@@ -143,4 +154,5 @@ def free_sota_memory():
         _llm_instance = None
         import gc
         gc.collect()
-        print("[AI] Pamięć GPU po module SOTA została wyczyszczona.")
+        logger.info("SOTA module GPU memory released")
+        logger.info("[AI] Pamięć GPU po module SOTA została wyczyszczona.")

@@ -1,10 +1,14 @@
 import sys
 import os
 import json
+import logging
 from pathlib import Path
 import subprocess
 import spacy
 from huggingface_hub import hf_hub_download
+
+logger = logging.getLogger(__name__)
+
 
 def get_app_dir():
     if getattr(sys, "frozen", False):

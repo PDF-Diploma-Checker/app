@@ -1,6 +1,9 @@
 import sys
 import re
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Wymuszenie kodowania UTF-8 dla terminala Windows
 if sys.stdout.encoding != 'utf-8':
@@ -16,8 +19,8 @@ import config
 from reference_matcher import ReferenceMatcher
 
 def dump_diagnostics_to_file(pdf_path, output_filename="wynik_teksty.txt"):
-    print(f"Rozpoczynam zrzucanie tekstów dla pliku: {pdf_path}")
-    print(f"Trwa ekstrakcja... To może chwilę potrwać.")
+    logger.info(f"Rozpoczynam zrzucanie tekstów dla pliku: {pdf_path}")
+    logger.info(f"Trwa ekstrakcja... To może chwilę potrwać.")
     
     from analysis.extraction.extraction_json import extractPDF
     from analysis.extraction.converter_linguistics_clean import PDFMapper
@@ -57,6 +60,19 @@ def dump_diagnostics_to_file(pdf_path, output_filename="wynik_teksty.txt"):
     matcher = ReferenceMatcher()
 
     # Otwieramy plik z twardym wymuszeniem zapisu w UTF-8
+    try:
+        _dump_report(output_filename, unique_images, paragraphs, matcher)
+    except OSError:
+        logger.exception("Failed to write diagnostics report to %s", output_filename)
+        raise
+
+    logger.info(f"\nZAKOŃCZONO! Cały raport został bezpiecznie zapisany w pliku: {output_filename}")
+    logger.info("Możesz go teraz otworzyć w Notatniku lub VSC i dokładnie przeanalizować.")
+
+
+def _dump_report(output_filename, unique_images, paragraphs, matcher):
+    """Write the diagnostics report contents to output_filename."""
+
     with open(output_filename, 'w', encoding='utf-8') as f:
         f.write("==================================================\n")
         f.write("RAPORT DIAGNOSTYCZNY: ZAWARTOŚĆ TEKSTOWA\n")
@@ -102,9 +118,6 @@ def dump_diagnostics_to_file(pdf_path, output_filename="wynik_teksty.txt"):
         
         for i, para in enumerate(paragraphs):
             f.write(f"[Blok {i+1}]: {para}\n\n")
-
-    print(f"\n✅ ZAKOŃCZONO! Cały raport został bezpiecznie zapisany w pliku: {output_filename}")
-    print("Możesz go teraz otworzyć w Notatniku lub VSC i dokładnie przeanalizować.")
 
 if __name__ == "__main__":
     # Plik zapisze się w głównym folderze projektu (tam gdzie uruchamiasz komendę)

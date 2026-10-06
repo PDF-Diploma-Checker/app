@@ -85,6 +85,7 @@ class PDFReader(QMainWindow):
         self.manager = SavingFiles()
         self.own_comments = []
         self.document = QPdfDocument(self)
+        self._log_window = None
         
         self.stack = QStackedWidget()
         self.setCentralWidget(self.stack)
@@ -255,8 +256,28 @@ class PDFReader(QMainWindow):
         self.export_btn.setCursor(Qt.PointingHandCursor)
         self.export_btn.clicked.connect(self.export_pdf_with_annotations)
         l.addWidget(self.export_btn)
-        
+
+        self.report_btn = QPushButton("Zgłoś problem")
+        self.report_btn.setStyleSheet(styles.RED_BUTTON_STYLE)
+        self.report_btn.setCursor(Qt.PointingHandCursor)
+        self.report_btn.clicked.connect(lambda: send_report(self))
+        l.addWidget(self.report_btn)
+
+        self.logs_btn = QPushButton("Logi")
+        self.logs_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.logs_btn.setCursor(Qt.PointingHandCursor)
+        self.logs_btn.clicked.connect(self.show_log_window)
+        l.addWidget(self.logs_btn)
+
         return toolbar
+
+    def show_log_window(self):
+        """Show the live log window, creating it on first use."""
+        if self._log_window is None:
+            self._log_window = LogWindow(self)
+        self._log_window.show()
+        self._log_window.raise_()
+        self._log_window.activateWindow()
 
     def open_file_dialog(self):
         """Opens a native system file dialog filtered for PDF files, allowing the user 
