@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
 import styles
 from common.path import resource_path
+from settings import SettingsDialog  
 
 class PDFDropFrame(QFrame):
     """provides drag-and-drop capabilities specialized for filtering and accepting PDF files."""
@@ -85,6 +86,22 @@ class StartPage(QWidget):
         header_layout.addWidget(title)
         header_layout.addStretch()
 
+        self.settings_btn = QPushButton()
+        self.settings_btn.setFixedSize(36, 36)
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.setStyleSheet(styles.ICON_BUTTON_STYLE if hasattr(styles, 'ICON_BUTTON_STYLE') else "border: none; background: transparent;")
+        
+        settings_icon_path = resource_path(os.path.join("ui", "assets", "settings.svg"))
+        if os.path.exists(settings_icon_path):
+            self.settings_btn.setIcon(QIcon(settings_icon_path))
+            self.settings_btn.setIconSize(QSize(24, 24))
+        else:
+            self.settings_btn.setText("⚙️") 
+            self.settings_btn.setStyleSheet("font-size: 18px; border: none; background: transparent;")
+
+        self.settings_btn.clicked.connect(self.open_settings)
+        header_layout.addWidget(self.settings_btn)
+
         shadow = QGraphicsDropShadowEffect(self.header_frame)
         shadow.setBlurRadius(15)
         shadow.setColor(QColor(0, 0, 0, 30))
@@ -107,7 +124,6 @@ class StartPage(QWidget):
         up_layout.setSpacing(10)
         
         self.pdf_icon = QLabel()
-        
         icon_path = resource_path(os.path.join("ui", "assets", "pdf_file.svg"))
         
         if os.path.exists(icon_path):
@@ -183,13 +199,16 @@ class StartPage(QWidget):
         main_layout.addWidget(scroll_area)
         self.header_frame.raise_()
 
+    def open_settings(self):
+        """Otwiera okno dialogowe ustawień konfiguracyjnych"""
+        dialog = SettingsDialog(self)
+        dialog.exec()
+
     def on_search(self, text):
-        """Capture text inputs dynamically from searching filters, all to lowercase"""
         self.search_text = text.lower()
         self._apply_sort_and_render()
 
     def toggle_sort(self):
-        """Invert active horizontal ordering flags and update label text fields"""
         self.sort_newest = not self.sort_newest
         if self.sort_newest:
             self.sort_btn.setText("⇅ Sortuj od: najnowszego")
@@ -198,12 +217,10 @@ class StartPage(QWidget):
         self._apply_sort_and_render()
 
     def render_doc_list(self, pliki):
-        """docs from elements fetched from index systems."""
         self.all_files = pliki 
         self._apply_sort_and_render()
 
     def _apply_sort_and_render(self):
-        """Execute searching matches against active items array lists"""
         filtered = [p for p in self.all_files if self.search_text in p.get('file_name', '').lower()]
         filtered.sort(key=lambda x: (x.get('date_added', ''), x.get('file_name', '')), reverse=self.sort_newest)
 
@@ -222,9 +239,7 @@ class StartPage(QWidget):
         
         header_layout.addWidget(QLabel(""), 0)
         header_layout.addWidget(h_name)
-        
         header_layout.addStretch()
-        
         header_layout.addWidget(h_config)
         header_layout.addSpacing(80)
         header_layout.addWidget(h_date)
@@ -239,20 +254,19 @@ class StartPage(QWidget):
 
         for p in filtered:
             has_config = p.get('plik_konfiguracyjny', p.get('config_path') is not None or True) 
-
             self.add_row(
                 name=p.get('file_name', 'Nieznany'), 
                 path=p.get('local_path', ''), 
                 date=p.get('date_added', 'Brak daty'),
                 has_config=has_config
             )
+
     def add_row(self, name, path, date, has_config=True):
-        """layout components, icon, action, and state badges for a document row item"""
         row = QWidget()
         row_l = QHBoxLayout(row)
         row_l.setContentsMargins(5, 10, 5, 10)
         
-        icon_path =  resource_path(os.path.join("ui", "assets", "pdf_file.svg"))
+        icon_path = resource_path(os.path.join("ui", "assets", "pdf_file.svg"))
         if os.path.exists(icon_path):
             icon_widget = QSvgWidget(icon_path)
             icon_widget.setFixedSize(30, 36) 
@@ -291,45 +305,36 @@ class StartPage(QWidget):
 
         if has_config:
             badge.setStyleSheet(styles.BADGE_FRAME_SUCCESS)
-            
             icon_circle = QLabel()
             icon_circle.setAlignment(Qt.AlignCenter)
             icon_circle.setFixedSize(20, 20)
             
             tick_path = resource_path(os.path.join("ui", "assets", "tick.svg"))
             if os.path.exists(tick_path):
-                from PySide6.QtGui import QIcon
                 icon_circle.setPixmap(QIcon(tick_path).pixmap(QSize(12, 12)))
             else:
                 icon_circle.setText("✓")
                 
             icon_circle.setStyleSheet(styles.BADGE_ICON_SUCCESS)
-            
             text_lbl = QLabel("załączony")
             text_lbl.setStyleSheet(styles.BADGE_TEXT_DEFAULT)
-            
             badge_layout.addWidget(icon_circle)
             badge_layout.addWidget(text_lbl)
-            
         else:
             badge.setStyleSheet(styles.BADGE_FRAME_ERROR)
-            
             icon_circle = QLabel()
             icon_circle.setAlignment(Qt.AlignCenter)
             icon_circle.setFixedSize(20, 20)
             
-            cross_path =  resource_path(os.path.join("ui", "assets","cross.svg"))
+            cross_path = resource_path(os.path.join("ui", "assets","cross.svg"))
             if os.path.exists(cross_path):
-                from PySide6.QtGui import QIcon
                 icon_circle.setPixmap(QIcon(cross_path).pixmap(QSize(10, 10)))
             else:
                 icon_circle.setText("✕")
                 
             icon_circle.setStyleSheet(styles.BADGE_ICON_ERROR)
-            
             text_lbl = QLabel("brak")
             text_lbl.setStyleSheet(styles.BADGE_TEXT_ERROR)
-            
             badge_layout.addWidget(icon_circle)
             badge_layout.addWidget(text_lbl)
 
