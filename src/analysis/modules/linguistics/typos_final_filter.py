@@ -1,11 +1,14 @@
 import re
 from .language_error_extractor import typo_check
+import logging
+
+logger = logging.getLogger(__name__)
 
 def is_word_correct(word, language):
     if not word: return False
     return typo_check(word)
 
-def refine_typos(errors, blocks, output_json="typos.json"):
+def refine_typos(errors, blocks):
     '''
     Error post-processing. It sifts through typos and checks whether they cease to be errors when combined with adjacent words.
     '''
@@ -59,13 +62,16 @@ def refine_typos(errors, blocks, output_json="typos.json"):
                 resolved_word = merged_right
 
         if is_resolved:
-            typos_report["resolved_typos"].append({
+            resolved_info = {
                 "original_typo": typo_text,
                 "resolved_as": resolved_word,
                 "context": f"...{context_left}[{typo_text}]{context_right}...",
                 "language": lang
-            })
+            }
+            typos_report["resolved_typos"].append(resolved_info)
+            logger.debug("Resolved typo: '%s' -> '%s' (Context: %s)", typo_text, resolved_word, resolved_info["context"])
         else:
             final_errors.append(err)
 
+    logger.info("Typo refinement: %d resolved, %d kept", len(typos_report["resolved_typos"]), len(final_errors))
     return final_errors

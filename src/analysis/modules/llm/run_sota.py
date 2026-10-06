@@ -5,6 +5,9 @@ from find_sota import get_sota_chapter
 from evaluate_sota import analyze_sota_chapter, free_sota_memory
 from config import THESIS_PATH, LANGUAGE
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ChapterBlock:
@@ -74,10 +77,10 @@ def get_final_sota_report(mapped_doc, language: str = LANGUAGE):
     s_id, s_title, s_method, s_citations, s_content = get_sota_chapter(sota_blocks, language)
     
     if s_id:
-        print("\n--- DEBUG SOTA (CO WIDZI MODEL?) ---")
-        print(f"Długość tekstu przekazanego do Gemmy: {len(s_content)} znaków")
-        print(f"Początek tekstu:\n{s_content[:300]}...")
-        print("------------------------------------\n")
+        logger.info("\n--- DEBUG SOTA (CO WIDZI MODEL?) ---")
+        logger.info(f"Długość tekstu przekazanego do Gemmy: {len(s_content)} znaków")
+        logger.info(f"Początek tekstu:\n{s_content[:300]}...")
+        logger.info("------------------------------------\n")
 
     if not s_id:
         return None, None, 0, "Brak", 0, False, False, False
@@ -91,7 +94,8 @@ def get_final_sota_report(mapped_doc, language: str = LANGUAGE):
         r3 = bool(ocena_data["r3"])
         
     except Exception as e:
-        print(f"Błąd analizy SOTA: {e}")
+        logger.exception("SOTA chapter analysis failed for chapter %r", s_title)
+        logger.info(f"Błąd analizy SOTA: {e}")
         s_score = 0
         r1 = r2 = r3 = False
     finally:
@@ -103,7 +107,7 @@ def get_final_sota_report(mapped_doc, language: str = LANGUAGE):
 def main():
     """Execute a standalone SOTA analysis run for the configured thesis file."""
 
-    print(f"Rozpoczynam testową analizę z konfiguracji: {THESIS_PATH}")
+    logger.info(f"Rozpoczynam testową analizę z konfiguracji: {THESIS_PATH}")
     
     import sys
     import os
@@ -124,16 +128,16 @@ def main():
     end_time = time.time() 
     elapsed_time = int(end_time - start_time)
 
-    print("\n" + "="*50)
-    print(f"CZAS WYKONANIA: {elapsed_time // 60} min {elapsed_time % 60} sek.")
-    print("="*50)
+    logger.info("\n" + "="*50)
+    logger.info(f"CZAS WYKONANIA: {elapsed_time // 60} min {elapsed_time % 60} sek.")
+    logger.info("="*50)
 
-    print("\n--- WYNIKI ---")
-    print(f"ID: {res_id}")
-    print(f"Tytuł: {res_title}")
-    print(f"Wynik: {res_score}%")
-    print(f"Podstawa wyboru: {res_method}")
-    print(f"R1: {r1}, R2: {r2}, R3: {r3}")
+    logger.info(f"\n--- WYNIKI ---")
+    logger.info(f"ID: {res_id}")
+    logger.info(f"Tytuł: {res_title}")
+    logger.info(f"Wynik: {res_score}%")
+    logger.info(f"Podstawa wyboru: {res_method}")
+    logger.info(f"R1: {r1}, R2: {r2}, R3: {r3}")
 
 
 if __name__ == "__main__":

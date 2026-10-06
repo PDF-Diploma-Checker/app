@@ -2,6 +2,7 @@ import sys
 import json
 import time
 import traceback
+import logging
 from pathlib import Path
 from datetime import datetime
 
@@ -48,6 +49,8 @@ from analysis.modules.llm.get_summary import (
 from analysis.modules.llm.goal_realization import (
     check_goal_realization,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def save_result_txt(
@@ -106,7 +109,11 @@ def save_result_txt(
     lines.append(json.dumps(purpose_realization_result, ensure_ascii=False, indent=2))
     lines.append("")
 
-    output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    try:
+        output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except OSError:
+        logger.exception("Failed to write result report to %s", output_path)
+        raise
 
 
 def save_error_txt(output_path, pdf_path, error_message):
@@ -123,14 +130,18 @@ def save_error_txt(output_path, pdf_path, error_message):
     lines.append("TREŚĆ BŁĘDU:")
     lines.append(error_message)
 
-    output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    try:
+        output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except OSError:
+        logger.exception("Failed to write error report to %s", output_path)
+        raise
 
 
 def process_single_pdf(pdf_path):
     start = time.perf_counter()
 
-    print("=" * 100)
-    print(f"Przetwarzanie: {pdf_path.name}")
+    logger.info("=" * 100)
+    logger.info(f"Przetwarzanie: {pdf_path.name}")
 
     output_path = RESULTS_DIR / f"result_{pdf_path.stem}.txt"
 
@@ -178,12 +189,14 @@ def process_single_pdf(pdf_path):
             elapsed_time=elapsed_time,
         )
 
-        print(f"Zapisano wynik: {output_path}")
-        print(f"Czas: {elapsed_time:.2f} s")
+        logger.info(f"Zapisano wynik: {output_path}")
+        logger.info(f"Czas: {elapsed_time:.2f} s")
 
     except Exception:
         elapsed_time = time.perf_counter() - start
         error_message = traceback.format_exc()
+
+        logger.exception("Analysis failed for %s", pdf_path.name)
 
         save_error_txt(
             output_path=output_path,
@@ -191,23 +204,25 @@ def process_single_pdf(pdf_path):
             error_message=error_message,
         )
 
-        print(f"Błąd dla pliku: {pdf_path.name}")
-        print(f"Zapisano błąd do: {output_path}")
-        print(f"Czas do błędu: {elapsed_time:.2f} s")
+        logger.info(f"Błąd dla pliku: {pdf_path.name}")
+        logger.info(f"Zapisano błąd do: {output_path}")
+        logger.info(f"Czas do błędu: {elapsed_time:.2f} s")
 
 
 def main():
-    print(f"PROJECT_ROOT: {PROJECT_ROOT}")
-    print(f"DATA_DIR: {DATA_DIR}")
-    print(f"RESULTS_DIR: {RESULTS_DIR}")
-    print("")
+    logger.info(f"PROJECT_ROOT: {PROJECT_ROOT}")
+    logger.info(f"DATA_DIR: {DATA_DIR}")
+    logger.info(f"RESULTS_DIR: {RESULTS_DIR}")
+    logger.info("")
 
     if not DATA_DIR.exists():
-        print(f"Błąd: folder data nie istnieje: {DATA_DIR}")
+        logger.error("Data directory does not exist: %s", DATA_DIR)
+        logger.info(f"Błąd: folder data nie istnieje: {DATA_DIR}")
         return
 
     if not MODEL_PATH.exists():
-        print(f"Błąd: model LLM nie istnieje: {MODEL_PATH}")
+        logger.error("LLM model does not exist: %s", MODEL_PATH)
+        logger.info(f"Błąd: model LLM nie istnieje: {MODEL_PATH}")
         return
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -215,11 +230,11 @@ def main():
     pdf_files = sorted(DATA_DIR.glob("*.pdf"))
 
     if not pdf_files:
-        print(f"Brak plików PDF w folderze: {DATA_DIR}")
+        logger.info(f"Brak plików PDF w folderze: {DATA_DIR}")
         return
 
-    print(f"Znaleziono {len(pdf_files)} plików PDF.")
-    print("")
+    logger.info(f"Znaleziono {len(pdf_files)} plików PDF.")
+    logger.info("")
 
     global_start = time.perf_counter()
 
@@ -228,10 +243,10 @@ def main():
 
     global_elapsed = time.perf_counter() - global_start
 
-    print("=" * 100)
-    print("Zakończono analizę wszystkich prac.")
-    print(f"Folder wyników: {RESULTS_DIR}")
-    print(f"Łączny czas działania: {global_elapsed:.2f} s")
+    logger.info("=" * 100)
+    logger.info("Zakończono analizę wszystkich prac.")
+    logger.info(f"Folder wyników: {RESULTS_DIR}")
+    logger.info(f"Łączny czas działania: {global_elapsed:.2f} s")
 
 
 if __name__ == "__main__":

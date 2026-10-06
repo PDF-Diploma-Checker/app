@@ -242,7 +242,6 @@ def parse_text_block(
         )
         clean_block = post_process_block(output_block)
         # clean_block = output_block
-        logging.info(f"Successfully parsed text block {raw_block.get('number', 'unknown')}.")
         return clean_block, prev_bottomline, current_span_id
 
     except Exception as e:

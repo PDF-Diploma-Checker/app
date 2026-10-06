@@ -3,6 +3,7 @@ import json
 import re
 import gc
 import base64
+import logging
 from pathlib import Path
 from llama_cpp import Llama
 from llama_cpp.llama_chat_format import Llava15ChatHandler
@@ -12,6 +13,9 @@ sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
 from analysis.modules.llm import config
+
+logger = logging.getLogger(__name__)
+
 
 def extract_images_for_fonts(doc_obj, mapped_doc):
     """Extract real figure images and captions, filtering out text-only references."""
@@ -30,16 +34,22 @@ def extract_images_for_fonts(doc_obj, mapped_doc):
                         unique_images[found_id] = {"desc": desc, "bytes": None}
                         img_path = Path(getattr(img, "path", ""))
                         if img_path.exists():
-                            with open(img_path, "rb") as f:
-                                unique_images[found_id]["bytes"] = f.read()
+                            try:
+                                with open(img_path, "rb") as f:
+                                    unique_images[found_id]["bytes"] = f.read()
+                            except OSError:
+                                logger.exception("Failed to read image file %s", img_path)
                     else:
                         old_desc = unique_images[found_id]["desc"]
                         if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
                             unique_images[found_id]["desc"] = desc
                             img_path = Path(getattr(img, "path", ""))
                             if img_path.exists():
-                                with open(img_path, "rb") as f:
-                                    unique_images[found_id]["bytes"] = f.read()
+                                try:
+                                    with open(img_path, "rb") as f:
+                                        unique_images[found_id]["bytes"] = f.read()
+                                except OSError:
+                                    logger.exception("Failed to read image file %s", img_path)
                         
     images = [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
     return images
@@ -47,15 +57,20 @@ def extract_images_for_fonts(doc_obj, mapped_doc):
 class LlavaFontEngine:
     """LLaVA-based engine for single-image font consistency checks."""
     def __init__(self, model_path=str(config.LLAVA_MODEL_PATH), mmproj_path=str(config.LLAVA_MMPROJ_PATH)):
-        self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-        self.llm = Llama(
-            model_path=model_path,
-            chat_handler=self.chat_handler,
-            n_ctx=4096,
-            n_gpu_layers=config.N_GPU_LAYERS,
-            logits_all=True,
-            verbose=False 
-        )
+        logger.info("Loading font-consistency LLaVA model from %s", model_path)
+        try:
+            self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
+            self.llm = Llama(
+                model_path=model_path,
+                chat_handler=self.chat_handler,
+                n_ctx=4096,
+                n_gpu_layers=config.N_GPU_LAYERS,
+                logits_all=True,
+                verbose=False
+            )
+        except Exception as e:
+            logger.exception("Failed to load font-consistency LLaVA model from %s", model_path)
+            raise RuntimeError(f"Failed to load font-consistency LLaVA model from {model_path}") from e
 
     def check_font_consistency(self, image_bytes):
         """Return whether font sizes in an image appear visually consistent."""
@@ -91,6 +106,7 @@ class LlavaFontEngine:
                 return {"consistent": True, "reason": f"Niejednoznaczna odpowiedź AI: {result_text}. Domyślnie zaakceptowano."}
                 
         except Exception as e:
+            logger.exception("Font consistency check inference failed")
             return {"consistent": False, "reason": f"Błąd przetwarzania AI: {str(e)}"}
 
 def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
@@ -101,12 +117,12 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
     if not images:
         return bad_fonts_report
 
-    if verbose: print("\n[AI] Ładowanie modelu wizyjnego LLaVA (Spójność Czcionek) do VRAM...")
+    if verbose: logger.info(f"\n[AI] Ładowanie modelu wizyjnego LLaVA (Spójność Czcionek) do VRAM...")
     
     llava = LlavaFontEngine()
     
     for idx, img in enumerate(images, 1):
-        if verbose: print(f"[{idx}/{len(images)}] LLaVA weryfikuje czcionki Rysunku {img['id']}...")
+        if verbose: logger.info(f"[{idx}/{len(images)}] LLaVA weryfikuje czcionki Rysunku {img['id']}...")
         
         assessment = llava.check_font_consistency(img["bytes"])
         
@@ -118,7 +134,7 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
                 "szczegoly_ai": assessment.get("reason", "Model AI zauważył drastyczne różnice w wielkościach tekstu.")
             })
             
-    if verbose: print("[AI] Zwalniam VRAM po analizie czcionek...")
+    if verbose: logger.info(f"[AI] Zwalniam VRAM po analizie czcionek...")
     del llava
     gc.collect()
     
@@ -130,7 +146,7 @@ if __name__ == "__main__":
     from analysis.extraction.main_extractor import extractPDF
     from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
     
-    print("MODUŁ: SPÓJNOŚĆ CZCIONEK NA OBRAZKACH")
+    logger.info("MODUŁ: SPÓJNOŚĆ CZCIONEK NA OBRAZKACH")
     
     start_time = time.time()
     
@@ -140,9 +156,9 @@ if __name__ == "__main__":
     raport_czcionek = get_font_consistency_report(doc_obj, mapped_doc, verbose=True)
     
     end_time = time.time()
-    print(f"CZAS WYKONANIA: {int(end_time - start_time)} sek.")
-    print("--- RAPORT NIESPÓJNYCH CZCIONEK ---")
+    logger.info(f"CZAS WYKONANIA: {int(end_time - start_time)} sek.")
+    logger.info("--- RAPORT NIESPÓJNYCH CZCIONEK ---")
     if not raport_czcionek:
-        print(json.dumps({"status": "Wszystkie obrazki mają piękne i spójne czcionki!"}, indent=4, ensure_ascii=False))
+        logger.info(json.dumps({"status": "Wszystkie obrazki mają piękne i spójne czcionki!"}, indent=4, ensure_ascii=False))
     else:
-        print(json.dumps(raport_czcionek, indent=4, ensure_ascii=False))
+        logger.info(json.dumps(raport_czcionek, indent=4, ensure_ascii=False))

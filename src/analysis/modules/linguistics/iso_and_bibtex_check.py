@@ -1,6 +1,9 @@
 from .helpers import add_match
 import re
 from collections import Counter 
+import logging
+
+logger = logging.getLogger(__name__)
 
 def check_item_words(matches, item, block, category, message, content):
     """
@@ -226,6 +229,7 @@ def check_bibtex(matches, Bib_context, bib_blocks):
                 msg = f"{messages['MISSING_BIBTEX_FIELD']} ({item.bibtex_type}: {', '.join(missing)})"
                 matches = check_item_words(matches, item, block, "MISSING_BIBTEX_FIELD", msg, item.content)
 
+    logger.info("BibTeX check complete: %d matches found", len(matches))
     return matches
 
 def check_item(matches, item, block):
@@ -449,4 +453,6 @@ def check_coherence_iso(matches, Bib_context, bib_blocks):
         if getattr(item, 'date_position', None) and t in dominant_date_pos and not getattr(item, 'online', False):
             if item.date_position != dominant_date_pos[t]:
                 matches = check_item_words(matches, item, block, "DATE_POSITION_COHERENCE", messages["DATE_POSITION_COHERENCE"], item.content)
+
+    logger.info("ISO coherence check complete: %d matches found", len(matches))
     return matches

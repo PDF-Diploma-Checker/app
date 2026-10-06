@@ -1,5 +1,8 @@
 from .helpers import nlp_pl, nlp_en
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 NLP_MODELS: dict = {
     "pl": nlp_pl,
@@ -31,6 +34,8 @@ def check_item(full_text, last_item, second_to_last, text_language, sentence_sty
     """
     Validates a single list item based on linguistic rules, position, and dominant list style.
     """
+    logger.debug("Validating list item: text='%s', last_item=%s, second_to_last=%s, dominant_ending='%s'", 
+                 full_text, last_item, second_to_last, dominant_ending)
 
     strip_open = '\u201e\u00ab\u201c\u2018"'
     strip_close = '\u201d\u00bb\u201d\u2019"'

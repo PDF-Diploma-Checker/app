@@ -5,7 +5,7 @@ import morfeusz2
 from lingua import Language, LanguageDetectorBuilder
 from analysis.extraction.linguistics_conversion.schema import *
 from .linguistics_types import Block_context, Error_type
-from collections import defaultdict
+from collections import defaultdict, Counter
 import functools
 import spacy
 from spacy.language import Language as Spacy_language
@@ -14,6 +14,9 @@ from common.path import resource_path
 import sys
 import re
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 os.environ["TQDM_DISABLE"] = "True"
 app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
@@ -55,26 +58,35 @@ def get_nlp(model_name):
     resolves the model from an absolute path under the bundle (_internal or the bundle root), descending
     into a subdirectory if needed to find config.cfg; otherwise it loads the model by name. Returns the
     loaded spaCy Language pipeline.'''
-    if getattr(sys, 'frozen', False):
-        base_path = Path(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))).resolve()
-        
-        model_path = base_path / "_internal" / model_name
-        if not model_path.exists():
-            model_path = base_path / model_name
+    logger.info("Loading spaCy model '%s'", model_name)
+    try:
+        if getattr(sys, 'frozen', False):
+            base_path = Path(getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))).resolve()
+            
+            model_path = base_path / "_internal" / model_name
+            if not model_path.exists():
+                model_path = base_path / model_name
 
-        if model_path.exists():
-            config_path = model_path / "config.cfg"
-            if not config_path.exists():
-                subdirs = [d for d in model_path.iterdir() if d.is_dir()]
-                for subdir in subdirs:
-                    if (subdir / "config.cfg").exists():
-                        model_path = subdir
-                        break
-            
-            print(f"[SPA CY] Ładowanie modelu z absolutnej ścieżki: {model_path.resolve()}")
-            return spacy.load(model_path.resolve())
-            
-    return spacy.load(model_name)
+            if model_path.exists():
+                config_path = model_path / "config.cfg"
+                if not config_path.exists():
+                    subdirs = [d for d in model_path.iterdir() if d.is_dir()]
+                    for subdir in subdirs:
+                        if (subdir / "config.cfg").exists():
+                            model_path = subdir
+                            break
+                
+                logger.info("Loading spaCy model from absolute path: %s", model_path.resolve())
+                nlp = spacy.load(model_path.resolve())
+                logger.info("spaCy model '%s' loaded successfully", model_name)
+                return nlp
+                
+        nlp = spacy.load(model_name)
+        logger.info("spaCy model '%s' loaded successfully", model_name)
+        return nlp
+    except Exception as e:
+        logger.exception("Failed to load spaCy model '%s'", model_name)
+        raise
 
 nlp_pl = get_nlp("pl_core_news_lg")
 nlp_pl.add_pipe("sentencizer", before="parser")
@@ -172,6 +184,7 @@ def get_match_info(block, offset, length):
 
 def extract_errors_to_json(matches, name):
     '''Helper function used for debugging, extracts structures to JSON file, and saves in in linguistics folder.'''
+    logger.debug("Saving debug JSON to '%s'", name)
     if type(matches) is list:
         all_matches = []
         for match in matches:
@@ -182,11 +195,16 @@ def extract_errors_to_json(matches, name):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(all_matches, f, ensure_ascii=False, indent=4)
+    logger.debug("Debug JSON saved to '%s'", output_path)
 
 
 def get_context(blocks):
     '''Adds another structure on top of extactions FinalDocument, to include raw string content and language of each block.'''
+    logger.info("Building block context")
     blocks_info = []
+    block_type_counts = Counter()
+    language_counts = Counter()
+    skipped_title_pages = 0
     for block in blocks.logical_blocks:
         if not block.words:
             continue
@@ -197,13 +215,24 @@ def get_context(blocks):
                 contents = " ".join(item.text for item in block.items if item.text)
             else:
                 continue
+            block_lang = language(contents)
             block_info = Block_context(
                 block = block,
                 contents = contents,
-                language = language(contents),
+                language = block_lang,
             )
             blocks_info.append(block_info)
+            block_type_counts[block.type] += 1
+            language_counts[block_lang] += 1
+        else:
+            skipped_title_pages += 1
         
+    logger.info("Context built: %d blocks (skipped %d title page blocks)",
+                len(blocks_info), skipped_title_pages)
+    for btype, count in block_type_counts.most_common():
+        logger.info("  Block type '%s': %d", btype, count)
+    for lang, count in language_counts.most_common():
+        logger.info("  Language '%s': %d blocks", lang, count)
     return blocks_info
 
 def add_match(content, block_id, page_start, page_end, word_idxs, error_coordinate, category, message):

@@ -1,6 +1,7 @@
 """Extract and clean the main thesis purpose from full thesis text."""
 
 import sys
+import logging
 from pathlib import Path
 import requests
 from llama_cpp import Llama
@@ -17,6 +18,7 @@ for p in (PROJECT_ROOT, SRC_DIR):
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 from analysis.modules.llm.config import MODEL_PATH, LANGUAGE, THESIS_PATH, N_GPU_LAYERS
 
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = str(MODEL_PATH)
 
@@ -164,24 +166,29 @@ _LLAMA_MODELS = {}
 
 
 def print_if_main(*args, **kwargs):
-    """Print only when this file is run as a script."""
+    """Log output only when this file is run as a script."""
 
-    if _IS_MAIN_SCRIPT:
-        print(*args, **kwargs)
+    if _IS_MAIN_SCRIPT and args:
+        logger.info(" ".join(str(a) for a in args))
 
 
 def ask_model(model_name, prompt, num_predict=120):
     """Send a prompt to the LLM and return plain text response."""
 
     if model_name not in _LLAMA_MODELS:
-        _LLAMA_MODELS[model_name] = Llama(
-            model_path=model_name,
-            n_ctx=N_CTX,
-            n_threads=N_THREADS,
-            n_gpu_layers=N_GPU_LAYERS,
-            chat_format="gemma",
-            verbose=False,
-        )
+        logger.info("Loading purpose-extraction LLM from %s", model_name)
+        try:
+            _LLAMA_MODELS[model_name] = Llama(
+                model_path=model_name,
+                n_ctx=N_CTX,
+                n_threads=N_THREADS,
+                n_gpu_layers=N_GPU_LAYERS,
+                chat_format="gemma",
+                verbose=False,
+            )
+        except Exception as e:
+            logger.exception("Failed to load LLM from %s", model_name)
+            raise RuntimeError(f"Failed to load LLM from {model_name}") from e
 
     llm = _LLAMA_MODELS[model_name]
 
@@ -434,23 +441,27 @@ def get_purpose(full_text, language):
         return clean_goal
 
     except requests.exceptions.ReadTimeout:
+        logger.exception("Model response timed out while extracting thesis purpose")
         if language == "pl":
             return "Błąd: model nie odpowiedział na czas."
         return "Error: model response timed out."
 
     except requests.exceptions.ConnectionError:
+        logger.exception("Could not connect to model while extracting thesis purpose")
         if language == "pl":
             return "Błąd: nie udało się połączyć z modelem."
         return "Error: could not connect to model."
 
     except requests.exceptions.HTTPError as e:
         details = e.response.text if e.response is not None else ""
+        logger.exception("HTTP error while extracting thesis purpose")
 
         if language == "pl":
             return f"Błąd HTTP: {e}. Szczegóły: {details}"
         return f"HTTP error: {e}. Details: {details}"
 
     except Exception as e:
+        logger.exception("Unexpected error while extracting thesis purpose")
         if language == "pl":
             return f"Błąd: {e}"
         return f"Error: {e}"
@@ -462,8 +473,8 @@ def main():
     full_text = get_plain_text(THESIS_PATH)
     result = get_purpose(full_text, LANGUAGE)
 
-    print("WYNIK KOŃCOWY:")
-    print(result)
+    logger.info("WYNIK KOŃCOWY:")
+    logger.info(result)
 
 
 if __name__ == "__main__":

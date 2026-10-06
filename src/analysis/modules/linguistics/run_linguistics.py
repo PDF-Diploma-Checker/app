@@ -14,6 +14,10 @@ from analysis.extraction.linguistics_conversion.converter_linguistics_clean impo
 import json
 from common.path import resource_path
 import os
+from collections import Counter
+import logging
+
+logger = logging.getLogger(__name__)
 
 def remove_errors_inside_images(matches, raw_blocks):
     '''Excludes matches found on images bboxes.'''
@@ -44,27 +48,34 @@ def remove_errors_inside_images(matches, raw_blocks):
 def run_linguistics(raw_blocks, config_path=None):
     '''Starting point of linguistic analysis. This function runs all of the linguistics functions,
       returns matches list and senetence analysis statistics.'''
+    
+    logger.info("Starting linguistic analysis")
     check_first_person = True
     check_bibtex = True
     if config_path:
+        logger.info("Loading linguistics config from: %s", config_path)
         try:
             with open(config_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if data["sprawdzanie_formy_osobowej"].lower() not in ["tak", "nie"]:
-                print("błędne sprawdzanie formy osobowej, oczekiwano 'tak' lub 'nie'")
+                logger.warning("Invalid 'check_first_person' value, expected 'yes' or 'no'")
             else:
                 check_first_person = data["sprawdzanie_formy_osobowej"].lower() == "tak"
             if data["sprawdzanie_wg_bibtex"].lower() not in ["tak", "nie"]:
-                print("błędne sprawdzanie bibtex, oczekiwano 'tak' lub 'nie'")
+                logger.warning("Invalid 'check_bibtex' value, expected 'yes' or 'no'")
             else:
                 check_bibtex = data["sprawdzanie_wg_bibtex"].lower() == "tak"
         except KeyError:
-            print("Brak pola w konfiguracji lingwistyki.")
+            logger.warning("Missing field in linguistics config")
         except ValueError as e:
-            print(f"niepoprawny typ danych w konfiguracji lingwistyki: {e}")
+            logger.warning("Invalid data type in linguistics config: %s", e)
+    logger.info("Config: check_first_person=%s, check_bibtex=%s", check_first_person, check_bibtex)
+
     blocks = get_context(raw_blocks)
     # extract_errors_to_json(blocks, "document.json")
     chapter_nums = extract_chapter_numbers(blocks)
+    logger.info("Extracted %d chapter numbers", len(chapter_nums))
+
     extracted_acronyms = raw_blocks.reference_sections.acronyms
     proper_names, bibliography_dict = get_proper_names(blocks)
     bib_matches = check_bibliography(blocks, raw_blocks.metadata["producer"], bibliography_dict, bibtex_check_bool = check_bibtex)
@@ -74,22 +85,32 @@ def run_linguistics(raw_blocks, config_path=None):
     dash_matches = dash_check(blocks)
     language_matches = language_tool_analisys(blocks)
     list_matches = check_coherence_in_list(blocks, proper_names, acronyms_with_definitions)
+
     main_font = raw_blocks.metadata.get("main_font")
     checked_exeptions = check_exeptions(language_matches, blocks, proper_names, main_font)
     language_style_matches, sentence_analisys = sentence_check(blocks, check_first_person=check_first_person, acronyms_with_definitions=acronyms_with_definitions, chapter_nums=chapter_nums)
+
     matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + bib_matches
+    before_image_filter = len(matches)
     matches = remove_errors_inside_images(matches, raw_blocks)
+    logger.info("Image overlap filter removed %d matches", before_image_filter - len(matches))
+
+    category_counts = Counter(m.category for m in matches)
+    logger.info("Linguistic analysis complete: %d total matches", len(matches))
+    for cat, count in category_counts.most_common():
+        logger.info("  Category '%s': %d", cat, count)
+
     return matches, sentence_analisys
 
 #plik pomocniczy do uruchamiania analizy bez GUI
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     pdf_file = resource_path(os.path.join("analysis", "modules", "linguistics", "jabi.pdf"))
     try:
         document = extractPDF(str(pdf_file))
         mapper = PDFMapper()
         raw_blocks = mapper.map_to_schema(document)
-        extracted_acronyms = raw_blocks.reference_sections.acronyms
     except AttributeError:
-        print("Ekstrakcja zakończyła się niepowodzeniem.")
+        logger.exception("Extraction failed")
     else:
         matches = run_linguistics(raw_blocks)

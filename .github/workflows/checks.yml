@@ -1,0 +1,40 @@
+name: checks
+
+on:
+  pull_request:
+
+jobs:
+  ruff:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: ruff check
+        run: uvx ruff check --select E9,F63,F7,F82 src
+
+  compile:
+    name: compileall
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      - name: compileall
+        run: uv run --no-project python -m compileall -q src
+
+  lockfile:
+    name: uv.lock up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: uv lock --check
+        run: uv lock --check

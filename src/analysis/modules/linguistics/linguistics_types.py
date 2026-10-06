@@ -4,6 +4,9 @@ Definitions of dataclasses used in the linguistic module
 from dataclasses import dataclass, field
 from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, ListBlock
 from typing import Union, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 @dataclass
 class Error_type:
     content: str

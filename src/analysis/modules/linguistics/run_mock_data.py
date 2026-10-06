@@ -9,7 +9,7 @@ from .exeptions_check import *
 from .list_check import check_coherence_in_list
 from .sentence_check import *
 from .proper_names import get_proper_names
-from .helpers import extract_errors_to_json, get_context
+from .helpers import extract_errors_to_json, get_context, extract_chapter_numbers
 from .first_definition import check_first_definition
 from .check_acronym import check_if_was_defined
 from .bibliography_check import check_bibliography
@@ -17,6 +17,9 @@ from analysis.extraction.main_extractor import extractPDF
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 from common.path import resource_path
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 def run_linguistics(raw_blocks, extracted_acronyms):
     blocks = get_context(raw_blocks)
@@ -42,8 +45,8 @@ if __name__ == "__main__":
         mapper = PDFMapper()
         raw_blocks = mapper.map_to_schema(document)
         extracted_acronyms = raw_blocks.reference_sections.acronyms
-    except AttributeError:
-        print("Ekstrakcja zakończyła się niepowodzeniem.")
+    except AttributeError as e:
+        logger.exception("Ekstrakcja zakończyła się niepowodzeniem.")
     else:
         extract_errors_to_json(raw_blocks, "final_document_raw.json")
         matches = run_linguistics(raw_blocks, extracted_acronyms)

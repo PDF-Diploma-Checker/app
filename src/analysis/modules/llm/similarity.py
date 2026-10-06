@@ -2,6 +2,7 @@
 
 import sys
 import os
+import logging
 from pathlib import Path
 from datetime import datetime
 
@@ -22,6 +23,8 @@ from analysis.modules.llm.get_subtitles import extract_subtitles_from_pdf
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_summary import summarize_subtitles
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, OUTPUT_DIR, LANGUAGE, N_GPU_LAYERS
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_text(text):
@@ -87,23 +90,29 @@ def compute_similarity_for_summaries(purpose, summaries, embedding_model=EMBEDDI
     use_cuda = (N_GPU_LAYERS != 0) and torch.cuda.is_available()
     device = "cuda" if use_cuda else "cpu"
 
-    model = SentenceTransformer(
-        embedding_model,
-        trust_remote_code=True,
-        device=device,
-    )
+    logger.info("Loading embedding model %s on device %s", embedding_model, device)
 
-    purpose_embedding = model.encode(
-        [get_purpose_text_for_embedding(purpose)],
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    )
+    try:
+        model = SentenceTransformer(
+            embedding_model,
+            trust_remote_code=True,
+            device=device,
+        )
 
-    text_embeddings = model.encode(
-        texts,
-        convert_to_numpy=True,
-        normalize_embeddings=True,
-    )
+        purpose_embedding = model.encode(
+            [get_purpose_text_for_embedding(purpose)],
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+
+        text_embeddings = model.encode(
+            texts,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+    except Exception as e:
+        logger.exception("Embedding computation failed using model %s", embedding_model)
+        raise RuntimeError(f"Embedding computation failed using model {embedding_model}") from e
 
     scores = cosine_similarity(purpose_embedding, text_embeddings).flatten()
 
@@ -150,7 +159,13 @@ def save_similarity_txt(pdf_path, result):
         lines.append("-" * 80)
         lines.append("")
 
-    output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    try:
+        output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+    except OSError as e:
+        logger.exception("Failed to write similarity report to %s", output_path)
+        raise RuntimeError(f"Failed to write similarity report to {output_path}") from e
+
+    logger.info("Similarity report written to %s", output_path)
     return output_path
 
 
@@ -161,13 +176,15 @@ def main():
     language = LANGUAGE
 
     if not pdf_path.exists():
-        print(f"Error: file does not exist: {pdf_path}")
+        logger.error("PDF file does not exist: %s", pdf_path)
+        logger.info(f"Error: file does not exist: {pdf_path}")
         return
 
     raw_doc = extractPDF_llm(str(pdf_path.resolve()))
 
     if raw_doc is None:
-        print("Error: extractPDF_llm returned None.")
+        logger.error("extractPDF_llm returned None for %s", pdf_path)
+        logger.info("Error: extractPDF_llm returned None.")
         return
 
     plain_text = get_plain_text(pdf_path)
@@ -179,7 +196,7 @@ def main():
     result = compute_similarity_for_summaries(purpose, summaries)
     output_path = save_similarity_txt(pdf_path, result)
 
-    print(f"Result saved to: {output_path}")
+    logger.info(f"Result saved to: {output_path}")
 
 
 if __name__ == "__main__":

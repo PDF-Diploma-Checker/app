@@ -2,6 +2,9 @@ import re
 import string
 from .helpers import language, lemmatization
 from .check_acronym import potential_acronym
+import logging
+
+logger = logging.getLogger(__name__)
 
 def initials_match(acronym, definition, proper_names, block = None):
     """
@@ -127,7 +130,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     """
     Scans document blocks to find and extract the first definitions of acronyms.
     """
-
+    logger.info("Starting first definition check")
     acronyms_with_definitions = {}
     bibliography_re = re.compile(r"^\[\d+\]")
     list_acronyms = re.compile(r'^[A-Z]{2,}\s+[\u2013\u2014\-\u2212:]\s|^((\S+\s){1,4})[\u2013\u2014\-\u2212:]\s')
@@ -246,5 +249,6 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                     if potential_acronym(acronym):
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions)
-    
+    logger.info("First definition check complete: %d acronyms with definitions found, %d proper names",
+                len(acronyms_with_definitions), len(proper_names))
     return acronyms_with_definitions, proper_names
