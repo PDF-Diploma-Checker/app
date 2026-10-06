@@ -10,7 +10,6 @@ from PySide6.QtGui import QPixmap, QIcon
 import styles
 
 from common.path import resource_path
-# Import funkcji sprawdzających i pobierających z Twojego pliku konfiguracyjnego
 from analysis.modules.llm.config import are_ai_models_downloaded, download_specific_language, download_ai_models_with_progress
 
 
@@ -214,7 +213,7 @@ class AnalysisDialog(QDialog):
         
         self.setup_ui()
 
-    def _check_gpu_vram(self):
+    def check_gpu_vram(self):
         try:
             import torch
             if torch.cuda.is_available():
@@ -327,7 +326,7 @@ class AnalysisDialog(QDialog):
         self.cb_images.setChecked(True)
         self.cb_images.setVisible(False)
 
-        gpu_name, vram_gb = self._check_gpu_vram()
+        gpu_name, vram_gb = self.check_gpu_vram()
         self.gpu_info_label = QLabel()
         self.gpu_info_label.setWordWrap(True)
         
@@ -354,13 +353,12 @@ class AnalysisDialog(QDialog):
         mode_section.addWidget(self.cb_images)
         mode_section.addWidget(self.gpu_info_label)
 
-        def _on_szybki_clicked():
+        def on_szybki_clicked():
             self.btn_dokladny.setChecked(False)
             self.cb_images.setVisible(False)
             self.gpu_info_label.setVisible(False)
             
-        def _on_dokladny_clicked():
-            # Sprawdzenie, czy modele AI są fizycznie obecne na dysku
+        def on_dokladny_clicked():
             if not are_ai_models_downloaded():
                 reply = QMessageBox.question(
                     self,
@@ -382,8 +380,8 @@ class AnalysisDialog(QDialog):
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
             
-        self.btn_szybki.clicked.connect(_on_szybki_clicked)
-        self.btn_dokladny.clicked.connect(_on_dokladny_clicked)
+        self.btn_szybki.clicked.connect(on_szybki_clicked)
+        self.btn_dokladny.clicked.connect(on_dokladny_clicked)
 
         config_layout.addLayout(mode_section)
         config_layout.addStretch(1)
@@ -405,7 +403,7 @@ class AnalysisDialog(QDialog):
         
         self.cancel_btn = QPushButton("Anuluj")
         self.cancel_btn.setStyleSheet(styles.DELETE_BTN_STYLE)
-        self.cancel_btn.clicked.connect(self._cancel_analysis)
+        self.cancel_btn.clicked.connect(self.cancel_analysis)
         
         progress_layout.addStretch()
         progress_layout.addWidget(self.progress_label)
@@ -417,28 +415,28 @@ class AnalysisDialog(QDialog):
 
         self.analyze_btn = QPushButton("Analizuj")
         self.analyze_btn.setStyleSheet(styles.ANALIZA_BTN_STYLE)
-        self.analyze_btn.clicked.connect(self._start_analysis)
+        self.analyze_btn.clicked.connect(self.start_analysis)
         self.main_layout.addWidget(self.analyze_btn)
 
-        self.add_json_btn.clicked.connect(self._open_file_dialog)
-        self.json_frame.fileDropped.connect(self._set_config_file)
+        self.add_json_btn.clicked.connect(self.open_file_dialog)
+        self.json_frame.fileDropped.connect(self.set_config_file)
 
-    def _open_file_dialog(self):
+    def open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz plik konfiguracyjny", "", "JSON Files (*.json)")
-        if path: self._set_config_file(path)
+        if path: self.set_config_file(path)
 
-    def _set_config_file(self, path):
+    def set_config_file(self, path):
         self.config_file_path = path
         while self.badge_layout.count():
             item = self.badge_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         self.json_frame.setFixedHeight(180)
         badge = FileBadge(os.path.basename(path))
-        badge.removed.connect(self._remove_config_file)
+        badge.removed.connect(self.remove_config_file)
         self.badge_layout.addWidget(badge)
         self.badge_container.setVisible(True)
 
-    def _remove_config_file(self):
+    def remove_config_file(self):
         self.config_file_path = None
         self.badge_container.setVisible(False)
         while self.badge_layout.count():
@@ -446,7 +444,7 @@ class AnalysisDialog(QDialog):
             if item.widget(): item.widget().deleteLater()
         self.json_frame.setFixedHeight(220)
 
-    def _start_analysis(self):
+    def start_analysis(self):
         self.config_widget.setVisible(False)
         self.analyze_btn.setVisible(False)
         self.progress_widget.setVisible(True)
@@ -455,9 +453,9 @@ class AnalysisDialog(QDialog):
         is_detailed = self.btn_dokladny.isChecked()
         choosen_lg = "pl" if self.btn_lang_pl.isChecked() else "en"
                 
-        self._run_pipeline_worker(is_detailed, choosen_lg)
+        self.run_pipeline_worker(is_detailed, choosen_lg)
 
-    def _run_pipeline_worker(self, is_detailed, choosen_lg):
+    def run_pipeline_worker(self, is_detailed, choosen_lg):
         self.worker = PipelineWorker(
             pdf_path=self.pdf_path, 
             config_path=self.config_file_path, 
@@ -465,22 +463,22 @@ class AnalysisDialog(QDialog):
             language=choosen_lg,
             download_models_flag=self.should_download_models
         )
-        self.worker.progress_update.connect(self._update_progress)
-        self.worker.finished_success.connect(self._on_analysis_success)
+        self.worker.progress_update.connect(self.update_progress)
+        self.worker.finished_success.connect(self.on_analysis_success)
         self.worker.finished_error.connect(lambda msg: self.reject())
         self.worker.start()
 
-    def _on_analysis_success(self, final_report):
+    def on_analysis_success(self, final_report):
         self.final_report = final_report
         self.accept()
 
-    def _cancel_analysis(self):
+    def cancel_analysis(self):
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.terminate()
             self.worker.wait()
-        self._reset_ui_state()
+        self.reset_ui_state()
 
-    def _reset_ui_state(self):
+    def reset_ui_state(self):
         self.pbar.setValue(0)
         self.progress_label.setText("Przygotowywanie do analizy...")
         self.progress_widget.setVisible(False)
@@ -489,6 +487,6 @@ class AnalysisDialog(QDialog):
         self.close_btn.setEnabled(True)
         self.title_label.setText("Przeanalizuj dokument")
 
-    def _update_progress(self, value, text):
+    def update_progress(self, value, text):
         self.pbar.setValue(value)
         self.progress_label.setText(text)
