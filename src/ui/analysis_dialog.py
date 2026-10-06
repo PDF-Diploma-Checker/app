@@ -3,17 +3,18 @@ import os
 import json
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QFrame, QProgressBar, QWidget, QFileDialog, QCheckBox
+    QPushButton, QFrame, QProgressBar, QWidget, QFileDialog, QCheckBox, QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QSize
 from PySide6.QtGui import QPixmap, QIcon
 import styles
 
 from common.path import resource_path
+# Import funkcji sprawdzających i pobierających z Twojego pliku konfiguracyjnego
+from analysis.modules.llm.config import are_ai_models_downloaded, download_specific_language, download_ai_models_with_progress
 
 
 class FileBadge(QFrame):
-    """ Widget displaying info about JSON config file with a delete button"""
     removed = Signal()
 
     def __init__(self, filename, parent=None):
@@ -74,7 +75,6 @@ class FileBadge(QFrame):
 
 
 class ConfigDropFrame(QFrame):
-    """drag-and-drop for JSON files"""
     fileDropped = Signal(str)
 
     def __init__(self, parent=None):
@@ -82,7 +82,6 @@ class ConfigDropFrame(QFrame):
         self.setAcceptDrops(True)
 
     def dragEnterEvent(self, event):
-        """accepts only .json"""
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
             if urls and urls[0].toLocalFile().lower().endswith('.json'):
@@ -91,33 +90,34 @@ class ConfigDropFrame(QFrame):
         event.ignore()
 
     def dropEvent(self, event):
-        """Handles the drop event and gets the file path of the dropped JSON"""
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
             self.fileDropped.emit(file_path)
 
+
 class PipelineWorker(QThread):
-    """thread that handles the background processing of the PDF analysis"""
     progress_update = Signal(int, str) 
     finished_success = Signal(dict) 
     finished_error = Signal(str) 
 
-    def __init__(self, pdf_path, config_path, use_llm, language):
+    def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.use_llm = use_llm
         self.language = language
+        self.download_models_flag = download_models_flag
 
     def run(self):
-        """Runs the analysis, downloads language files, parses coordinates/bounding boxes and gives results"""
         try:
-            self.progress_update.emit(5, "Sprawdzanie i pobieranie wymagań językowych...")
-            from setup import download_specific_language
+            self.progress_update.emit(5, "Sprawdzanie wymagań językowych...")
             download_specific_language(self.language)
 
-            self.progress_update.emit(10, "Uruchamianie silnika analizy...")
+            if self.use_llm and self.download_models_flag:
+                download_ai_models_with_progress(self.progress_update.emit)
+
+            self.progress_update.emit(40, "Uruchamianie silnika analizy...")
             from app.entry import run_analysis_for_pdf
             
             final_report = run_analysis_for_pdf(
@@ -131,14 +131,12 @@ class PipelineWorker(QThread):
             report_objects = getattr(final_report, "linguistics_errors", [])
             ui_report = []
             for error in report_objects:
-                
                 if isinstance(error, dict):
                     page_nr = error.get('page', error.get('page_number', error.get('page_start', 1)))
                     bbox = error.get('bbox', error.get('bounding_box', None))
                     single_x = error.get('x', None)
                     single_y = error.get('y', None)
                     err_coord = error.get('error_coordinate', None) 
-                    
                     category = error.get('category', error.get('ruleId', 'Błąd językowy'))
                     text = error.get('content', error.get('text', error.get('matched_text', '[Brak textu]')))
                     comment = error.get('message', error.get('msg', error.get('comments', 'Znaleziono błąd.')))
@@ -148,7 +146,6 @@ class PipelineWorker(QThread):
                     single_x = getattr(error, 'x', None)
                     single_y = getattr(error, 'y', None)
                     err_coord = getattr(error, 'error_coordinate', None)
-                    
                     category = getattr(error, 'category', getattr(error, 'ruleId', 'Błąd językowy'))
                     text = getattr(error, 'content', getattr(error, 'text', getattr(error, 'matched_text', '[Brak textu]')))
                     comment = getattr(error, 'message', getattr(error, 'msg', getattr(error, 'comments', 'Znaleziono błąd.')))
@@ -157,7 +154,6 @@ class PipelineWorker(QThread):
                     page_nr = 1
                 
                 x, y, w, h = 50.0, 50.0, 20.0, 20.0 
-                
                 if err_coord and isinstance(err_coord, list) and len(err_coord) > 0:
                     first_coord = err_coord[0]
                     if isinstance(first_coord, dict) and "coordinates" in first_coord:
@@ -166,10 +162,8 @@ class PipelineWorker(QThread):
                             x1, y1, x2, y2 = bbox_list[:4]
                             x, y = float(x1), float(y1)
                             w, h = float(x2 - x1), float(y2 - y1)
-                        
                         if first_coord.get("page", -1) != -1:
                             page_nr = first_coord["page"]
-                            
                 elif isinstance(bbox, (list, tuple)):
                     if len(bbox) == 4:
                         x1, y1, x2, y2 = bbox
@@ -177,7 +171,6 @@ class PipelineWorker(QThread):
                         w, h = float(x2 - x1), float(y2 - y1)
                     elif len(bbox) == 2:
                         x, y = float(bbox[0]), float(bbox[1])
-                        
                 elif single_x is not None and single_y is not None:
                     x, y = float(single_x), float(single_y)
                 
@@ -189,19 +182,15 @@ class PipelineWorker(QThread):
                     "category": str(category),
                     "found_text": str(text),
                     "comment": str(comment),
-                    "coords": {
-                        "x": x, "y": y, "w": w, "h": h
-                    }
+                    "coords": {"x": x, "y": y, "w": w, "h": h}
                 })
             
             sota_data = getattr(final_report, "llm_result", None)
-
             ui_data = {
                 "errors": ui_report,
                 "sota": sota_data if isinstance(sota_data, dict) else None,
                 "language": self.language 
             }
-            
             self.finished_success.emit(ui_data)
             
         except Exception as e:
@@ -209,8 +198,8 @@ class PipelineWorker(QThread):
             traceback.print_exc()
             self.finished_error.emit(str(e))
 
+
 class AnalysisDialog(QDialog):
-    """dialog window allowing configuration and running the document analysis. Allows JSON file upload, language selection, and analysis mode switching"""
     def __init__(self, pdf_path, parent=None):
         super().__init__(parent)
         self.pdf_path = pdf_path
@@ -220,10 +209,12 @@ class AnalysisDialog(QDialog):
         self.setStyleSheet(styles.DIALOG_STYLE)
         
         self.config_file_path = None 
+        self.models_available = are_ai_models_downloaded()
+        self.should_download_models = False
+        
         self.setup_ui()
 
     def _check_gpu_vram(self):
-        """Sprawdza dostępność i pamięć VRAM karty graficznej. Zwraca: (Nazwa_GPU, VRAM_w_GB)"""
         try:
             import torch
             if torch.cuda.is_available():
@@ -233,26 +224,9 @@ class AnalysisDialog(QDialog):
                 return name, vram_gb
         except Exception:
             pass
-        
-        try:
-            import subprocess
-            creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-            result = subprocess.run(
-                ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader,nounits'],
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=creation_flags
-            )
-            if result.returncode == 0:
-                output = result.stdout.strip().split('\n')[0]
-                name, vram_mb = output.split(',')
-                vram_gb = float(vram_mb.strip()) / 1024.0
-                return name.strip(), vram_gb
-        except Exception:
-            pass
-
         return None, 0.0
 
     def setup_ui(self):
-        """Sets up the layout"""
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(30, 20, 30, 30)
         self.main_layout.setSpacing(12)
@@ -363,7 +337,7 @@ class AnalysisDialog(QDialog):
                 rec_text = f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>Tryb dokładny (AI) powinien działać płynnie."
             else:
                 color = "#D32F2F" 
-                rec_text = f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br><b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli lub nie zadziałać."
+                rec_text = f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br><b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli."
         else:
              color = "#D32F2F"
              rec_text = "<b>Brak wspieranego GPU (NVIDIA).</b><br>Tryb dokładny użyje procesora (CPU) i analiza będzie trwała bardzo długo."
@@ -386,6 +360,24 @@ class AnalysisDialog(QDialog):
             self.gpu_info_label.setVisible(False)
             
         def _on_dokladny_clicked():
+            # Sprawdzenie, czy modele AI są fizycznie obecne na dysku
+            if not are_ai_models_downloaded():
+                reply = QMessageBox.question(
+                    self,
+                    "Brak modeli AI",
+                    "Modele AI (Gemma i LLaVA) nie zostały znalezione na dysku.\n"
+                    "Czy chcesz zezwolić na ich pobranie teraz? (Może to potrwać zależnie od łącza)",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    self.should_download_models = True
+                    self.models_available = True
+                else:
+                    self.btn_dokladny.setChecked(False)
+                    self.btn_szybki.setChecked(True)
+                    return
+
             self.btn_szybki.setChecked(False)
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
@@ -432,14 +424,11 @@ class AnalysisDialog(QDialog):
         self.json_frame.fileDropped.connect(self._set_config_file)
 
     def _open_file_dialog(self):
-        """Opens a standard dialog to select a config JSON file manually"""
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz plik konfiguracyjny", "", "JSON Files (*.json)")
         if path: self._set_config_file(path)
 
     def _set_config_file(self, path):
-        """displays the selected configuration file badge and stores the file path"""
         self.config_file_path = path
-        
         while self.badge_layout.count():
             item = self.badge_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
@@ -450,15 +439,14 @@ class AnalysisDialog(QDialog):
         self.badge_container.setVisible(True)
 
     def _remove_config_file(self):
-        """Clears the stored configuration file path and hides the file badge from the UI"""
         self.config_file_path = None
         self.badge_container.setVisible(False)
         while self.badge_layout.count():
             item = self.badge_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
         self.json_frame.setFixedHeight(220)
+
     def _start_analysis(self):
-        """checks if there are models"""
         self.config_widget.setVisible(False)
         self.analyze_btn.setVisible(False)
         self.progress_widget.setVisible(True)
@@ -470,32 +458,29 @@ class AnalysisDialog(QDialog):
         self._run_pipeline_worker(is_detailed, choosen_lg)
 
     def _run_pipeline_worker(self, is_detailed, choosen_lg):
-        """Turns PDF analising thread"""
-        self.worker = PipelineWorker(self.pdf_path, self.config_file_path, use_llm=is_detailed, language=choosen_lg)
+        self.worker = PipelineWorker(
+            pdf_path=self.pdf_path, 
+            config_path=self.config_file_path, 
+            use_llm=is_detailed, 
+            language=choosen_lg,
+            download_models_flag=self.should_download_models
+        )
         self.worker.progress_update.connect(self._update_progress)
         self.worker.finished_success.connect(self._on_analysis_success)
         self.worker.finished_error.connect(lambda msg: self.reject())
         self.worker.start()
 
     def _on_analysis_success(self, final_report):
-        """when the background thread completes successfully closes the dialog"""
         self.final_report = final_report
         self.accept()
 
     def _cancel_analysis(self):
-        """Terminates the running background worker thread"""
-        if hasattr(self, 'dl_worker') and self.dl_worker.isRunning():
-            self.dl_worker.terminate()
-            self.dl_worker.wait()
-            
         if hasattr(self, 'worker') and self.worker.isRunning():
             self.worker.terminate()
             self.worker.wait()
-            
         self._reset_ui_state()
 
     def _reset_ui_state(self):
-        """Resets progress indicators and switches the UI view back"""
         self.pbar.setValue(0)
         self.progress_label.setText("Przygotowywanie do analizy...")
         self.progress_widget.setVisible(False)
@@ -505,6 +490,5 @@ class AnalysisDialog(QDialog):
         self.title_label.setText("Przeanalizuj dokument")
 
     def _update_progress(self, value, text):
-        """Updates the progress bar value and the description label text"""
         self.pbar.setValue(value)
         self.progress_label.setText(text)
