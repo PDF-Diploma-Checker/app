@@ -26,7 +26,7 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: |
-          pyinstaller --noconsole --onedir --name="DiplomaChecker" --hidden-import=PySide6 --add-data "src/ui/assets;ui/assets" src/app/main.py
+          pyinstaller --noconsole --onedir --name="DiplomaChecker" --paths src --hidden-import=PySide6 --hidden-import=torch --hidden-import=spacy --add-data "src/ui/assets;ui/assets" src/app/main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

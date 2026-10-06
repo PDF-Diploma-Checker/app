@@ -47,15 +47,13 @@ from PySide6.QtGui import QIcon
 from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
-from select_text import SelectablePdfView, CommentMarker, HighlightBox
-from start_page import StartPage
-from saving_files import SavingFiles
+from .select_text import SelectablePdfView, CommentMarker, HighlightBox
+from .start_page import StartPage
+from .saving_files import SavingFiles
 import styles
-from analysis_dialog import AnalysisDialog
-from pipeline import AnalysisPipeline
+from .analysis_dialog import AnalysisDialog
 
 from PySide6.QtWidgets import QFrame
-from entry import run_analysis_for_pdf
 from common.path import resource_path
 
 class AnalysisWorker(QObject):
