@@ -8,9 +8,9 @@ from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtSvgWidgets import QSvgWidget
 from PySide6.QtWidgets import QGraphicsDropShadowEffect 
 from PySide6.QtGui import QColor
-import styles
+from . import styles
 from common.path import resource_path
-from settings import SettingsDialog  
+from .settings import SettingsDialog  
 
 class PDFDropFrame(QFrame):
     """provides drag-and-drop capabilities specialized for filtering and accepting PDF files."""

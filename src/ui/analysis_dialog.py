@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QThread, QSize
 from PySide6.QtGui import QPixmap, QIcon
-import styles
+from . import styles
 
 from common.path import resource_path
 from analysis.modules.llm.config import are_ai_models_downloaded, download_specific_language, download_ai_models_with_progress

@@ -50,7 +50,7 @@ from PySide6.QtGui import QColor
 from .select_text import SelectablePdfView, CommentMarker, HighlightBox
 from .start_page import StartPage
 from .saving_files import SavingFiles
-import styles
+from . import styles
 from .analysis_dialog import AnalysisDialog
 
 from PySide6.QtWidgets import QFrame
@@ -733,7 +733,7 @@ class PDFReader(QMainWindow):
                 box.setStyleSheet(styles.HIGHLIGHT_BOX_CUSTOM_COMMENT_STYLE)
                 self.pdf_view.highlight_boxes.append(box)
 
-            from select_text import CommentMarker
+            from .select_text import CommentMarker
             marker = CommentMarker(c_data, self.pdf_view.viewport())
             self.pdf_view.comment_markers.append(marker)
 
