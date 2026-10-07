@@ -1,7 +1,7 @@
 import re
 from .linguistics_types import Bibliography_context, Bib_item_context
 from .exeptions_check import check_quotes
-from .iso_and_bibtex_check import check_coherence_iso, check_bibtex
+from .iso_and_bibtex_check import check_coherence_iso, check_missing_fields
 import logging
 from collections import Counter
 
@@ -18,17 +18,13 @@ ART_INTRO_KEYWORDS = re.compile(r'\s+(?:[Ii]n|[Ww])\.?:\s+')
 DOI_PATTERNS = {
     r'doi\.org/10\.\d{4,9}/\S+': 'link',
     r'(?:DOI|doi)\s*:\s*10\.\d{4,9}/\S+': 'citation',
+    r'/doi/10\.\d{4,9}/\S+': 'url_embedded',
 }
 
-ACCESS_PATTERNS = {
-    r'(?<![\d\.\w])[aA]vailable\s+[aA]t[\s:]*': 'Available at:',
-    r'(?<![\d\.\w])[aA]vailable\s+[\s:]*': 'Available:',
-    r'(?<![\d\.\w])\[\s*[oO]nline\s*\]\s*': '[online]',
-    r'(?<![\d\.\w])[oO]nline\s*(?:[aA]t)[\s\:]*': 'online at',
-    r'(?<![\d\.\w])\(\s*[dD]ata\s*[dD]ostępu[\s\:]*\)': '(data dostępu)',
-    r'(?<![\d\.\w])[dD]ata\s*[dD]ostępu[\s\:]*': 'data dostępu',
-    r'(?<![\d\.\w])[dD]ost[eę]p[\s\:]*': 'dostęp',
-}
+ACCESS_KEYWORD = re.compile(
+    r'(?<!\w)(?:accessed|access(?=[\s:\]\)]*:)|retrieved|cited|data\s+dostępu|dost[eę]pu?)\b[\s:\]\)]*(?:on\s+)?',
+    re.IGNORECASE)
+ACCESS_DATE_WINDOW = 40
 
 EN_MONTH_LONG = r'January|February|March|April|May|June|July|August|September|October|November|December'
 EN_MONTH_SHORT = r'Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sept?|Oct|Nov|Dec'
@@ -54,18 +50,26 @@ DATE_PATTERNS = {
     rf'(?i)(?<!\w)(?:{PL_MONTH_SHORT})\.?\s+{YEAR_PATTERN}\b(?!\.\d)': 'mies. YYYY',
     rf'(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}/\d{{1,2}}/{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd/mm/yyyy',
     rf'(?<![\w\/\.\-])(?<!\d\.){YEAR_PATTERN}/\d{{1,2}}/\d{{1,2}}\b(?![\w\/\-])(?!\.\d)': 'yyyy/mm/dd',
-    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-{PL_MONTH_LONG}-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-Miesiąc-yyyy',
-    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-{PL_MONTH_SHORT}-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-mie-yyyy',
-    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-{EN_MONTH_LONG}-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-Month-yyyy',
-    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-{EN_MONTH_SHORT}-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-mon-yyyy',
+    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-(?:{PL_MONTH_LONG})-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-Miesiąc-yyyy',
+    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-(?:{PL_MONTH_SHORT})-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-mie-yyyy',
+    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-(?:{EN_MONTH_LONG})-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-Month-yyyy',
+    rf'(?i)(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-(?:{EN_MONTH_SHORT})-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-mon-yyyy',
     rf'(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}-\d{{1,2}}-{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd-mm-yyyy',
     rf'(?<![\w\/\.\-])(?<!\d\.)\b{YEAR_PATTERN}-\d{{1,2}}-\d{{1,2}}\b(?![\w\/\-])(?!\.\d)': 'yyyy-mm-dd',
     rf'(?<![\w\/\.\-])(?<!\d\.)\d{{1,2}}\.\d{{1,2}}\.{YEAR_PATTERN}\b(?![\w\/\-])(?!\.\d)': 'dd.mm.yyyy',
     rf'(?<![\w\/\.\-])(?<!\d\.)\b{YEAR_PATTERN}\.\d{{1,2}}\.\d{{1,2}}\b(?![\w\/\-])(?!\.\d)': 'yyyy.mm.dd',
-    rf'\({YEAR_PATTERN}\)(?=[\s\.\:\;\,])': '(yyyy)',
+    rf'\({YEAR_PATTERN},\s+(?:{EN_MONTH_LONG})(?:\s+\d{{1,2}})?\)': '(yyyy, Month)',
+    rf'\({YEAR_PATTERN},\s+(?:{EN_MONTH_SHORT})\.?(?:\s+\d{{1,2}})?\)': '(yyyy, Mon)',
+    rf'\({YEAR_PATTERN},\s+(?:{PL_MONTH_LONG})(?:\s+\d{{1,2}})?\)': '(yyyy, miesiąc)',
+    rf'\({YEAR_PATTERN},\s+(?:{PL_MONTH_SHORT})\.?(?:\s+\d{{1,2}})?\)': '(yyyy, mies.)',
+    rf'\({YEAR_PATTERN}\)(?=[\s\.\:\;\,]|$)': '(yyyy)',
     rf'(?:(?<=[,;]\s)|(?<=\.\s)|(?<=\s))\b{YEAR_PATTERN}\b(?=[,;:.\s]|$)(?!\.[\d\w])': 'YYYY'
 }
 
+ORG_KEYWORDS = re.compile(
+    r'\b(politechnika|uniwersytet|instytut|katedra|wydział|ministerstwo|urząd|stowarzyszenie|fundacja|'
+    r'association|university|institute|department|society|ministry|agency|foundation|corporation|'
+    r'committee|council|laboratory|centre|center|dokumentacja|organization|docuemntation|organization)\b', re.IGNORECASE)
 
 PAGES_PATTERNS = {
     r'(?<![\d\.\w])pp\.[\s\:]*\d+(?:\s*[-–]\s*\d+)?': 'pp. 2 - 4',
@@ -88,7 +92,7 @@ BARE_VOLUME = {
 }
 
 BARE_PAGES = { r'(?<![\w\/\.\-])\d+\s*[-–]\s*\d+(?![\w\/\-])': 'bare 2 - 4',}
-URL_PATTERN = re.compile(r'https?:\s*//\S+')
+URL_PATTERN = re.compile(r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+')
 
 UPPER_CASE = r'[A-ZĄĆĘŁŃÓŚŹŻÀ-ÖØ-öø-ÿĀ-ž]'
 LOWER_CASE = r'[a-ząćęłńóśźżà-öø-ÿā-ž]'
@@ -97,21 +101,21 @@ SURNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+(?:{SPECIAL_CHARS}(?:{UPPER_CASE}|
 FULLNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+'
 SHORT_NAME_PATTERN = rf'(?<!\w){UPPER_CASE}\.?(?!\w)'
 SEPARATOR_PATTERNS = r'(?:\s*(?:,|[Aa]nd\b|[Ii]\b|&)\s*)+'
-END_AUTHOR_PATTERNS = r'(?i)\s*(?:et al\.|i inni|i in)\s*'
+END_AUTHOR_PATTERNS = r'(?i)\s*(?:et al\.|i inni|i in\.?)\s*'
 
 AUTHOR_PATTERNS = {
-    rf'{SHORT_NAME_PATTERN}(?:\s*{SHORT_NAME_PATTERN})*\s{SURNAME_PATTERN}': 'J. Nowak',
+    rf'{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*\s{SURNAME_PATTERN}': 'J. Nowak',
     rf'{FULLNAME_PATTERN}(?:\s(?:{FULLNAME_PATTERN}|{SHORT_NAME_PATTERN}))*\s{SURNAME_PATTERN}': 'Jan Nowak',
-    rf'{SURNAME_PATTERN},\s{SHORT_NAME_PATTERN}(?:\s*{SHORT_NAME_PATTERN})*\s*': 'Nowak, J.',
+    rf'{SURNAME_PATTERN},\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*\s*': 'Nowak, J.',
     rf'{SURNAME_PATTERN},\s{FULLNAME_PATTERN}(?:\s(?:{FULLNAME_PATTERN}|{SHORT_NAME_PATTERN}))*': 'Nowak, Jan',
-    rf'{SURNAME_PATTERN}\s{SHORT_NAME_PATTERN}(?:\s*{SHORT_NAME_PATTERN})*': 'Nowak J.'
+    rf'{SURNAME_PATTERN}\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*': 'Nowak J.'
 }
 
-def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = True):
-    '''Uses only heuristics to match parts of each biblliography entry to its type, 
+def check_bibliography(blocks, producer, bibliography_dict):
+    """Uses only heuristics to match parts of each biblliography entry to its type, 
     quickly in fast mode. (authors, title, publisher, date, pages, volume, DOI, access date, URL).
-    Fields are later passed to ISO check.'''
-    logger.info("Starting bibliography check (producer=%s, bibtex_check=%s)", producer, bibtex_check_bool)
+    Fields are later passed to ISO check."""
+    logger.info("Starting bibliography check (producer=%s)", producer)
     matches = []
     authors = bibliography_dict["people"].union(bibliography_dict["organizations"])
     bib_context = Bibliography_context(block_id=0)
@@ -124,7 +128,8 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
 
                 bib_item = Bib_item_context(
                     content=content,
-                    item=list_item)
+                    item=list_item,
+                    parse_confidence=1.0)
 
                 font_spans = collect_font_spans(list_item)
                 quoted_spans = check_quotes(0, 0, content, return_spans=True)
@@ -134,7 +139,7 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
                 fields = extract_fields(masked)
                 url = URL_PATTERN.search(masked)
                 url_span = (url.start(), url.end()) if url else None
-                bib_item.url = {url.group(0): 'url'} if url else None
+                bib_item.url = {re.sub(r'\s+', '', url.group(0)).rstrip('.,;)'): 'url'} if url else None
 
                 authors_text, author_fmt, start_idx, authors_end = extract_authors(masked, content, authors)
                 if authors_text is not None:
@@ -169,10 +174,9 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
                 elif 'volume_extra' in fields:
                     bib_item.volume = fields['volume_extra'][2]
 
+                bib_item.online = bool(url_span)
                 if 'access_date' in fields:
                     bib_item.access_date = fields['access_date'][2]
-                    #bib_item.online = True
-                    bib_item.online = bool(url_span)
 
                 if 'doi' in fields:
                     bib_item.doi = fields['doi'][2]
@@ -202,7 +206,6 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
                 bib_blocks[list_item.item_id] = block.block
 
     logger.info("Parsed %d bibliography items", len(bib_context.items))
-    # Field statistics
     items_with_authors = sum(1 for it in bib_context.items if it.authors)
     items_with_title = sum(1 for it in bib_context.items if it.title)
     items_with_date = sum(1 for it in bib_context.items if it.date)
@@ -214,9 +217,7 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
                 items_with_authors, items_with_title, items_with_date, items_with_publisher, items_with_pages, items_with_url, items_with_doi)
 
     matches = check_coherence_iso(matches, bib_context, bib_blocks)
-    if producer and re.search(r'latex|tex', producer, re.IGNORECASE) and bibtex_check_bool:
-        logger.info("LaTeX detected, running BibTeX check")
-        matches = check_bibtex(matches, bib_context, bib_blocks)
+    matches = check_missing_fields(matches, bib_context, bib_blocks)
 
     cat_counts = Counter(m.category for m in matches)
     logger.info("Bibliography check complete: %d matches", len(matches))
@@ -227,8 +228,8 @@ def check_bibliography(blocks, producer, bibliography_dict, bibtex_check_bool = 
     return matches
 
 def first_match(content, patterns):
-    '''Finds the first regex match found in given text. Returns location of match
-    and a dict of match content and type.'''
+    """Finds the first regex match found in given text. Returns location of match
+    and a dict of match content and type."""
     for pattern, name in patterns.items():
         match = re.search(pattern, content)
         if match:
@@ -236,8 +237,8 @@ def first_match(content, patterns):
     return None
 
 def all_date_matches(content, date_patterns):
-    '''Collects up to three non-overlapping date matches from the content as a list of
-    dicts. Used for later determining publishing and access dates.'''
+    """Collects up to three non-overlapping date matches from the content as a list of
+    dicts. Used for later determining publishing and access dates."""
     results = []
     covered = []
     for pattern, name in date_patterns.items():
@@ -251,8 +252,8 @@ def all_date_matches(content, date_patterns):
 
 
 def collect_font_spans(list_item):
-    '''Scans the item's words (skipping the leading redaction marker word) and returns the
-     italic ranges as tuples.'''
+    """Scans the item's words (skipping the leading redaction marker word) and returns the
+     italic ranges as tuples."""
     spans = []
     italic= None
     for word in list_item.words[1:]:  #words[0] to wg ekstraktora redakcji marker
@@ -268,19 +269,28 @@ def collect_font_spans(list_item):
 
 
 def extract_fields(content):
-    '''Detects bibliographic fields (DOI, access date, dates, pages, volume, and a bare
-    volume fallback) in the masked content and returns them with field name as key.'''
+    """Detects bibliographic fields (DOI, access date, dates, pages, volume, and a bare
+    volume fallback) in the masked content and returns them with field name as key."""
     found = {}
 
     result = first_match(content, DOI_PATTERNS)
     if result:
         found['doi'] = result
+    date_content = content
+    keyword = ACCESS_KEYWORD.search(content)
+    if keyword:
+        window = content[keyword.end():keyword.end() + ACCESS_DATE_WINDOW]
+        access_dates = all_date_matches(window, DATE_PATTERNS)
+        if access_dates:
+            access_text = next(iter(access_dates[0]))
+            pos = window.find(access_text)
+            if pos >= 0:
+                start = keyword.start()
+                end = keyword.end() + pos + len(access_text)
+                found['access_date'] = (start, end, access_dates[0])
+                date_content = mask_spans(content, [(start, end)])
 
-    result = first_match(content, ACCESS_PATTERNS)
-    if result:
-        found['access_date'] = result
-
-    dates = all_date_matches(content, DATE_PATTERNS)
+    dates = all_date_matches(date_content, DATE_PATTERNS)
     if dates:
         found['date'] = dates
 
@@ -301,8 +311,8 @@ def extract_fields(content):
 
 
 def mask_spans(content, spans):
-    '''Returns a copy of the content with every (start, end) span replaced by spaces, so the
-    masked-out regions are excluded from pattern matching, but keeping offsets intact.'''
+    """Returns a copy of the content with every (start, end) span replaced by spaces, so the
+    masked-out regions are excluded from pattern matching, but keeping offsets intact."""
     if not spans:
         return content
     content_list = list(content)
@@ -313,8 +323,8 @@ def mask_spans(content, spans):
 
 
 def extract_authors(masked, content, authors):
-    '''Finds the author segment at the start of an entry by matching name patterns, then finds other authors 
-    matching to the same pattern. Returns the author text, its format label, and the offset'''
+    """Finds the author segment at the start of an entry by matching name patterns, then finds other authors 
+    matching to the same pattern. Returns the author text, its format label, and the offset"""
     best_start_known = None
     best_start_other = None
     best_start_fallback = None
@@ -329,6 +339,8 @@ def extract_authors(masked, content, authors):
         if match and not check_quotes(match.start(), match.end(), content):
             candidate = (match.end(), match.start(), fmt, pattern)
             if fmt == 'Jan Nowak':
+                if match.start() != 0:      
+                    continue
                 in_authors = match.group(0).strip().lower() in authors_lower
                 if match.start() == 0:
                     if in_authors:
@@ -365,10 +377,15 @@ def extract_authors(masked, content, authors):
     current_idx = idx
     authors_end = idx
 
+    has_explicit_end = False
     if author_fmt == 'different':
         while True:
             current_text = masked[current_idx:]
-            if re.match(END_AUTHOR_PATTERNS, current_text):
+            end_match = re.match(END_AUTHOR_PATTERNS, current_text)
+            if end_match:
+                current_idx += end_match.end()
+                authors_end = current_idx
+                has_explicit_end = True
                 break
             sep = re.match(SEPARATOR_PATTERNS, current_text)
             if not sep:
@@ -383,7 +400,11 @@ def extract_authors(masked, content, authors):
     else:
         while True:
             current_text = masked[current_idx:]
-            if re.match(END_AUTHOR_PATTERNS, current_text):
+            end_match = re.match(END_AUTHOR_PATTERNS, current_text)
+            if end_match:
+                current_idx += end_match.end()
+                authors_end = current_idx
+                has_explicit_end = True
                 break
             separator = re.match(SEPARATOR_PATTERNS, current_text)
             if separator:
@@ -395,13 +416,18 @@ def extract_authors(masked, content, authors):
                 authors_end = current_idx
             else:
                 break
+    if author_fmt == 'Jan Nowak' and not has_explicit_end:
+       if not content[authors_end:].lstrip().startswith((':', '.', ',', ';')):
+           return None, '', 0, 0
+       if ORG_KEYWORDS.search(content[start_idx:authors_end]):
+           author_fmt = 'organization'
 
     return content[start_idx:authors_end], author_fmt, start_idx, authors_end
 
 
 def extract_title(content, font_spans, quoted_spans, plain_candidates, authors_end):
-    '''Determines the entry's title and publisher after the authors are extracted.
-    First publisher is determined by keywords, then by type of span (quote/italic) then by order of spans.'''
+    """Determines the entry's title and publisher after the authors are extracted.
+    First publisher is determined by keywords, then by type of span (quote/italic) then by order of spans."""
     italic_after = [(style, start, end) for style, start, end in font_spans if start >= authors_end]
     quoted_after = [(start, end) for start, end in quoted_spans if start >= authors_end]
     has_italic = bool(italic_after)
@@ -483,8 +509,8 @@ def extract_title(content, font_spans, quoted_spans, plain_candidates, authors_e
 
 
 def find_title_candidates(text):
-    '''Finds possible title segments with sentence case or title case and returns them as
-     (segment, [case_pattern], start_index) ignoring linker words. '''
+    """Finds possible title segments with sentence case or title case and returns them as
+     (segment, [case_pattern], start_index) ignoring linker words. """
     results = []
     idx = 0
     for chunk in re.split(r'(\s{2,})', text):

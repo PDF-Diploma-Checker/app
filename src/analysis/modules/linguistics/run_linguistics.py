@@ -61,10 +61,6 @@ def run_linguistics(raw_blocks, config_path=None):
                 logger.warning("Invalid 'check_first_person' value, expected 'yes' or 'no'")
             else:
                 check_first_person = data["sprawdzanie_formy_osobowej"].lower() == "tak"
-            if data["sprawdzanie_wg_bibtex"].lower() not in ["tak", "nie"]:
-                logger.warning("Invalid 'check_bibtex' value, expected 'yes' or 'no'")
-            else:
-                check_bibtex = data["sprawdzanie_wg_bibtex"].lower() == "tak"
         except KeyError:
             logger.warning("Missing field in linguistics config")
         except ValueError as e:
@@ -78,7 +74,7 @@ def run_linguistics(raw_blocks, config_path=None):
 
     extracted_acronyms = raw_blocks.reference_sections.acronyms
     proper_names, bibliography_dict = get_proper_names(blocks)
-    bib_matches = check_bibliography(blocks, raw_blocks.metadata["producer"], bibliography_dict, bibtex_check_bool = check_bibtex)
+    bib_matches = check_bibliography(blocks, raw_blocks.metadata["producer"], bibliography_dict)
     acronyms_with_definitions, proper_names = check_first_definition(blocks, proper_names, extracted_acronyms)
     acronym_matches, proper_names = check_if_was_defined(blocks, acronyms_with_definitions, proper_names)
     decimal_matches = decimal_check(blocks, chapter_nums)

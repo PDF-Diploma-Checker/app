@@ -3,7 +3,7 @@ Definitions of dataclasses used in the linguistic module
 '''
 from dataclasses import dataclass, field
 from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, ListBlock
-from typing import Union, List, Optional
+from typing import Union, List, Optional, Dict, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,17 @@ class Bib_item_context:
     other: Optional[str] = None
     bibtex_type: Optional[str] = None
     separator: Optional[str] = None
+    norm_content: str = ""
+    container: Optional[dict[str, str]] = None
+    place: Optional[dict[str, str]] = None
+    edition: Optional[str] = None
+    genre: Optional[str] = None
+    editor_role: bool = False
+    date_position: Optional[str] = None
+    ending: Optional[str] = None
+    spans: Dict[str, Tuple[int, int]] = field(default_factory=dict)
+    confidence: Dict[str, float] = field(default_factory=dict)
+    parse_confidence: float = 0.0
 
 @dataclass
 class Bibliography_context:
