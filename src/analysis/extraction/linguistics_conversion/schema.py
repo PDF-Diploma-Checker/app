@@ -1,18 +1,19 @@
-'''
+"""
 Logical structure of converter_linguictics_clean's effective json
-'''
+"""
 
 from dataclasses import dataclass, field, asdict
 import json
 from typing import List, Dict, Any, Union, Optional
-import re 
+import re
+
 
 @dataclass
-class WordInfo: # Położenie XY oraz relatywne słowa
+class WordInfo:  # Położenie XY oraz relatywne słowa
     word_index: int
     text: str
-    start_char: int    
-    end_char: int      
+    start_char: int
+    end_char: int
     font: str
     size: float
     bold: bool
@@ -21,15 +22,17 @@ class WordInfo: # Położenie XY oraz relatywne słowa
     page_number: int
     line: int = 0
     incorrect_bibliography: int = 0
-    
+
+
 @dataclass
-class HeadingInfo: # Informacje o nagłówkach (TODO)
+class HeadingInfo:  # Informacje o nagłówkach (TODO)
     level: int
     number: str
     text: str
 
+
 @dataclass
-class ParagraphBlock: # Informacje o blokach tekstowych, które mogą być paragrafami, nagłówkami lub listami
+class ParagraphBlock:  # Informacje o blokach tekstowych, które mogą być paragrafami, nagłówkami lub listami
     block_id: Union[int, str]
     content: str = ""
     headings: List[HeadingInfo] = field(default_factory=list)
@@ -41,6 +44,7 @@ class ParagraphBlock: # Informacje o blokach tekstowych, które mogą być parag
     words: List[WordInfo] = field(default_factory=list)
     incorrect_caption: int = 0
 
+
 @dataclass
 class ListItem:
     item_id: int
@@ -48,6 +52,7 @@ class ListItem:
     text: str
     bbox: List[float]
     words: List[WordInfo] = field(default_factory=list)
+
 
 @dataclass
 class ListBlock:
@@ -59,66 +64,74 @@ class ListBlock:
     items: List[ListItem] = field(default_factory=list)
     words: List[WordInfo] = field(default_factory=list)
 
+
 @dataclass
-class PageArtifact: # Informacje o elementach pływających, takich jak numery stron, nagłówki/stopki, itp.
+class PageArtifact:  # Informacje o elementach pływających, takich jak numery stron, nagłówki/stopki, itp.
     artifact_id: int
     type: str  # np. "page_number"
     page_number: int
     text: str
     bbox: List[float]
 
+
 @dataclass
-class Footnote: # Informacje o przypisach (TODO)
+class Footnote:  # Informacje o przypisach (TODO)
     footnote_id: int
     page_number: int
     marker: str
     text: str
     bbox: List[float]
 
+
 @dataclass
-class VisualElement: # Informacje o elementach wizualnych, takich jak wykresy, rysunki, tabele itp.
+class VisualElement:  # Informacje o elementach wizualnych, takich jak wykresy, rysunki, tabele itp.
     element_id: int
     type: str  # "figure" lub "table"
     page_number: int
     bbox: List[float]
-    caption: Dict[str, Any] # text, label_type, number, description, bbox
+    caption: Dict[str, Any]  # text, label_type, number, description, bbox
     table_data: Optional[List[List[str]]] = None
-    format: Optional[Dict[str, int]] = None # num_rows, num_columns
+    format: Optional[Dict[str, int]] = None  # num_rows, num_columns
     incorrect_caption: int = 0
 
+
 @dataclass
-class Equation: # Informacje o równaniach, zarówno w tekście, jak i jako elementy pływające (TODO)
+class Equation:  # Informacje o równaniach, zarówno w tekście, jak i jako elementy pływające (TODO)
     equation_id: int
     page_number: int
     type: str = "block_equation"
     text: str = ""
     bbox: List[float] = field(default_factory=list)
 
+
 @dataclass
-class BibItem: # Informacje o elementach bibliografii (TODO)
+class BibItem:  # Informacje o elementach bibliografii (TODO)
     item_id: str
     marker_text: str
     full_text: str
     bbox: List[float]
     words: List[WordInfo]
 
+
 @dataclass
-class Bibliography: # Informacje o sekcji bibliografii (TODO)
+class Bibliography:  # Informacje o sekcji bibliografii (TODO)
     list_id: str
     page_number: int
     items: List[BibItem]
 
+
 @dataclass
 class AcronymItem:
-    acronym: str         
-    definition: str      
-    pages: str           
+    acronym: str
+    definition: str
+    pages: str
     bbox: List[float] = field(default_factory=list)
     words: List[WordInfo] = field(default_factory=list)
     src_page: int = 0
 
+
 @dataclass
-class TOCItem: # Informacje o elementach spisu treści (TODO)
+class TOCItem:  # Informacje o elementach spisu treści (TODO)
     item_id: str
     level: int
     number: str
@@ -127,8 +140,9 @@ class TOCItem: # Informacje o elementach spisu treści (TODO)
     target_page: int
     bbox: List[float]
 
+
 @dataclass
-class CodeSnippet: # Informacje o fragmentach kodu (w tekście i jako elementy pływające) (TODO)
+class CodeSnippet:  # Informacje o fragmentach kodu (w tekście i jako elementy pływające) (TODO)
     snippet_id: int
     page_number: int
     language: str
@@ -137,70 +151,77 @@ class CodeSnippet: # Informacje o fragmentach kodu (w tekście i jako elementy p
 
 
 @dataclass
-class FloatingElements: # Informacje o wszystkich elementach pływających na stronie
+class FloatingElements:  # Informacje o wszystkich elementach pływających na stronie
     page_artifacts: List[PageArtifact] = field(default_factory=list)
     footnotes: List[Footnote] = field(default_factory=list)
     visual_elements: List[VisualElement] = field(default_factory=list)
     equations: List[Equation] = field(default_factory=list)
 
+
 @dataclass
-class ReferenceSections: # Informacje o wszystkich sekcjach referencyjnych (TODO)
+class ReferenceSections:  # Informacje o wszystkich sekcjach referencyjnych (TODO)
     bibliography: List[Bibliography] = field(default_factory=list)
     table_of_contents: List[TOCItem] = field(default_factory=list)
     code_snippets: List[CodeSnippet] = field(default_factory=list)
     acronyms: List[AcronymItem] = field(default_factory=list)
 
+
 @dataclass
-class FinalDocument: # Ostateczna struktura dokumentu
+class FinalDocument:  # Ostateczna struktura dokumentu
     metadata: Dict[str, Any]
     logical_blocks: List[Union[ParagraphBlock, ListBlock]] = field(default_factory=list)
     floating_elements: FloatingElements = field(default_factory=list)
     reference_sections: ReferenceSections = field(default_factory=list)
 
     def to_json(self, file_path: str):
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(asdict(self), f, ensure_ascii=False, indent=4)
+
 
 # Słownik wzorców dla list
 LIST_PATTERNS = {
     "number_with_dot": r"^\d{1,3}+(\.\d+)*\.\s",
     "number_with_bracket": r"^\d{1,3}+\)\s?",
-    #"letter_with_dot": r"^[a-z]\.\s",
+    # "letter_with_dot": r"^[a-z]\.\s",
     "letter_with_bracket": r"^[a-z]\)\s?",
     "bullet": r"^[•••●○■]",
-    "dash": r"^[-−\u2013\u2014]"
+    "dash": r"^[-−\u2013\u2014]",
 }
 HEADER_PATTERN = r"^\d+(\.\d+)*\s+"  # Wykrywa 1.1, 1.2.1 itd.
 CAPTION_PATTERN = r"^(Tabela|Tab|Rysunek|Rys|Wykres|Fig|Figure)\s+\d+"
-TOC_DOTS_PATTERN = r"\.{4,}" # Wykrywa ciągi kropek w spisie treści
+TOC_DOTS_PATTERN = r"\.{4,}"  # Wykrywa ciągi kropek w spisie treści
+
 
 class DocumentPatterns:
     LIST_PATTERNS = {
         "number_with_dot": re.compile(r"^\d{1,3}+(\.\d+)*\.\s"),
         "number_with_bracket": re.compile(r"^\d{1,3}+\)\s?"),
-        #"letter_with_dot": re.compile(r"^[a-z]\.\s"),
+        # "letter_with_dot": re.compile(r"^[a-z]\.\s"),
         "letter_with_bracket": re.compile(r"^[a-z]\)\s?"),
         "bullet": re.compile(r"^[••●○■]"),
         "dash": re.compile(r"^[-−\u2013\u2014]"),
         "number_in_brackets": re.compile(r"^\[\d+\]\s?"),
-        "listing": re.compile(r"^\d+\s")
+        "listing": re.compile(r"^\d+\s"),
     }
-    ACRONYM_PATTERN = re.compile(r'^([A-ZĄĆĘŁŃÓŚŹŻ0-9]{2,}\b|\S{1,15}\s*[-–—−‐:=]\s+)')
-    ACRONYM_SEP = re.compile(r'^\S{1,15}\s*[-–—−‐:=]\s+')
-    ACRONYM_EXTRACT_PATTERN = re.compile(r'^([A-Z][A-Z0-9]{1,7})\s+([a-zA-Z].+?)\.\s*([\d,\-\s\u2013\u2014]+)$')
+    ACRONYM_PATTERN = re.compile(r"^([A-ZĄĆĘŁŃÓŚŹŻ0-9]{2,}\b|\S{1,15}\s*[-–—−‐:=]\s+)")
+    ACRONYM_SEP = re.compile(r"^\S{1,15}\s*[-–—−‐:=]\s+")
+    ACRONYM_EXTRACT_PATTERN = re.compile(
+        r"^([A-Z][A-Z0-9]{1,7})\s+([a-zA-Z].+?)\.\s*([\d,\-\s\u2013\u2014]+)$"
+    )
+
 
 def classify_block_content(text: str, active_marker: str = None):
     """
-    Classifies a block of text as either a 'list' or a 'paragraph' by matching it 
+    Classifies a block of text as either a 'list' or a 'paragraph' by matching it
     against predefined regular expression patterns.
 
     Args:
         text (str): The text content to classify.
-        active_marker (str, optional): The marker type of the currently active list, 
+        active_marker (str, optional): The marker type of the currently active list,
             used to check for direct continuations. Defaults to None.
 
     Returns:
-        tuple[str, str | None]: A tuple containing the block type ('list' or 'paragraph') 
+        tuple[str, str | None]: A tuple containing the block type ('list' or 'paragraph')
         and the matched marker type (if applicable, otherwise None).
     """
     text = text.strip()
@@ -210,15 +231,16 @@ def classify_block_content(text: str, active_marker: str = None):
         if pattern and pattern.match(text):
             return "list", active_marker
         return "paragraph", None
-    
+
     for marker_type, pattern in DocumentPatterns.LIST_PATTERNS.items():
-        if pattern.match(text): 
+        if pattern.match(text):
             return "list", marker_type
     return "paragraph", None
 
+
 def strip_list_marker(text: str, marker_type: str) -> str:
     """
-    Removes the matched list marker (e.g., bullet points, numbering) from the 
+    Removes the matched list marker (e.g., bullet points, numbering) from the
     beginning of a list item's text.
 
     Args:
@@ -229,12 +251,15 @@ def strip_list_marker(text: str, marker_type: str) -> str:
         str: The cleaned text with the leading list marker removed.
     """
     if marker_type in DocumentPatterns.LIST_PATTERNS:
-        return re.sub(DocumentPatterns.LIST_PATTERNS[marker_type], "", text, count=1).strip()
+        return re.sub(
+            DocumentPatterns.LIST_PATTERNS[marker_type], "", text, count=1
+        ).strip()
     return text.strip()
+
 
 def is_acronym(text: str) -> bool:
     """
-    Evaluates whether a given string matches the predefined structural pattern 
+    Evaluates whether a given string matches the predefined structural pattern
     of an acronym or abbreviation definition.
 
     Args:
@@ -245,55 +270,58 @@ def is_acronym(text: str) -> bool:
     """
     return bool(re.match(DocumentPatterns.ACRONYM_PATTERN, text.strip()))
 
+
 def find_table_description(table_bbox: list, logical_blocks: list, priority_side=None):
     """
-    Searches for a table's caption by analyzing logical text blocks situated physically 
-    close to the table's bounding box (either above or below). It uses keyword matching 
+    Searches for a table's caption by analyzing logical text blocks situated physically
+    close to the table's bounding box (either above or below). It uses keyword matching
     specific to tables.
 
     Args:
         table_bbox (list): The bounding box of the table [x0, y0, x1, y1].
         logical_blocks (list): A list of processed logical text blocks on the page.
-        priority_side (str, optional): The preferred side to check first ('above' or 'below'). 
+        priority_side (str, optional): The preferred side to check first ('above' or 'below').
             Defaults to 'above'.
 
     Returns:
-        tuple[str, str]: A tuple containing the extracted description text and the 
+        tuple[str, str]: A tuple containing the extracted description text and the
         side it was found on ('above' or 'below'). Returns an empty string if not found.
     """
     x0, y0, x1, y1 = table_bbox
     kw_matches = {"above": [], "below": []}
     other_matches = {"above": [], "below": []}
 
-    for block in logical_blocks:            
-        if getattr(block, 'type', None) == "list":
-             continue
-        
-        if hasattr(block, 'bbox') and block.bbox:
+    for block in logical_blocks:
+        if getattr(block, "type", None) == "list":
+            continue
+
+        if hasattr(block, "bbox") and block.bbox:
             block_bbox = block.bbox
-        elif hasattr(block, 'words') and block.words:
+        elif hasattr(block, "words") and block.words:
             block_bbox = [
                 min(w.bbox[0] for w in block.words),
                 min(w.bbox[1] for w in block.words),
                 max(w.bbox[2] for w in block.words),
-                max(w.bbox[3] for w in block.words)
+                max(w.bbox[3] for w in block.words),
             ]
         else:
             continue
 
         bx0, by0, bx1, by1 = block_bbox
-        
+
         is_close_above = (y0 - 100 < by1) and (by0 < y0 + 60)
-        is_close_below = (y1 - 60 < by0) and (by1 < y1 + 100) 
-        
-        
+        is_close_below = (y1 - 60 < by0) and (by1 < y1 + 100)
+
         if is_close_above or is_close_below:
             full_text = block.content.strip()
-            if not full_text: continue
-            
+            if not full_text:
+                continue
+
             side = "above" if is_close_above else "below"
-            
-            if full_text.lower().startswith(("tabele", "tabela", "tab.", "table", "tab")):
+
+            if full_text.lower().startswith(
+                ("tabele", "tabela", "tab.", "table", "tab")
+            ):
                 kw_matches[side].append(full_text)
             else:
                 other_matches[side].append(full_text)
@@ -301,82 +329,109 @@ def find_table_description(table_bbox: list, logical_blocks: list, priority_side
     primary = priority_side if priority_side else "above"
     secondary = "below" if primary == "above" else "above"
 
-    if kw_matches[primary]: return kw_matches[primary][0], primary
-    if kw_matches[secondary]: return kw_matches[secondary][0], secondary
-    if other_matches[primary]: return other_matches[primary][0], primary
-    if other_matches[secondary]: return other_matches[secondary][0], secondary
+    if kw_matches[primary]:
+        return kw_matches[primary][0], primary
+    if kw_matches[secondary]:
+        return kw_matches[secondary][0], secondary
+    if other_matches[primary]:
+        return other_matches[primary][0], primary
+    if other_matches[secondary]:
+        return other_matches[secondary][0], secondary
 
     return "", priority_side
 
+
 def find_image_description(image_bbox: list, logical_blocks: list, priority_side=None):
     """
-    Searches for an image's or figure's caption by analyzing nearby logical text blocks. 
-    It applies specific keyword matching (e.g., 'figure', 'image', 'rys.') to validate 
+    Searches for an image's or figure's caption by analyzing nearby logical text blocks.
+    It applies specific keyword matching (e.g., 'figure', 'image', 'rys.') to validate
     the caption.
 
     Args:
         image_bbox (list): The bounding box of the image [x0, y0, x1, y1].
         logical_blocks (list): A list of processed logical text blocks on the page.
-        priority_side (str, optional): The preferred side to check first ('above' or 'below'). 
+        priority_side (str, optional): The preferred side to check first ('above' or 'below').
             Defaults to 'below'.
 
     Returns:
-        tuple[str, str]: A tuple containing the extracted description text and the 
+        tuple[str, str]: A tuple containing the extracted description text and the
         side it was found on ('above' or 'below'). Returns an empty string if not found.
     """
     x0, y0, x1, y1 = image_bbox
     kw_matches = {"above": [], "below": []}
     other_matches = {"above": [], "below": []}
 
-    img_keywords = ("rysunek", "rys.", "fot.", "ilustracja", "wykres", "rycina", 
-                    "schemat", "diagram", "grafika", "figure", "fig.", "photo", 
-                    "img", "image", "schema", "chart", "plot")
+    img_keywords = (
+        "rysunek",
+        "rys.",
+        "fot.",
+        "ilustracja",
+        "wykres",
+        "rycina",
+        "schemat",
+        "diagram",
+        "grafika",
+        "figure",
+        "fig.",
+        "photo",
+        "img",
+        "image",
+        "schema",
+        "chart",
+        "plot",
+    )
 
     for block in logical_blocks:
-        if getattr(block, 'type', None) == "list":
-             continue
-        
-        if hasattr(block, 'bbox') and block.bbox:
+        if getattr(block, "type", None) == "list":
+            continue
+
+        if hasattr(block, "bbox") and block.bbox:
             block_bbox = block.bbox
-        elif hasattr(block, 'words') and block.words:
+        elif hasattr(block, "words") and block.words:
             block_bbox = [
                 min(w.bbox[0] for w in block.words),
                 min(w.bbox[1] for w in block.words),
                 max(w.bbox[2] for w in block.words),
-                max(w.bbox[3] for w in block.words)
+                max(w.bbox[3] for w in block.words),
             ]
         else:
             continue
 
         bx0, by0, bx1, by1 = block_bbox
-        
+
         is_close_above = abs(by1 - y0) < 40
         is_close_below = abs(by0 - y1) < 40
-        
+
         if is_close_above or is_close_below:
             full_text = block.content.strip()
-            if not full_text: continue
-            
+            if not full_text:
+                continue
+
             side = "above" if is_close_above else "below"
-            
+
             if full_text.lower().startswith(img_keywords):
                 kw_matches[side].append(full_text)
             else:
                 other_matches[side].append(full_text)
 
-    primary = priority_side if priority_side else "below" 
+    primary = priority_side if priority_side else "below"
     secondary = "below" if primary == "above" else "above"
 
-    if kw_matches[primary]: return kw_matches[primary][0], primary
-    if kw_matches[secondary]: return kw_matches[secondary][0], secondary
-    if other_matches[primary]: return other_matches[primary][0], primary
-    if other_matches[secondary]: return other_matches[secondary][0], secondary
+    if kw_matches[primary]:
+        return kw_matches[primary][0], primary
+    if kw_matches[secondary]:
+        return kw_matches[secondary][0], secondary
+    if other_matches[primary]:
+        return other_matches[primary][0], primary
+    if other_matches[secondary]:
+        return other_matches[secondary][0], secondary
 
     return "", priority_side
 
+
 def is_widow_func(combined_words):
     """
-    Detects typographical 'widows' within a paragraph. A widow is defined here as 
+    Detects typographical 'widows' within a paragraph. A widow is defined here as
     a very short final line of a paragraph (consisting of 1 or 2 isolated words).
 
     Args:
@@ -385,25 +440,26 @@ def is_widow_func(combined_words):
     Returns:
         int: The number of words constituting the widow (1 or 2), or 0 if no widow is detected.
     """
-    is_widow = 0  
+    is_widow = 0
 
     if combined_words and len(combined_words) >= 10:
         last_word = combined_words[-1]
-        second_to_last_word = combined_words[-2] 
-        word_text = getattr(last_word, 'text', str(last_word)) 
-        if word_text.count(' ') <= 1:
+        second_to_last_word = combined_words[-2]
+        word_text = getattr(last_word, "text", str(last_word))
+        if word_text.count(" ") <= 1:
             if last_word.line != second_to_last_word.line:
                 is_widow = 1
             elif len(combined_words) >= 3:
                 third_to_last_word = combined_words[-3]
                 if second_to_last_word.line != third_to_last_word.line:
-                        is_widow = 2
+                    is_widow = 2
     return is_widow
+
 
 def is_bekart_func(combined_words):
     """
-    Detects typographical 'bastards' (also known as orphans in some conventions) 
-    within a paragraph. This occurs when the final line(s) of a paragraph spill over 
+    Detects typographical 'bastards' (also known as orphans in some conventions)
+    within a paragraph. This occurs when the final line(s) of a paragraph spill over
     and sit isolated at the very top of the next page.
 
     Args:
@@ -417,61 +473,62 @@ def is_bekart_func(combined_words):
     if combined_words:
         first_page = combined_words[0].page_number
         first_line = combined_words[0].line
-        page_lines_buf = 1  
-        has_page_break = False  
+        page_lines_buf = 1
+        has_page_break = False
         words_line_buf = 1
-            
+
         for word in combined_words:
             if word.page_number != first_page:
                 first_page = word.page_number
                 first_line = word.line
-                page_lines_buf = 1  
-                has_page_break = True  
-                words_line_buf = 1           
+                page_lines_buf = 1
+                has_page_break = True
+                words_line_buf = 1
             elif word.line != first_line:
                 first_line = word.line
                 page_lines_buf += 1
                 words_line_buf = 1
             else:
                 words_line_buf += 1
-            
+
         if has_page_break and page_lines_buf <= 2:
             is_bekart = words_line_buf
         else:
             is_bekart = 0
     return is_bekart
 
+
 def is_szewc_func(combined_words):
     """
-    Detects typographical 'shoemakers' (often called orphans) within a paragraph. 
-    This occurs when the first line of a new paragraph is left isolated at the very 
+    Detects typographical 'shoemakers' (often called orphans) within a paragraph.
+    This occurs when the first line of a new paragraph is left isolated at the very
     bottom of a page, while the rest of the paragraph continues on the next page.
 
     Args:
         combined_words (list[WordInfo]): A list of all words making up the paragraph.
 
     Returns:
-        int: The number of words in the isolated first line at the bottom of the page, 
+        int: The number of words in the isolated first line at the bottom of the page,
         or 0 if no shoemaker is detected.
     """
     is_szewc = 0
-    
+
     if combined_words:
         first_page = combined_words[0].page_number
         first_line = combined_words[0].line
-        page_lines_buf = 1  
-        has_page_break = False  
-        words_first_line_buf = 1 
-                
+        page_lines_buf = 1
+        has_page_break = False
+        words_first_line_buf = 1
+
         for word in combined_words[1:]:
             if word.page_number != first_page:
                 has_page_break = True
-                break 
-                        
+                break
+
             elif word.line != first_line:
                 first_line = word.line
                 page_lines_buf += 1
-                        
+
             elif page_lines_buf == 1:
                 words_first_line_buf += 1
 

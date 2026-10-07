@@ -2,8 +2,6 @@ import sys
 import json
 import logging
 from pathlib import Path
-from common.path import resource_path
-import os
 
 logger = logging.getLogger(__name__)
 

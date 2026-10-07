@@ -118,7 +118,7 @@ if __name__ == "__main__":
         sys.path.insert(0, src_dir)
         
     from analysis.modules.llm.config import THESIS_PATH
-    from analysis.extraction.extraction_json import extractPDF
+    from analysis.extraction.main_extractor import extractPDF
     
     logger.info(f"Szukam pliku PDF pod ścieżką: {THESIS_PATH}")
     if not os.path.exists(str(THESIS_PATH)):
