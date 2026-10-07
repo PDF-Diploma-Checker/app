@@ -9,6 +9,12 @@ from analysis.extraction.raw_extraction.bare_struct import (
 )
 from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 
+PUNCTUATION = (
+    "(", ")", "[", "]", "{", "}", '"', "'", "”", "„",
+    ".", ",", ":", ";", "?", "!", "-",
+)
+CLOSING_PUNCTUATION = ".,;:!?)]}”\""
+
 
 def fix_latex(text):
     try:
@@ -64,7 +70,6 @@ def parse_text_block(
     geometry_classifier = GeometryClassifier()
 
     try:
-
         for x in word_list:
             if x[5] == raw_block["number"]:
                 block_words.append(x)
@@ -75,7 +80,7 @@ def parse_text_block(
         for raw_line in raw_block["lines"]:
             try:
                 spans = []
-                max_font_size = 0.0  
+                max_font_size = 0.0  # Do znalezienia słowa o największej czcionce w linijce.
 
                 for raw_span in raw_line["spans"]:
                     if not raw_span["text"].strip():
@@ -95,36 +100,21 @@ def parse_text_block(
                         word_text = x[4]
                         m_left = 0.2
                         m_right = 0.2
-                        punctuation = (
-                            "(",
-                            ")",
-                            "[",
-                            "]",
-                            "{",
-                            "}",
-                            '"',
-                            "'",
-                            "”",
-                            "„",
-                            ".",
-                            ",",
-                            ":",
-                            ";",
-                            "?",
-                            "!",
-                            "-",
-                        )
 
-                        if word_text and word_text[0] in punctuation:
+                        if word_text and word_text[0] in PUNCTUATION:
                             m_left = 15.0
 
-                        if word_text and word_text[-1] in punctuation:
+                        if word_text and word_text[-1] in PUNCTUATION:
                             m_right = 15.0
                         # Sprawdzanie czy dane słowo należy do spanu z małym marginesem błędu (0.2), w razie
                         # problemów można zwiększyć
                         # Dodatkowo, jeśli słowo zaczyna się lub kończy interpunkcją, to zwiększamy margines, żeby zapobiec ucinaniu słów przy nawiasach, cudzysłowach, itp.
+                        starts_inside = x[0] < s_bbox[2] - 0.5
+                        ends_after_start = x[2] > s_bbox[0] + 0.5
                         if (
-                            x[0] >= s_bbox[0] - m_left
+                            starts_inside
+                            and ends_after_start
+                            and x[0] >= s_bbox[0] - m_left
                             and x[1] >= s_bbox[1] - 1.0
                             and x[2] <= s_bbox[2] + m_right
                             and x[3] <= s_bbox[3] + 1.0
@@ -149,13 +139,13 @@ def parse_text_block(
 
                         if start_match and not first_word_text.startswith(start_match.group(1)):
                             missing_start = start_match.group(1)
-                        if end_match and not last_word_text.endswith(end_match.group(1)):
+                        if end_match and end_match.group(1) not in last_word_text:
                             missing_end = end_match.group(1)
 
                         for idx, orig_x in enumerate(span_words):
                             x = list(orig_x)
                             if idx == 0 and missing_start:
-                                is_closing_punct = all(c in ".,;:!?)]}”" for c in missing_start)
+                                is_closing_punct = all(c in CLOSING_PUNCTUATION for c in missing_start)
                                 if is_closing_punct and len(spans) > 0:
                                     spans[-1].text += missing_start
                                     p_box = spans[-1].bbox
@@ -187,6 +177,14 @@ def parse_text_block(
                                 )
                             )
                     else:
+                        stripped_span = raw_span["text"].strip()
+                        if (
+                            spans
+                            and stripped_span
+                            and all(c in CLOSING_PUNCTUATION for c in stripped_span)
+                            and spans[-1].text.endswith(stripped_span)
+                        ):
+                            continue
                         current_span_id += 1
                         spans.append(
                             TextSpan(
@@ -205,7 +203,9 @@ def parse_text_block(
                     spacing = None
                     curr_bottomline = raw_line["bbox"][3]
                     if prev_bottomline is not None:
-                        spacing = geometry_classifier.line_spacing(curr_bottomline, prev_bottomline, max_font_size)
+                        spacing = geometry_classifier.line_spacing(
+                            curr_bottomline, prev_bottomline, max_font_size
+                        )
                         if not is_ftr:
                             if spacing > 0.5 and spacing < 3.0:
                                 all_spacings.append(spacing)
@@ -334,6 +334,8 @@ def post_process_block(block: TextBlock) -> TextBlock:
 
             line.spans = fixed_spans
     except Exception as e:
-        logging.error(f"Error during post-processing of block {getattr(block, 'block_id', 'unknown')}: {e}")
+        logging.error(
+            f"Error during post-processing of block {getattr(block, 'block_id', 'unknown')}: {e}"
+        )
 
     return block
