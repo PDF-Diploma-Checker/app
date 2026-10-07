@@ -5,6 +5,36 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+MIN_SUPPORT = 3
+MIN_SHARE = 0.6
+MIN_TYPE_GROUP = 5
+MIN_PARSE_CONFIDENCE = 0.5
+DOT_SHARE = 0.8
+SPECIAL_TYPES = {'legislation', 'standard', 'patent'}
+
+FIELD_LABELS = {
+    'pl': {
+        'authors': 'autorzy', 'title': 'tytuł', 'container': 'czasopismo/materiały',
+        'publisher': 'wydawca', 'place': 'miejsce', 'date': 'data', 'volume': 'wolumin',
+        'pages': 'strony', 'url': 'adres URL', 'access_date': 'data dostępu',
+    },
+    'en': {
+        'authors': 'authors', 'title': 'title', 'container': 'journal/proceedings',
+        'publisher': 'publisher', 'place': 'place', 'date': 'date', 'volume': 'volume',
+        'pages': 'pages', 'url': 'URL', 'access_date': 'access date',
+    },
+}
+
+EQUIVALENT_DATE_FORMATS = [
+    {"(yyyy)", "yyyy", "(yyyy, month)", "(yyyy, mon)", "(yyyy, miesiąc)", "(yyyy, mies.)"},
+    {"dd mon yyyy", "dd mies. yyyy"},
+    {"mon yyyy", "mies. yyyy"},
+    {"yyyy-mm-dd", "yyyy.mm.dd", "yyyy/mm/dd"},
+    {"dd month yyyy", "dd miesiąc yyyy"},
+    {"dd.mm.yyyy", "dd/mm/yyyy", "dd-mm-yyyy"},
+]
+
+
 def check_item_words(matches, item, block, category, message, content):
     """
     Adds a match error with coordinates for a specific bibliography item.
@@ -35,41 +65,27 @@ def get_format(field):
         return None
     return next(iter(field.values()), None)
 
+
 def check_order(item):
     """
-    Determines the order of fields in a bibliography item based on their positions in the text.
+    Determines the order of fields in a bibliography item from the positions found by the parser.
+    Using parser spans instead of searching the text avoids matching a year that is part of the
+    title or a publisher name that also appears elsewhere in the entry.
     """
-    
-    text = item.content
     positions = {}
-    
-    field_map = {
-        'authors':    get_text(item.authors) if item.authors else None,
-        'title':      get_text(item.title) if item.title else None,
-        'journal':    get_text(getattr(item, 'journal', None)),
-        'volume':     get_text(item.volume) if item.volume else None,
-        'pages':      get_text(item.pages) if item.pages else None,
-        'publisher':  get_text(item.publisher) if item.publisher else None,
-        'book_title': get_text(item.book_title) if item.book_title else None,
-        'url':        get_text(item.url) if item.url else None,
-        'access_date':get_text(item.access_date) if item.access_date else None,
-    }
-    if item.date and len(item.date) > 0:
-        field_map['date'] = get_text(item.date[0])
+    for name, span in (item.spans or {}).items():
+        if name in ('access_date', 'place'):
+            continue
+        if item.confidence and name in item.confidence and item.confidence[name] < MIN_PARSE_CONFIDENCE:
+            continue
+        positions[name] = span[0]
+    return tuple(sorted(positions.keys(), key=lambda key: positions[key]))
 
-    min_len = 4
-
-    for name, val in field_map.items():
-        if val and len(val) >= min_len:
-            pos = text.find(val)
-            if pos != -1:
-                positions[name] = pos
-
-    return tuple(sorted(positions.keys(), key=lambda k: positions[k]))
 
 def get_field_separator(item):
     """
     Identifies the most common separator character used between fields in a bibliography item.
+    Used as a fallback when the parser could not determine the separator from field spans.
     """
 
     text = item.content
@@ -84,7 +100,7 @@ def get_field_separator(item):
             if match_date:
                 end_pos += match_date.end()
                 after = text[end_pos:].strip()
-            
+
             sep = re.match(r'^[.,;:]', after)
             if sep:
                 separators.append(sep.group(0))
@@ -103,356 +119,279 @@ def get_field_separator(item):
 
     return Counter(separators).most_common()[0][0] if separators else None
 
+
+def message(block):
+    """Returns the full set of messages in the language of the bibliography block."""
+    return MESSAGES_EN if getattr(block, 'language', None) == 'en' else MESSAGES_PL
+
+
+def label(block, field):
+    """
+    Retrieves the translated label for a given bibliography field based on the block's language.
+    """
+    return FIELD_LABELS['en' if getattr(block, 'language', None) == 'en' else 'pl'].get(field, field)
+
+
+def detail(block, expected, found):
+    """
+    Appendix "expected X, found Y" — without it the coherence message does not tell
+    the user what exactly to fix.
+    """
+    if expected is None or found is None:
+        return ''
+    if getattr(block, 'language', None) == 'en':
+        return f" (expected: „{expected}”, found: „{found}”)"
+    return f" (oczekiwano: „{expected}”, znaleziono: „{found}”)"
+
+
+def dominant(values):
+    """
+    Dominant value computed only when it has enough support and a clear lead. This prevents
+    one of two entries of a given type from being automatically flagged as an error.
+    """
+    values = [value for value in values if value]
+    if len(values) < MIN_SUPPORT:
+        return None
+    counted = Counter(values).most_common()
+    top_value, top_count = counted[0]
+    if len(counted) > 1 and top_count == counted[1][1]:
+        return None
+    if top_count / len(values) < MIN_SHARE:
+        return None
+    return top_value
+
+
+def group_key(item, grouped_types):
+    """Entries are compared within their type only when the type has enough representatives;
+    otherwise they are compared against the entire bibliography."""
+    return item.bibtex_type if item.bibtex_type in grouped_types else '*'
+
+
+def reliable(item):
+    """
+    Determines if a bibliography item contains sufficient recognized data
+    to be considered reliable for coherence checks.
+    """
+    return (item.parse_confidence or 0) >= MIN_PARSE_CONFIDENCE
+
+
+def comparable(item):
+    """Whether the entry can participate in formatting coherence comparisons."""
+    return reliable(item) and item.entry_type not in SPECIAL_TYPES
+
+
 def check_iso(matches, item, block):
     """
-    Verifies the presence of a final dot in bibliography items.
+    Fills in the entry separator when the parser could not derive it from field spans.
+    The final-dot rule is checked for the whole bibliography in check_coherence_iso.
     """
-
-    if block.language == "pl":
-        Category_and_message = {
-            "MISSING_FINAL_DOT": "Nie zastosowano kropki na końcu wpisu.",
-        }
-    else:
-        Category_and_message = {
-            "MISSING_FINAL_DOT": "A final dot was not used at the end of the entry.",
-        }
-    text = item.content.strip()
-    ends_with_url = bool(re.search(r'https?:\s*//\S+$|www\.\S+$|doi\.org/\S+$', text))
-    if not text.endswith('.') and not ends_with_url:
-        matches = check_item_words(matches, item, block, "MISSING_FINAL_DOT", Category_and_message["MISSING_FINAL_DOT"], text)
-
-    if item.authors and get_text(item.authors):
+    if item.separator is None and item.authors and get_text(item.authors):
         item.separator = get_field_separator(item)
-
     return matches
 
-def add_bibtex_type(Bib_context):
-    """
-    Assigns the BibTeX type for each bibliography item based on its content.
-    """
-    
-    keywords = {
-    'proceedings', 'conference', 'symposium', 'workshop', 'congress',
-    'konferencja', 'konferencji', 'seminarium', 'international',
-    'handbook', 'monograph'
-    }
 
-    for item in Bib_context.items:
-        has_url = bool(item.url and get_text(item.url))
-        has_access_date = bool(item.access_date and get_text(item.access_date))
-        has_pub_date = bool(item.date and len(item.date) > 0 and get_text(item.date[0]))
-        has_journal = bool(getattr(item, 'journal', None) and get_text(item.journal))
-        
-        publisher_text = get_text(item.publisher) or ""
-        publisher_fmt = get_format(item.publisher) if item.publisher else None
-        publisher_is_journal = publisher_fmt == 'italic'
-        publisher_is_proceedings = (
-            publisher_is_journal and
-            any(kw in publisher_text.lower() for kw in keywords)
-        )
-        
-        has_publisher = bool(item.publisher and get_text(item.publisher))
-
-        if publisher_is_proceedings:
-            item.bibtex_type = "inproceedings"
-            if not getattr(item, 'book_title', None):
-                item.book_title = item.publisher
-                item.publisher = None
-        elif has_journal or publisher_is_journal:
-            item.bibtex_type = "article"
-            if not getattr(item, 'journal', None):
-                item.journal = item.publisher
-                item.publisher = None
-        elif has_publisher:
-            item.bibtex_type = "book"
-        elif getattr(item, 'online', False) or has_url:
-            item.bibtex_type = "online"
-            if not getattr(item, 'journal', None):
-                item.journal = item.publisher
-                item.publisher = None
-        else:
-            raw_text = item.content.lower()
-            
-            if "arxiv" in raw_text or "preprint" in raw_text or "tech. rep" in raw_text or "technical report" in raw_text:
-                item.bibtex_type = "article"
-            elif any(kw in raw_text for kw in keywords): 
-                item.bibtex_type = "inproceedings"
-            elif "journal" in raw_text or "transactions" in raw_text or "letters" in raw_text or "ieee access" in raw_text or re.search(r'\d+\(\d+\)', raw_text):
-                item.bibtex_type = "article"
-            else:
-                item.bibtex_type = None
-
-def check_bibtex(matches, Bib_context, bib_blocks):
+def get_ending(item):
     """
-    Validates bibliography items against BibTeX-specific requirements and required fields.
+    Determines how the entry ends (with a dot or otherwise).
+    Special handling is applied to URLs and DOIs which do not require a dot.
     """
-    
-    Category_and_message = {
-        "WRONG_BIBTEX_TYPE": "Nieznany typ wpisu w bibliografii.",
-        "MISSING_BIBTEX_FIELD": "Brakuje wymaganego pola dla tego typu wpisu BibTeX.",
-    }
-    Category_and_message_eng = {
-        "WRONG_BIBTEX_TYPE": "Unknown BibTeX entry type.",
-        "MISSING_BIBTEX_FIELD": "Required field missing for this BibTeX entry type.",
-    }
-    required_fields_per_type = {
-        "article": ["journal"],
-    }
+    if getattr(item, 'ending', None):
+        return item.ending
+    text = item.content.strip()
+    ends_with_url = bool(re.search(r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+$|www\.\S+$|doi\.org/\S+$', text))
+    if text.endswith('.') or ends_with_url:
+        return 'dot'
+    return 'other'
 
-    add_bibtex_type(Bib_context)
+def check_final_dots(matches, Bib_context, bib_blocks):
+    """
+    Final dot at the end of an entry. Always required. If the bibliography consistently ends
+    entries without a dot, a single summary remark is reported instead of flagging each entry
+    individually — otherwise a single thesis could receive 125 identical messages.
+    """
+    items = [item for item in Bib_context.items
+             if bib_blocks.get(item.item.item_id)]
+    if not items:
+        return matches
+    endings = [get_ending(item) for item in items]
+    with_dot = sum(1 for ending in endings if ending == 'dot')
+    total = len(items)
+    block = bib_blocks.get(items[0].item.item_id)
+    messages = message(block)
+
+    if total and with_dot / total >= DOT_SHARE:
+        for item, ending in zip(items, endings):
+            if ending == 'dot':
+                continue
+            item_block = bib_blocks.get(item.item.item_id)
+            matches = check_item_words(matches, item, item_block, "MISSING_FINAL_DOT",
+                                       messages["MISSING_FINAL_DOT"], item.content.strip())
+        return matches
+
+    missing = total - with_dot
+    if missing:
+        summary = messages["MISSING_FINAL_DOT_ALL"].format(missing=missing, total=total)
+        matches = check_item_words(matches, items[0], block, "MISSING_FINAL_DOT", summary,
+                                   items[0].content.strip())
+    return matches
+
+
+def check_missing_fields(matches, Bib_context, bib_blocks):
+    """
+    Iterates through all bibliography entries and ensures they contain
+    the required bibliographic fields (e.g., authors, dates).
+    """
     for item in Bib_context.items:
         block = bib_blocks.get(item.item.item_id)
         if block is None:
             continue
-        messages = Category_and_message_eng if block.language == 'en' else Category_and_message
-        if item.bibtex_type is None:
-            matches = check_item_words(matches, item, block, "WRONG_BIBTEX_TYPE", messages["WRONG_BIBTEX_TYPE"], item.content)
-            continue 
         check_item(matches, item, block)
-
-        required = required_fields_per_type.get(item.bibtex_type, [])
-        missing = []
-        for f in required:
-            val = getattr(item, f, None)
-            if not val:
-                missing.append(f)
-            elif isinstance(val, dict) and not get_text(val):
-                missing.append(f)
-            elif isinstance(val, list) and (len(val) == 0 or not get_text(val[0])):
-                missing.append(f)
-        
-        if missing:
-            if 'journal' in missing and re.search(r'arxiv|preprint', item.content, re.IGNORECASE):
-                missing.remove('journal')
-
-            if missing: 
-                msg = f"{messages['MISSING_BIBTEX_FIELD']} ({item.bibtex_type}: {', '.join(missing)})"
-                matches = check_item_words(matches, item, block, "MISSING_BIBTEX_FIELD", msg, item.content)
-
-    logger.info("BibTeX check complete: %d matches found", len(matches))
+    
+    logger.info("Missing fields check complete: %d matches found", len(matches))
     return matches
+
+PERSISTENT_URL = re.compile(
+    r'(10\.\d{4,9}/|'                                 
+    r'doi\.org/|ieeexplore\.ieee\.org/document/|dl\.acm\.org/|'
+    r'arxiv\.org/abs/|zenodo\.org/|link\.springer\.com/|sciencedirect\.com/science/article/|'
+    r'linkinghub\.elsevier\.com/retrieve/pii/|mdpi\.com/\d{4}-\d{3}[\dX]/|ojs\.aaai\.org/)',
+    re.IGNORECASE)
+
+
+def is_online(item):
+    """
+    Checks if the bibliography item is an online source based on its type
+    or the presence of a URL.
+    """
+    return item.bibtex_type == 'online' or bool(item.url and get_text(item.url))
+
+
+def has_persistent_id(item):
+    """DOI, or a URL pointing to a stable scientific repository."""
+    if get_text(item.doi):
+        return True
+    url = get_text(item.url) if item.url else None
+    return bool(url and PERSISTENT_URL.search(url))
 
 def check_item(matches, item, block):
     """
-    Checks a bibliography item for missing obligatory fields based on its type.
+    Validates a single bibliography item for the presence of required fields,
+    generating error messages for missing authors, dates, or access identifiers.
     """
-    if block.language == "pl":
-        Category_and_message = {
-            "MISSING_OBLIGATORY": "We wpisie brakuje pól wymaganych (autor, tytuł lub data)",
-            "MISSING_PUBLISHER": "Brakuje wydawcy dla pozycji książkowej.",
-            "MISSING_ONLINE": "Brakuje pól obowiązkowych dla prac online.",
-            "MISSING_PAGES": "Brakuje stron dla artykułu.",
-            "MISSING_ARTICLE_OR_BOOK": "Brakuje danych identyfikacyjnych pracy.",
-            "NO_ACCESS_DATE_OR_DOI": "Brakuje daty dostępu lub doi.",
-        }
-    else:
-        Category_and_message = {
-            "MISSING_OBLIGATORY": "Entry is missing required fields (author, title, or date).",
-            "MISSING_PUBLISHER": "Missing publisher for a book entry.",
-            "MISSING_ONLINE": "Missing required fields for an online entry.",
-            "MISSING_PAGES": "Missing page numbers for an article.",
-            "MISSING_ARTICLE_OR_BOOK": "Missing identifying information for the work.",
-            "NO_ACCESS_DATE_OR_DOI": "Missing access date or DOI.",
-        }
+    if not reliable(item) or item.entry_type in SPECIAL_TYPES:
+        return matches
+    messages = message(block)
     text = item.content.strip()
-    
-    if item.bibtex_type != "online":
-        if not get_text(item.authors) or (not item.date or len(item.date) == 0 or not get_text(item.date[0])):
-            matches = check_item_words(matches, item, block, "MISSING_OBLIGATORY", Category_and_message["MISSING_OBLIGATORY"], text)
-            return matches
 
-    if item.bibtex_type =="book" and (not item.publisher or not get_text(item.publisher)):
-        matches = check_item_words(matches, item, block, "MISSING_PUBLISHER", Category_and_message["MISSING_PUBLISHER"], text)
-
-    if item.bibtex_type == "online":
-        if not item.access_date or not get_text(item.access_date):
-            has_valid_pub_date = False
-            if item.date and len(item.date) > 0:
-                date_text = get_text(item.date[0])
-                if date_text and "n.d." not in date_text.lower():
-                    has_valid_pub_date = True
-            
-            is_wiki = "wikipedia" in text.lower() or "wiki" in text.lower()
-            
-            if not has_valid_pub_date or is_wiki:
-                matches = check_item_words(matches, item, block, "MISSING_ONLINE", Category_and_message["MISSING_ONLINE"], text)
-        if not get_text(item.url) and not get_text(item.doi) and not get_text(item.publisher):
-            matches = check_item_words(matches, item, block, "MISSING_ARTICLE_OR_BOOK", Category_and_message["MISSING_ARTICLE_OR_BOOK"], text)
-
-    if getattr(item, 'journal', None) and get_text(item.journal):
-        journal_text = get_text(item.journal) or ""
-    
-        book_keywords = {
-            'handbook', 'synthesis', 'monograph', 'textbook',
-            'edition', 'podręcznik', 'monografia', 'kompendium'
-        }
-        is_book_like = (
-            len(journal_text) > 60
-            or any(kw in journal_text.lower() for kw in book_keywords)
-        )
-        
-        if not is_book_like:
-            has_pages_in_context = item.pages and get_text(item.pages)
-            has_pages_in_text = re.search(r'\b(?:art(?:icle)?\.?|pp?\.)\s*\d+|\b\d+:\d+\b', text, re.IGNORECASE)
-            has_book_volume = bool(re.search(r'\bvolume\s+\d+', text, re.IGNORECASE))
-            is_preprint_or_repo = re.search(r'arxiv|preprint|zenodo|biorxiv', text, re.IGNORECASE)
-
-            if not has_pages_in_context and not has_pages_in_text and not has_book_volume and not is_preprint_or_repo:
-                matches = check_item_words(matches, item, block, "MISSING_PAGES", Category_and_message["MISSING_PAGES"], text)
-
-    if item.url and get_text(item.url) and not get_text(item.doi) and (not item.access_date or not get_text(item.access_date)) and item.bibtex_type != "online":
-        matches = check_item_words(matches, item, block, "NO_ACCESS_DATE_OR_DOI", Category_and_message["NO_ACCESS_DATE_OR_DOI"], text)
-    
+    is_web_page = is_online(item) and not has_persistent_id(item)
+    if not (item.date and get_text(item.date[0])):
+        if not is_web_page:
+            matches = check_item_words(matches, item, block, "MISSING_DATE", messages["MISSING_DATE"], text)
+    if is_online(item) and not get_text(item.access_date) and not has_persistent_id(item):
+        matches = check_item_words(matches, item, block, "MISSING_ACCESS_DATE_OR_DOI",
+                                   messages["MISSING_ACCESS_DATE_OR_DOI"], text)
     return matches
+
 
 def check_coherence_iso(matches, Bib_context, bib_blocks):
     """
-    Checks the overall coherence of formatting (separators, dates, authors) across all bibliography items.
+    Checks the overall coherence of formatting (separators, dates, authors, titles, field order)
+    across all bibliography items.
     """
-    Category_and_message = {
-        "SEPARATOR_COHERENCE": "Niespójna forma separatora pól wpisu z pozostałymi wpisami bibliografii.",
-        "AUTHOR_FORMAT_COHERENCE": "Niespójny format autorów wpisu z pozostałymi wpisami bibliografii.",
-        "DATE_FORMAT_COHERENCE": "Niespójny format dat wpisu z pozostałymi wpisami bibliografii.",
-        "TITLE_FORMAT_COHERENCE": "Niespójny format tytułów wpisu z pozostałymi wpisami bibliografii.",
-        "DATE_POSITION_COHERENCE": "Niespójna pozycja daty wpisu z pozostałymi wpisami bibliografii.",
-        "WRONG_ORDER_ISO": "Kolejność bądź formatowanie pól we wpisie niespójna z resztą bibliografii.",
-    }
-    Category_and_message_eng = {
-        "SEPARATOR_COHERENCE": "Inconsistent field separator format in the entry compared to other bibliography entries.",
-        "AUTHOR_FORMAT_COHERENCE": "Inconsistent author format in the entry compared to other bibliography entries.",
-        "DATE_FORMAT_COHERENCE": "Inconsistent date format in the entry compared to other bibliography entries.",
-        "TITLE_FORMAT_COHERENCE": "Inconsistent title format in the entry compared to other bibliography entries.",
-        "DATE_POSITION_COHERENCE": "Inconsistent date position in the entry compared to other bibliography entries.",
-        "WRONG_ORDER_ISO": "Order or formatting of fields in the entry is inconsistent with the rest of the bibliography.",
-    }
+    reliable = [item for item in Bib_context.items
+                if bib_blocks.get(item.item.item_id) and comparable(item)]
 
-    add_bibtex_type(Bib_context)
+    type_counts = Counter(item.bibtex_type for item in reliable if item.bibtex_type)
+    grouped_types = {name for name, count in type_counts.items() if count >= MIN_TYPE_GROUP}
+
     separators, author_formats = {}, {}
     date_formats, title_formats = {}, {}
     date_positions = {}
-    marker_types = []
     field_order = {}
 
     for item in Bib_context.items:
         block = bib_blocks.get(item.item.item_id)
         if block is None:
             continue
-        if block.language == 'en':
-            messages = Category_and_message_eng
-        else:
-            messages = Category_and_message
         check_iso(matches, item, block)
-        t = item.bibtex_type
 
-        if getattr(item, 'separator', None):
-            separators.setdefault(t, []).append(item.separator)
-        if item.authors and get_format(item.authors):
-            author_formats.setdefault(t, []).append(get_format(item.authors))
-        if item.date:
-            for d in item.date:
-                fmt = get_format(d)
-                if fmt:
-                    date_formats.setdefault(t, []).append(fmt)
-        if getattr(item, 'date_position', None) and not getattr(item, 'online', False):
-            date_positions.setdefault(t, []).append(item.date_position)
+    for item in reliable:
+        key = group_key(item, grouped_types)
 
-        item_title_fmt = get_format(item.title) if item.title else None
-        if item_title_fmt == 'italic+quotes':
-            item_title_fmt = 'quotes'
-        if item_title_fmt and item_title_fmt not in ('sentence_case', 'title_case'):
-            title_formats.setdefault(t, []).append(item_title_fmt)
+        if item.authors and get_format(item.authors) not in (None, 'different', 'organization'):
+            author_formats.setdefault(key, []).append(get_format(item.authors))
+        for date_val in item.date or []:
+            fmt = get_format(date_val)
+            if fmt:
+                date_formats.setdefault(key, []).append(fmt)
+                break
 
-        if item.item.marker_type:
-            marker_types.append(item.item.marker_type)
+    dominant_author_fmt = {key: value for key, value in ((k, dominant(v)) for k, v in author_formats.items()) if value}
+    dominant_date_fmt = {key: value for key, value in ((k, dominant(v)) for k, v in date_formats.items()) if value}
 
-        order = check_order(item)
-        if order:
-            field_order.setdefault(t, []).append(order)
-
-    dominant_separator = {t: Counter(v).most_common(1)[0][0] for t, v in separators.items()}
-    dominant_author_fmt = {t: Counter(v).most_common(1)[0][0] for t, v in author_formats.items()}
-    dominant_date_fmt = {t: Counter(v).most_common(1)[0][0] for t, v in date_formats.items()}
-    dominant_title_fmt = {t: Counter(v).most_common(1)[0][0] for t, v in title_formats.items()}
-    dominant_date_pos = {t: Counter(v).most_common(1)[0][0] for t, v in date_positions.items()}
-    dominant_marker = Counter(marker_types).most_common(1)[0][0] if marker_types else None
-    dominant_order = {t: Counter(v).most_common(1)[0][0] for t, v in field_order.items()}
-
-    for item in Bib_context.items:
+    for item in reliable:
         block = bib_blocks.get(item.item.item_id)
-        if block is None:
-            continue
-        if block.language == 'en':
-            messages = Category_and_message_eng
-        else:
-            messages = Category_and_message
-
-        t = item.bibtex_type
-
-        if getattr(item, 'separator', None) and t in dominant_separator:
-            if item.separator != dominant_separator[t]:
-                matches = check_item_words(matches, item, block, "SEPARATOR_COHERENCE", messages["SEPARATOR_COHERENCE"], item.content)
+        messages = message(block)
+        key = group_key(item, grouped_types)
 
         author_fmt = get_format(item.authors)
-        if t in dominant_author_fmt and dominant_author_fmt[t] == 'Jan Nowak' and author_fmt in {'Nowak J.', 'Nowak, J.'}:
-            pass
-        elif author_fmt and author_fmt not in ('different', 'Jan Nowak') and t in dominant_author_fmt:
-            if author_fmt != dominant_author_fmt[t]:
-                matches = check_item_words(matches, item, block, "AUTHOR_FORMAT_COHERENCE", messages["AUTHOR_FORMAT_COHERENCE"], item.content)
+        expected = dominant_author_fmt.get(key)
+        if author_fmt and expected and author_fmt not in ('different', 'organization'):
+            # "Jan Nowak" is a superset of initial-based formats — the same author fits both.
+            equivalent = expected == 'Jan Nowak' and author_fmt in {'Nowak J.', 'Nowak, J.'}
+            if not equivalent and author_fmt != expected:
+                matches = check_item_words(matches, item, block, "AUTHOR_FORMAT_COHERENCE",
+                                           messages["AUTHOR_FORMAT_COHERENCE"] + detail(block, expected, author_fmt),
+                                           item.content)
 
-        if item.date and len(item.date) > 0 and t in dominant_date_fmt:
-            dom_date_fmt = dominant_date_fmt[t]
-            equivalent_formats = [
-                {"(yyyy)", "yyyy"},               
-                {"dd mon yyyy", "dd mies. yyyy"},  
-                {"mon yyyy", "mies. yyyy"},  
-                {"yyyy-mm-dd", "yyyy.mm.dd", "yyyy/mm/dd"},
-                {"dd month yyyy", "dd miesiąc yyyy"}, 
-                {"dd.mm.yyyy", "dd/mm/yyyy", "dd-mm-yyyy"}         
-            ]
-            
-            is_equivalent = False
-            for d in item.date:
-                item_date_fmt = get_format(d)
-                if not item_date_fmt:
-                    continue
-                    
-                if item_date_fmt == dom_date_fmt:
-                    is_equivalent = True
-                    break
-                    
-                for group in equivalent_formats:
-                    if item_date_fmt.lower() in group and dom_date_fmt.lower() in group:
-                        is_equivalent = True
-                        break 
-                
-                if is_equivalent:
-                    break
-                    
-            if not is_equivalent:
-                matches = check_item_words(matches, item, block, "DATE_FORMAT_COHERENCE", messages["DATE_FORMAT_COHERENCE"], item.content)
+        expected = dominant_date_fmt.get(key)
+        if item.date and expected:
+            found = get_format(item.date[0])
+            if found and not date_formats_match(found, expected):
+                matches = check_item_words(matches, item, block, "DATE_FORMAT_COHERENCE",
+                                           messages["DATE_FORMAT_COHERENCE"] + detail(block, expected, found),
+                                           item.content)
 
-        if t in dominant_title_fmt:
-            item_title_fmt = get_format(item.title) if item.title else None
-            if item_title_fmt == 'italic+quotes':  
-                item_title_fmt = 'quotes'
-            title_text = get_text(item.title) or ""
-            if item_title_fmt and item_title_fmt not in ('sentence_case', 'title_case'):  
-                if t not in ('article', 'incollection', 'online', 'inproceedings'):  
-                    if t in dominant_title_fmt and item_title_fmt != dominant_title_fmt[t]:
-                        if not title_text.startswith('(') and len(title_text) > 10:
-                            matches = check_item_words(matches, item, block, "TITLE_FORMAT_COHERENCE", messages["TITLE_FORMAT_COHERENCE"], item.content)
-
-        if t in dominant_order:
-            item_order = check_order(item)
-            dom = dominant_order[t]
-            common_fields = [f for f in dom if f in item_order]
-            item_filtered = [f for f in item_order if f in common_fields]
-            if item_filtered != common_fields:
-                matches = check_item_words(matches, item, block, "WRONG_ORDER_ISO", messages["WRONG_ORDER_ISO"], item.content)
-
-        if getattr(item, 'date_position', None) and t in dominant_date_pos and not getattr(item, 'online', False):
-            if item.date_position != dominant_date_pos[t]:
-                matches = check_item_words(matches, item, block, "DATE_POSITION_COHERENCE", messages["DATE_POSITION_COHERENCE"], item.content)
-
+    matches = check_final_dots(matches, Bib_context, bib_blocks)
     logger.info("ISO coherence check complete: %d matches found", len(matches))
     return matches
+
+
+def title_format(item):
+    """Title formatting reduced to a form comparable across entries."""
+    fmt = get_format(item.title) if item.title else None
+    if fmt == 'italic+quotes':
+        fmt = 'quotes'
+    if fmt in ('sentence_case', 'title_case', 'plain', None):
+        return None
+    return fmt
+
+
+def date_formats_match(found, expected):
+    """Whether two date notations should be considered the same format."""
+    if found == expected:
+        return True
+    groups = list(EQUIVALENT_DATE_FORMATS)
+    for group in groups:
+        if found.lower() in group and expected.lower() in group:
+            return True
+    return False
+
+
+MESSAGES_PL = {
+    "MISSING_FINAL_DOT": "Nie zastosowano kropki na końcu wpisu. Jeśli wpis kończy się linkiem lub doi kropka powinna byc po spacji, żeby nie popsuć funkcjonalności linku.",
+    "MISSING_FINAL_DOT_ALL": "Wpisy bibliografii nie są zakończone kropką ({missing} z {total}); norma PN-ISO 690 przewiduje kropkę na końcu wpisu.",
+    "MISSING_DATE": "Brakuje daty we wpisie.",
+    "MISSING_ACCESS_DATE_OR_DOI": "Wpis online nie ma ani DOI, ani daty dostępu. Dodaj DOI (jeśli publikacja je ma) albo datę dostępu.",
+    "AUTHOR_FORMAT_COHERENCE": "Niespójny format autorów wpisu z pozostałymi wpisami bibliografii.",
+    "DATE_FORMAT_COHERENCE": "Niespójny format dat wpisu z pozostałymi wpisami bibliografii.",
+}
+
+MESSAGES_EN = {
+    "MISSING_FINAL_DOT": "A final dot was not used at the end of the entry.",
+    "MISSING_FINAL_DOT_ALL": "Bibliography entries do not end with a full stop ({missing} of {total}); PN-ISO 690 expects a dot at the end of an entry.",
+    "MISSING_DATE": "Missing date in the entry.",
+    "MISSING_ACCESS_DATE_OR_DOI": "Online entry has neither a DOI nor an access date. Add a DOI (if the publication has one) or an access date.",
+    "AUTHOR_FORMAT_COHERENCE": "Inconsistent author format in the entry compared to other bibliography entries.",
+    "DATE_FORMAT_COHERENCE": "Inconsistent date format in the entry compared to other bibliography entries.",
+}
