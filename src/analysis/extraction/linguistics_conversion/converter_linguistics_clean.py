@@ -5,6 +5,12 @@ a form better suited for linguistics and LLM
 
 import re
 import statistics
+import unicodedata
+
+
+import re
+import statistics
+import unicodedata
 
 
 from analysis.extraction.linguistics_conversion.schema import (
@@ -36,7 +42,6 @@ from analysis.extraction.linguistics_conversion.schema import (
 
 
 class PDFMapper:
-    # Stałe
     TOP_MARGIN_THRESH = 70
     BOTTOM_MARGIN_OFFSET = 75
     MARGIN_INDENT_THRESH = 20
@@ -46,6 +51,64 @@ class PDFMapper:
     TABLE_INTERSECT_THRESH = 0.8
     MIN_VERTICAL_GAP_LIST = 50
 
+    BIB_HEADINGS = (
+        "BIBLIOGRAFIA",
+        "LITERATURA",
+        "REFERENCES",
+        "WYKAZ LITERATURY",
+        "PIŚMIENNICTWO",
+        "ŹRÓDŁA",
+        "BIBLIOGRAPHY",
+        "WORKS CITED",
+        "CITED REFERENCES",
+        "SPIS LITERATURY",
+        "WYKAZ BIBLIOGRAFICZNY",
+        "WYKAZ ŹRÓDEŁ",
+        "LITERATURE",
+    )
+    AFTER_BIB_HEADING_RE = re.compile(
+        r"^(DODATEK\b|ZAŁĄCZNIK\b|ZALACZNIK\b|APPENDIX\b|ANEKS\b|SPIS\s|WYKAZ\s|LIST\b|OŚWIADCZENIE\b|OSWIADCZENIE\b|ABSTRACT\b|STRESZCZENIE\b)", re.IGNORECASE
+    )
+    HEADING_NUM_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?|[A-Z]\.|[IVXLC]+\.)\s+")
+
+    @staticmethod
+    def _strip_heading_number(text: str) -> str:
+        """
+        Removes a leading section number (e.g. '5. ', '2.1 ', 'A. ') from a heading
+        and returns the upper-cased remainder. Falls back to the whole text if nothing remains.
+        """
+        cleaned = PDFMapper.HEADING_NUM_RE.sub("", text, count=1).strip().upper()
+        return cleaned or text.strip().upper()
+
+    @staticmethod
+    def _is_bib_heading_line(text: str) -> bool:
+        """
+        True if a single line is exactly a bibliography heading (optionally numbered,
+        e.g. '9. REFERENCES', 'Bibliografia:'). Used for headings that sit in one PDF block
+        together with the bibliography entries and are not bold / larger than body text.
+        """
+        text = text.strip()
+        if not text or len(text) >= 80:
+            return False
+            
+        if re.match(r"^\s*\d+\.\d+", text):
+            return False
+            
+        key = PDFMapper._strip_heading_number(text).rstrip(":. ")
+        return key in PDFMapper.BIB_HEADINGS
+
+    @staticmethod
+    def _is_after_bib_heading_line(text: str) -> bool:
+        """
+        True if a single line is exactly a heading that ends the bibliography 
+        (e.g. 'ABSTRACT', 'SPIS RYSUNKÓW').
+        """
+        text = text.strip()
+        if not text or len(text) >= 80:
+            return False
+        key = PDFMapper._strip_heading_number(text).rstrip(":. ")
+        return bool(PDFMapper.AFTER_BIB_HEADING_RE.match(key))
+
     def __init__(self):
         # Stan wewnętrzny
         self.logical_blocks = []
@@ -54,7 +117,6 @@ class PDFMapper:
         self.curr_line = 0
         self.last_y1 = None
 
-    # Metody statyczne (Pomocnicze, bez stanu)
     @staticmethod
     def is_continuation(last_item_bbox: list, current_block_bbox: list) -> bool:
         """
@@ -335,18 +397,49 @@ class PDFMapper:
                 else 0
             )
 
-        self.logical_blocks.append(
-            ParagraphBlock(
-                block_id=self.paragraph_buffer[0]["block_id"],
-                content=combined_content,
+        is_bib = getattr(self, "in_bibliography_section", False)
+
+        if is_bib:
+            if combined_words:
+                bbox = [
+                    min(w.bbox[0] for w in combined_words),
+                    min(w.bbox[1] for w in combined_words),
+                    max(w.bbox[2] for w in combined_words),
+                    max(w.bbox[3] for w in combined_words),
+                ]
+            else:
+                bbox = [0, 0, 0, 0]
+            item = ListItem(
+                item_id=self.paragraph_buffer[0]["block_id"],
+                marker_type="none",
+                text=combined_content,
+                bbox=bbox,
                 words=combined_words,
-                type=block_type,
-                is_widow=is_widow,
-                is_bekart=is_bekart,
-                is_szewc=is_szewc,
-                debug_empty=debug_why_empty,
             )
-        )
+            self.logical_blocks.append(
+                ListBlock(
+                    block_id=self.paragraph_buffer[0]["block_id"],
+                    content=combined_content,
+                    bbox=bbox,
+                    type="list",
+                    is_bibliography=True,
+                    items=[item],
+                    words=combined_words,
+                )
+            )
+        else:
+            self.logical_blocks.append(
+                ParagraphBlock(
+                    block_id=self.paragraph_buffer[0]["block_id"],
+                    content=combined_content,
+                    words=combined_words,
+                    type=block_type,
+                    is_widow=is_widow,
+                    is_bekart=is_bekart,
+                    is_szewc=is_szewc,
+                    debug_empty=debug_why_empty,
+                )
+            )
         self.paragraph_buffer.clear()
 
     def _empty_list_buffer(self):
@@ -372,6 +465,13 @@ class PDFMapper:
             is_bibiography = (
                 True if getattr(self, "in_bibliography_section", False) else False
             )
+            
+            if is_bibiography:
+                valid_markers = [item.marker_type for item in items if getattr(item, "marker_type", "none") != "none"]
+                dominant_marker = max(set(valid_markers), key=valid_markers.count) if valid_markers else "none"
+                for item in items:
+                    item.marker_type = dominant_marker
+
             data = self.list_buffer[0]
             item = data["item"]
 
@@ -473,11 +573,17 @@ class PDFMapper:
             ):
                 if not finished:
                     is_new_paragraph = (
-                        False  # Ratujemy! Zignoruj fałszywe wcięcie (np. lustrzane)
+                        False 
                     )
                 else:
                     is_new_paragraph = True
                     debug_reason = "wcięcie na początku bloku/strony"
+            elif full_text.strip() and getattr(self, "in_bibliography_section", False):
+                # Specjalna reguła dla bibliografii (APA/Harvard): 
+                # Jeśli poprzednia linia kończy się kropką, a nowa linia nie ma wcięcia (wcięcie wiszące lub brak), to nowy wpis.
+                if finished and line_x0 <= x0_margin + self.MARGIN_INDENT_THRESH:
+                    is_new_paragraph = True
+                    debug_reason = "nowy wpis bibliografii (brak wcięcia)"
 
         if is_valid_list_cont:
             is_new_paragraph = False
@@ -519,6 +625,22 @@ class PDFMapper:
             if not word_text:
                 continue
 
+            is_combining = all(
+                unicodedata.category(ch).startswith("M") for ch in word_text
+            )
+            if is_combining and words_info:
+                last_word = words_info[-1]
+                merged = unicodedata.normalize("NFC", last_word.text + word_text)
+                last_word.text = merged
+                last_word.end_char = last_word.start_char + len(merged)
+                if full_text.endswith(" "):
+                    full_text = full_text[:-1]
+                full_text = full_text[: last_word.start_char] + merged + full_text[last_word.start_char + len(merged) :]
+                last_word.bbox[2] = max(last_word.bbox[2], span.bbox[2])
+                last_word.bbox[3] = max(last_word.bbox[3], span.bbox[3])
+                prev_span_x1 = span.bbox[2]
+                continue
+
             if prev_span_x1 is not None:
                 current_gap = span.bbox[0] - prev_span_x1
 
@@ -535,21 +657,17 @@ class PDFMapper:
                 if current_gap > 1.5 * m_gap and after_punct:
                     full_text += " "
 
-            # Logika rozdzielania słów
             sub_words = word_text.split()
-
             span_x0, span_y0, span_x1, span_y1 = span.bbox
             span_width = span_x1 - span_x0
             total_chars = len(word_text)
-
             current_sub_x0 = span_x0
 
             for i, sub_w in enumerate(sub_words):
                 if i > 0:
                     full_text += " "
-
+                sub_w = unicodedata.normalize("NFC", sub_w)
                 start_char = len(full_text)
-
                 sub_w_width = (
                     (len(sub_w) / total_chars) * span_width if total_chars > 0 else 0
                 )
@@ -654,6 +772,7 @@ class PDFMapper:
             r"^(rysunek|rys\.|fot\.|schemat)\s*(?:\d+|[IVX]+)", re.IGNORECASE
         )
         tab_pattern = re.compile(r"^(tabela|tab\.)\s*(?:\d+|[IVX]+)", re.IGNORECASE)
+
         geometry_classifier = GeometryClassifier()
         margins = geometry_classifier.calculate_margins(
             [{"bbox": b.bbox} for b in page.text_blocks], page.width, page.height
@@ -716,7 +835,7 @@ class PDFMapper:
                 new_doc.floating_elements.page_artifacts.append(new_artifact)
                 continue
 
-            for line in block.lines:
+            for line_idx, line in enumerate(block.lines):
                 line_bbox = (
                     [
                         line.spans[0].bbox[0],
@@ -733,7 +852,56 @@ class PDFMapper:
                 tmp_line_text = "".join(s.text for s in line.spans).strip()
                 if not tmp_line_text:
                     continue
-                line_type, _ = classify_block_content(tmp_line_text, current_marker)
+                tmp_line_text_sp = " ".join(
+                    s.text.strip() for s in line.spans if s.text.strip()
+                )
+                if line_idx == 0 and self._is_bib_heading_line(tmp_line_text_sp):
+                    self._empty_paragraph_buffer("wykryto nagłówek bibliografii")
+                    self.curr_line = 0
+                    self._empty_list_buffer()
+                    self.in_bibliography_section = True
+                    current_marker = None
+                    is_valid_list_cont = False
+                    hd_text, hd_words, _ = self._extract_words_with_spacing(
+                        line, "", [], page.number, 0, line.spans[-1].bbox[2]
+                    )
+                    self.curr_line = 0
+                    self.logical_blocks.append(
+                        ParagraphBlock(
+                            block_id=block.block_id,
+                            content=hd_text.strip(),
+                            words=hd_words,
+                            type="heading",
+                            debug_empty="nagłówek bibliografii (linia)",
+                        )
+                    )
+                    self.last_y1 = line.spans[-1].bbox[3]
+                    continue
+
+                if line_idx == 0 and getattr(self, "in_bibliography_section", False) and self._is_after_bib_heading_line(tmp_line_text_sp):
+                    self._empty_paragraph_buffer("wykryto koniec bibliografii")
+                    self.curr_line = 0
+                    self._empty_list_buffer()
+                    self.in_bibliography_section = False
+                    current_marker = None
+                    is_valid_list_cont = False
+                    hd_text, hd_words, _ = self._extract_words_with_spacing(
+                        line, "", [], page.number, 0, line.spans[-1].bbox[2]
+                    )
+                    self.curr_line = 0
+                    self.logical_blocks.append(
+                        ParagraphBlock(
+                            block_id=block.block_id,
+                            content=hd_text.strip(),
+                            words=hd_words,
+                            type="heading",
+                            debug_empty="koniec bibliografii (linia)",
+                        )
+                    )
+                    self.last_y1 = line.spans[-1].bbox[3]
+                    continue
+
+                line_type, _ = classify_block_content(tmp_line_text_sp, current_marker)
 
                 if line_type == "list" and full_text.strip():
                     prev_type, prev_marker = classify_block_content(
@@ -830,7 +998,7 @@ class PDFMapper:
                 if is_new_paragraph and full_text.strip():
                     curr_type, _ = classify_block_content(full_text, current_marker)
                     next_line_type, _ = classify_block_content(
-                        tmp_line_text, current_marker
+                        tmp_line_text_sp, current_marker
                     )
 
                     if curr_type == "list" and next_line_type != "list":
@@ -928,14 +1096,36 @@ class PDFMapper:
                 )
                 continue
 
-            if self.is_header(words_info):
+            is_hdr = self.is_header(words_info)
+            in_bib = getattr(self, "in_bibliography_section", False)
+            if is_hdr and in_bib:
+                is_bold = all(w.bold for w in words_info)
+                avg_size = sum(w.size for w in words_info) / len(words_info) if words_info else 0
+                if not (is_bold or avg_size > 12.5):
+                    is_hdr = False
+
+            heading_key = self._strip_heading_number(full_text)
+            if re.match(r"^\s*\d+\.\d+", full_text):
+                heading_key = full_text.strip().upper()
+            is_short = len(full_text) < 80 and len(words_info) <= 8
+            if is_short and (
+                heading_key in self.BIB_HEADINGS
+                or (in_bib and self.AFTER_BIB_HEADING_RE.match(heading_key))
+            ):
+                is_hdr = True
+
+            if is_hdr:
                 self._empty_paragraph_buffer("wykryto nagłówek")
                 self.curr_line = 0
                 self._empty_list_buffer()
 
-                if full_text.upper().startswith(
-                    ("BIBLIOGRAFIA", "LITERATURA", "REFERENCES", "WYKAZ LITERATURY")
+                if heading_key.rstrip(":. ").startswith(self.BIB_HEADINGS):
+                    self.in_bibliography_section = True
+                elif in_bib and not (
+                    self.AFTER_BIB_HEADING_RE.match(heading_key)
+                    or self.HEADING_NUM_RE.match(full_text)
                 ):
+
                     self.in_bibliography_section = True
                 else:
                     self.in_bibliography_section = False
@@ -1311,12 +1501,19 @@ class PDFMapper:
         for block in self.logical_blocks:
             if getattr(block, "is_bibliography", False) and hasattr(block, "items"):
                 for item in block.items:
+                    # Wpisy bez markera (marker_type="none") nie mają numeru - pierwszym słowem jest autor
+                    if getattr(item, "marker_type", None) == "none":
+                        continue
                     if item.words:
                         marker_text = item.words[0].text
 
                         match = re.search(r"\d+", marker_text)
                         if match:
                             valid_bib_numbers.add(match.group())
+
+        # Bibliografia nienumerowana (np. APA) - brak numerów do weryfikacji cytowań [n]
+        if not valid_bib_numbers:
+            return
 
         citation_pattern = re.compile(r"\[([\d\s,\-]+)\]")
 
