@@ -257,7 +257,9 @@ class PDFReader(QMainWindow):
         self.report_btn = QPushButton("Zgłoś problem")
         self.report_btn.setStyleSheet(styles.RED_BUTTON_STYLE)
         self.report_btn.setCursor(Qt.PointingHandCursor)
-        self.report_btn.clicked.connect(lambda: send_report(self))
+        self.report_btn.clicked.connect(
+            lambda: send_report(self, getattr(self, "current_pdf_path", None))
+        )
         l.addWidget(self.report_btn)
 
         self.logs_btn = QPushButton("Logi")
