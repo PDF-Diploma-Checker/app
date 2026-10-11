@@ -1,0 +1,64 @@
+#helper for building exe without having windows operating system
+
+
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ exe ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: base
+            sync_args: ""
+            pyi_args: ""
+          - variant: cpu
+            sync_args: "--extra cpu"
+            pyi_args: "--collect-all llama_cpp"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+          enable-cache: true
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          uv sync --frozen --no-dev ${{ matrix.sync_args }}
+          uv pip install pyinstaller
+
+      - name: Build executable with PyInstaller
+        shell: pwsh
+        run: |
+          $pl_path = .venv\Scripts\python.exe -c "import pl_core_news_lg, pathlib; print(pathlib.Path(pl_core_news_lg.__file__).parent)"
+          $en_path = .venv\Scripts\python.exe -c "import en_core_web_lg, pathlib; print(pathlib.Path(en_core_web_lg.__file__).parent)"
+
+          $extra = "${{ matrix.pyi_args }}" -split ' ' | Where-Object { $_ }
+
+          .venv\Scripts\python.exe -m PyInstaller --noconfirm --noconsole --onedir --name "DiplomaChecker" `
+            --paths src `
+            --collect-submodules ui `
+            --collect-all spacy `
+            --collect-all morfeusz2 `
+            --collect-data language_tool_python `
+            --add-data "src/ui/assets;ui/assets" `
+            --add-data "${pl_path};pl_core_news_lg" `
+            --add-data "${en_path};en_core_web_lg" `
+            @extra `
+            src/app/main.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiplomaChecker-Windows-${{ matrix.variant }}
+          path: dist/DiplomaChecker/

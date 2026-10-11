@@ -19,7 +19,7 @@ COMMON_DIR = os.path.join(SRC_DIR, "common")
 LINGUISTICS_DIR = os.path.join(SRC_DIR, "analysis", "modules", "linguistics")
 LLM_DIR = os.path.join(SRC_DIR, "analysis", "modules", "llm")
 REDACTION_DIR = os.path.join(SRC_DIR, "analysis", "modules", "redaction")
-
+from common.path import resource_path
 
 for path in [SRC_DIR, BASE_DIR, EXTRACTION_DIR, COMMON_DIR, LINGUISTICS_DIR, LLM_DIR, REDACTION_DIR]:
     if path not in sys.path:
@@ -138,7 +138,10 @@ class AnalysisPipeline:
 
                 mapper = PDFMapper()
 
-                ling_path = os.path.join(LINGUISTICS_DIR, "run_linguistics.py")
+                ling_path = resource_path("src/analysis/modules/linguistics/run_linguistics.py")
+                if not os.path.exists(ling_path):
+                    ling_path = resource_path("analysis/modules/linguistics/run_linguistics.py")
+
                 spec = importlib.util.spec_from_file_location(
                     "analysis.modules.linguistics.run_linguistics",
                     ling_path,
