@@ -2,7 +2,7 @@
 Definitions of dataclasses used in the linguistic module
 '''
 from dataclasses import dataclass, field
-from analysis.extraction.schema import ParagraphBlock, ListBlock
+from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, ListBlock
 from typing import Union, List, Optional
 import logging
 

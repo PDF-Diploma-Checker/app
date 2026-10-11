@@ -30,12 +30,8 @@ from PySide6.QtWidgets import (
     QLineEdit, QStackedWidget, QFileDialog, QMessageBox
 )
 import os
-import json
 import fitz
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QScrollArea, QLabel, QPushButton, QSplitter, 
-    QLineEdit, QStackedWidget, QFileDialog, QMessageBox,
     QDialog, QInputDialog
 )
 from PySide6.QtCore import Qt, QSize, QPointF, QObject, Signal, QThread
@@ -44,9 +40,9 @@ from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 
 from PySide6.QtGui import QIcon
-from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QGraphicsDropShadowEffect
 from PySide6.QtGui import QColor
+<<<<<<< HEAD
 from .select_text import SelectablePdfView, CommentMarker, HighlightBox
 from .start_page import StartPage
 from .saving_files import SavingFiles
@@ -56,6 +52,18 @@ from .report_bug import send_report
 from .log_window import LogWindow
 from PySide6.QtWidgets import QFrame
 from common.path import resource_path
+=======
+from select_text import SelectablePdfView, CommentMarker
+from start_page import StartPage
+from saving_files import SavingFiles
+import styles
+from analysis_dialog import AnalysisDialog
+from pipeline import AnalysisPipeline
+from report_bug import send_report
+from log_window import LogWindow
+
+from PySide6.QtWidgets import QFrame
+>>>>>>> upstream/main
 
 class AnalysisWorker(QObject):
     """A worker class that handles the execution of the document analysis pipeline"""
