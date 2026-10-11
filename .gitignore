@@ -22,8 +22,7 @@ build/
 dist/
 **/build/
 **/dist/
-<<<<<<< HEAD
 app_config.json
-=======
 **/images/
->>>>>>> upstream/main
+src/common/report_mail_config.py
+.ruff_cache/
