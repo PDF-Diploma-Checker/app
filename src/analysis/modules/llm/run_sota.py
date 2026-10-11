@@ -1,9 +1,9 @@
 """Run SOTA chapter extraction, scoring, and console reporting utilities."""
 
 from dataclasses import dataclass
-from find_sota import get_sota_chapter
-from evaluate_sota import analyze_sota_chapter, free_sota_memory
-from config import THESIS_PATH, LANGUAGE
+from .find_sota import get_sota_chapter
+from .evaluate_sota import analyze_sota_chapter, free_sota_memory
+from .config import THESIS_PATH, LANGUAGE
 import re
 import logging
 

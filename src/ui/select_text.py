@@ -4,7 +4,10 @@ from PySide6.QtWidgets import QMenu, QApplication, QRubberBand, QPushButton, QTo
 from PySide6.QtCore import Qt, QPoint, QRect, QRectF, Signal, QPointF, QSize
 from PySide6.QtGui import QAction
 from PySide6.QtPdfWidgets import QPdfView
-import styles
+import os
+import sys
+
+from . import styles
 
 TOOLTIP_LANG = {
     "pl": {
