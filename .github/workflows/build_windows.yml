@@ -1,3 +1,6 @@
+#helper for building exe without having windows operating system
+
+
 name: Build Windows Executable
 
 on:
