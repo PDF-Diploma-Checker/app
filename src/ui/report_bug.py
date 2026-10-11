@@ -1,153 +1,293 @@
-"""Let users get the app's logs back to the developer for troubleshooting.
-Zips the logs locally and prefills an email, since mailto: can't attach files itself."""
+"""Email logs, system info and the opened thesis to the developers over SMTP."""
 
+import base64
+import binascii
+import io
 import logging
-import platform
+import smtplib
+import ssl
 import sys
 import zipfile
 from datetime import datetime
+from email.message import EmailMessage
 from pathlib import Path
-from urllib.parse import quote
 
-import platformdirs
 from PySide6 import __version__ as pyside_version
-from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMessageBox
+from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
+)
 
+import styles
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
+from common.system_info import build_system_report
 
 logger = logging.getLogger(__name__)
 
-REPORT_EMAIL = "pdfdiplomachecker@gmail.com"
-LOG_TAIL_LINES = 40
-LOG_TAIL_MAX_CHARS = 1200
+SMTP_TIMEOUT_S = 30
+MAX_THESIS_BYTES = 18_000_000
 
 
-def read_log_tail(log_path, max_lines=LOG_TAIL_LINES, max_chars=LOG_TAIL_MAX_CHARS):
-    """Return a short tail of the log file for inline preview in the email body."""
+class MailConfigError(Exception):
+    """Mail config is missing or invalid; the message is shown to the user."""
 
-    if not log_path.exists():
-        return "(Brak pliku logow - aplikacja nie zapisala jeszcze zadnych wpisow.)"
+
+def _load_mail_config():
+    """Return the config module and decoded password; raise MailConfigError if unusable."""
 
     try:
-        text = log_path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        logger.exception("Failed to read log file for report: %s", log_path)
-        return "(Nie udalo sie odczytac pliku logow - zalacz go recznie do maila.)"
+        from common import report_mail_config
+        password = base64.b64decode(
+            report_mail_config.SENDER_PASSWORD_B64, validate=True
+        ).decode("utf-8")
+    except (ImportError, AttributeError, binascii.Error, UnicodeDecodeError) as e:
+        logger.error("Invalid or missing common/report_mail_config.py: %r", e)
+        raise MailConfigError(
+            "Ta wersja aplikacji nie ma skonfigurowanego wysyłania zgłoszeń."
+        ) from e
 
-    tail = "\n".join(text.splitlines()[-max_lines:])
+    if not password:
+        logger.error("report_mail_config.SENDER_PASSWORD_B64 is empty")
+        raise MailConfigError("Ta wersja aplikacji nie ma skonfigurowanego wysyłania zgłoszeń.")
 
-    if len(tail) > max_chars:
-        tail = "...(skrocono)...\n" + tail[-max_chars:]
-
-    return tail
+    return report_mail_config, password
 
 
 def _build_system_info():
-    """Build a short text summary of versions useful for diagnosing a report."""
+    """Return app and system details for the report."""
 
     return (
         f"App: {APP_NAME}\n"
         f"Czas raportu: {datetime.now().isoformat(timespec='seconds')}\n"
-        f"System: {platform.platform()}\n"
-        f"Python: {platform.python_version()}\n"
         f"PySide6: {pyside_version}\n"
         f"Spakowana (frozen): {getattr(sys, 'frozen', False)}\n"
+        f"{build_system_report()}"
     )
 
 
-def _default_export_path():
-    """Suggest a Desktop location for the exported diagnostic zip."""
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    desktop_dir = Path(platformdirs.user_desktop_dir())
-    return desktop_dir / f"diploma_checker_logi_{timestamp}.zip"
-
-
-def build_diagnostic_zip(destination):
-    """Collect the log file, its rotated backups, and a system-info file
-    into a single zip at `destination`. Returns True if any log file was found."""
+def build_diagnostic_zip(system_info):
+    """Return zip bytes with the log files and info.txt."""
 
     log_dir = get_log_dir()
     log_file = get_log_file_path()
 
-    log_files = sorted(log_dir.glob(f"{log_file.name}*"))
-
-    destination = Path(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("info.txt", _build_system_info())
-        for f in log_files:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("info.txt", system_info)
+        for f in sorted(log_dir.glob(f"{log_file.name}*")):
             if f.is_file():
                 zf.write(f, arcname=f.name)
 
-    return bool(log_files)
+    return buffer.getvalue()
 
 
-def send_report(parent=None):
-    """Save a diagnostic zip (logs + system info) locally, then open the
-    user's default email client pre-filled with instructions to attach it."""
+def _build_message(config, thesis_path):
+    """Build the report email.
 
-    log_path = get_log_file_path()
-    log_tail = read_log_tail(log_path)
+    System info is collected once (it spawns subprocesses). The body is set before
+    attachments, and a thesis over MAX_THESIS_BYTES is skipped to stay under Gmail's 25 MB limit.
+    """
 
-    suggested_path = _default_export_path()
-    zip_path_str, _ = QFileDialog.getSaveFileName(
-        parent,
-        "Zapisz raport diagnostyczny",
-        str(suggested_path),
-        "Archiwum ZIP (*.zip)",
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Zgloszenie problemu - {APP_NAME} - {timestamp}"
+    msg["From"] = config.SENDER_EMAIL
+    msg["To"] = config.RECIPIENT_EMAIL
+
+    system_info = _build_system_info()
+    logger.info("System info for bug report:\n%s", system_info)
+    body = system_info
+    thesis_bytes = None
+
+    if thesis_path is not None:
+        thesis_path = Path(thesis_path)
+        size = thesis_path.stat().st_size
+        if size > MAX_THESIS_BYTES:
+            logger.warning("Thesis too large to attach (%d bytes): %s", size, thesis_path)
+            body += f"\nPraca NIE zostala dolaczona - plik za duzy ({size / 1e6:.1f} MB).\n"
+        else:
+            thesis_bytes = thesis_path.read_bytes()
+            body += f"\nDolaczono prace: {thesis_path.name}\n"
+
+    msg.set_content(body)
+    msg.add_attachment(
+        build_diagnostic_zip(system_info),
+        maintype="application",
+        subtype="zip",
+        filename=f"diploma_checker_logi_{timestamp}.zip",
     )
+    if thesis_bytes is not None:
+        msg.add_attachment(
+            thesis_bytes,
+            maintype="application",
+            subtype="pdf",
+            filename=thesis_path.name,
+        )
 
-    if not zip_path_str:
-        return
+    return msg
 
-    zip_path = Path(zip_path_str)
+
+class ReportSender(QObject):
+    """Sends the report email off the GUI thread."""
+
+    finished = Signal(bool, str)
+
+    def __init__(self, config, password, thesis_path):
+        super().__init__()
+        self.config = config
+        self.password = password
+        self.thesis_path = thesis_path
+
+    def run(self):
+        try:
+            msg = _build_message(self.config, self.thesis_path)
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL(
+                self.config.SMTP_HOST, self.config.SMTP_PORT,
+                context=context, timeout=SMTP_TIMEOUT_S,
+            ) as server:
+                server.login(self.config.SENDER_EMAIL, self.password)
+                server.send_message(msg)
+        except Exception as e:
+            logger.exception("Failed to send bug report")
+            self.finished.emit(False, str(e))
+            return
+
+        logger.info("Bug report sent (thesis attached: %s)", self.thesis_path is not None)
+        self.finished.emit(True, "")
+
+
+class ReportDialog(QDialog):
+    """Asks for consent, then sends the report.
+
+    The consent text is a separate QLabel because QCheckBox text can't word-wrap.
+    """
+
+    def __init__(self, config, password, thesis_path=None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Zgłoś problem")
+        self.setMinimumWidth(420)
+
+        self.config = config
+        self.password = password
+        self.thesis_path = thesis_path
+        self._thread = None
+        self._sender = None
+
+        layout = QVBoxLayout(self)
+
+        info = QLabel(
+            "Zgłoszenie zostanie wysłane do twórców aplikacji, aby pomóc w zdiagnozowaniu "
+            "problemu. Zawiera:\n"
+            "• logi aplikacji,\n"
+            "• dane systemowe: wersję systemu i dystrybucji, model karty graficznej, "
+            "wersję sterowników i CUDA, wersje bibliotek,\n"
+            "• plik pracy dyplomowej (PDF)."
+        )
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.consent = QCheckBox()
+        consent_row = QHBoxLayout()
+        consent_row.addWidget(self.consent, 0, Qt.AlignTop)
+        consent_label = QLabel(
+            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, "
+            "logów oraz pracy dyplomowej, w celu "
+            "diagnozowania błędów i rozwijania aplikacji."
+        )
+        consent_label.setWordWrap(True)
+        consent_label.mousePressEvent = lambda _event: self.consent.toggle()
+        consent_row.addWidget(consent_label, 1)
+        layout.addLayout(consent_row)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+
+        self.cancel_btn = QPushButton("Anuluj")
+        self.cancel_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.cancel_btn.setCursor(Qt.PointingHandCursor)
+        self.cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(self.cancel_btn)
+
+        self.send_btn = QPushButton("Wyślij")
+        self.send_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE)
+        self.send_btn.setCursor(Qt.PointingHandCursor)
+        self.send_btn.setDefault(True)
+        self.send_btn.clicked.connect(self._send)
+        self.send_btn.setEnabled(False)
+        self.consent.toggled.connect(self.send_btn.setEnabled)
+        buttons.addWidget(self.send_btn)
+
+        layout.addLayout(buttons)
+
+    def _send(self):
+        """Lock the form and start the worker thread."""
+        self.send_btn.setEnabled(False)
+        self.cancel_btn.setEnabled(False)
+        self.consent.setEnabled(False)
+        self.send_btn.setText("Wysyłanie...")
+
+        self._thread = QThread(self)
+        self._sender = ReportSender(self.config, self.password, self.thesis_path)
+        self._sender.moveToThread(self._thread)
+        self._thread.started.connect(self._sender.run)
+        self._sender.finished.connect(self._on_finished)
+        self._thread.finished.connect(self._sender.deleteLater)
+        self._thread.start()
+
+    def _on_finished(self, ok, error):
+        """Stop the worker thread and show the result.
+
+        quit() is called here because a queued quit() would only run after this slot,
+        so wait() would deadlock the GUI.
+        """
+        self._thread.quit()
+        if not self._thread.wait(5000):
+            logger.warning("Bug report worker thread did not stop in time")
+
+        try:
+            self._show_result(ok, error)
+        except Exception:
+            logger.exception("Failed to show bug report result")
+            self._reset_buttons()
+
+    def _show_result(self, ok, error):
+        if ok:
+            QMessageBox.information(self, "Wysłano", "Dziękujemy! Zgłoszenie zostało wysłane.")
+            self.accept()
+            return
+
+        QMessageBox.warning(
+            self,
+            "Nie udało się wysłać",
+            f"Nie udało się wysłać zgłoszenia.\n\n{error}",
+        )
+        self._reset_buttons()
+
+    def _reset_buttons(self):
+        self.send_btn.setText("Wyślij")
+        self.send_btn.setEnabled(self.consent.isChecked())
+        self.cancel_btn.setEnabled(True)
+        self.consent.setEnabled(True)
+
+    def reject(self):
+        """Ignore close requests while sending."""
+        if self._thread is not None and self._thread.isRunning():
+            return
+        super().reject()
+
+
+def send_report(parent=None, thesis_path=None):
+    """Show the report dialog for the currently opened PDF, if any."""
 
     try:
-        build_diagnostic_zip(zip_path)
-    except OSError:
-        logger.exception("Failed to build diagnostic zip at %s", zip_path)
-        if parent is not None:
-            QMessageBox.warning(
-                parent,
-                "Nie udalo sie zapisac raportu",
-                f"Nie udalo sie zapisac pliku z logami:\n{zip_path}",
-            )
+        config, password = _load_mail_config()
+    except MailConfigError as e:
+        QMessageBox.warning(parent, "Zgłaszanie niedostępne", str(e))
         return
 
-    logger.info("Diagnostic report saved to %s", zip_path)
+    if thesis_path and not Path(thesis_path).is_file():
+        thesis_path = None
 
-    subject = "Zgloszenie problemu - Diploma Checker"
-    body = (
-        "Opisz krotko co sie stalo:\n\n\n"
-        "----------------------------------------\n"
-        "Prosze zalacz do tego maila plik z logami, ktory zapisany zostal tutaj:\n"
-        f"{zip_path}\n"
-        "(mailto: nie potrafi dolaczac zalacznikow automatycznie - dolacz go recznie)\n"
-        "----------------------------------------\n\n"
-        "Ostatnie wpisy z logu (podglad):\n\n"
-        f"{log_tail}\n"
-    )
-
-    mailto_url = QUrl(f"mailto:{REPORT_EMAIL}?subject={quote(subject)}&body={quote(body)}")
-    opened = QDesktopServices.openUrl(mailto_url)
-
-    QDesktopServices.openUrl(QUrl.fromLocalFile(str(zip_path.parent)))
-
-    if not opened:
-        logger.warning("Failed to open default email client for bug report")
-
-    # QDesktopServices.openUrl() on Linux can report success even when no
-    # mailto: handler is registered (the failure happens later, in a
-    # detached process) - always show the manual fallback instructions.
-    if parent is not None:
-        QMessageBox.information(
-            parent,
-            "Raport zapisany",
-            f"Plik z raportem zostal zapisany tutaj:\n{zip_path}\n\n"
-            "Jesli program pocztowy sie nie otworzyl, wyslij ten plik "
-            f"recznie na adres: {REPORT_EMAIL}",
-        )
+    ReportDialog(config, password, thesis_path or None, parent).exec()
