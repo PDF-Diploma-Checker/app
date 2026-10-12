@@ -13,14 +13,16 @@ def add_list_error(items_by_id, num, block_id, category, lang):
 
     if lang =="pl":
         Category_and_message = {
-        "LIST_CASING": "Niepoprawna wielkość litery na początku elementu wyliczenia.",
-        "LIST_ENDING": "Niepoprawne zakończenie elementu wyliczenia.",
-    }
+            "LIST_CASING": "Niepoprawna wielkość litery na początku elementu wyliczenia.",
+            "LIST_ENDING": "Niepoprawne zakończenie elementu wyliczenia.",
+            "LIST_MARKER_STYLE": "Lista numerowana. Użyj punktorów lub zapisz punkty jako pełne zdania.",
+        }
     else:
         Category_and_message = {
-        "LIST_CASING": "Incorrect casing at the beginning of a list item.",
-        "LIST_ENDING": "Incorrect ending of a list item.",
-    }
+            "LIST_CASING": "Incorrect casing at the beginning of a list item.",
+            "LIST_ENDING": "Incorrect ending of a list item.",
+            "LIST_MARKER_STYLE": "List uses dotted numbering. Use bullets or write full sentences.",
+        }
 
     item = items_by_id[num]
     if not item.words:
@@ -28,7 +30,8 @@ def add_list_error(items_by_id, num, block_id, category, lang):
     word_idxs = [word.word_index for word in item.words]
     page_start = item.words[0].page_number
     page_end = item.words[-1].page_number
-    error_coordinate = [{"page": item.words[-1].page_number, "coordinates": list(item.words[-1].bbox)}]
+    coord_word = item.words[0] if category == "LIST_MARKER_STYLE" else item.words[-1]
+    error_coordinate = [{"page": coord_word.page_number, "coordinates": list(coord_word.bbox)}]
     return add_match(item.text, block_id, page_start, page_end, word_idxs, error_coordinate, category, Category_and_message[category])
 
 def is_short_definition(text, text_language):
@@ -61,8 +64,11 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
     list_count = 0
     for b in blocks:
         block = b.block
-        if block.type == "list" and block.is_bibliography: 
-            continue
+        if block.type == "list":
+            if getattr(block, "is_bibliography", False): 
+                continue
+            if any(getattr(item, "marker_type", "") == "number_in_brackets" for item in getattr(block, "items", [])):
+                continue
         if block.type == "heading":
             current_heading = block.content.upper()
             continue
@@ -73,6 +79,17 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
         msg_language = getattr(block, 'language', None) or language
         if block.type == "list":
             list_count += 1
+            non_empty_items = [
+                it for it in getattr(block, "items", [])
+                if getattr(it, "text", "") and it.text.strip()
+            ]
+            quote_close_chars = '"»”’\')'
+            if non_empty_items and all(
+                re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', it.text)).strip().rstrip(quote_close_chars).strip().endswith('?')
+                for it in non_empty_items
+            ):
+                continue
+
             casing_error_ids = []
             ending_error_ids = []
             items_by_id = {}
@@ -99,11 +116,15 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                 if re.search(r'\((?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+', effective_text):
                     definition_id.append(item.item_id)
                     continue
-                if item.words and len(item.words) >= 2:
-                    first_font = (item.words[0].font, item.words[0].italic)
-                    rest_words = [w for w in item.words[1:] if w.text.strip()]
-                    if rest_words:
-                        rest_fonts = [(w.font, w.italic) for w in rest_words]
+                if item.words:
+                    words = [w for w in item.words if w.text.strip()]
+                    marker_symbols = {'•', '–', '—', '-', '*', '·', 'o'}
+                    if words and (words[0].text in marker_symbols or not any(c.isalnum() for c in words[0].text)):
+                        words = words[1:]
+                    if len(words) >= 2:
+                        first_font = (words[0].font, getattr(words[0], 'bold', False), words[0].italic)
+                        rest_words = words[1:]
+                        rest_fonts = [(w.font, getattr(w, 'bold', False), w.italic) for w in rest_words]
                         dominant_font = max(set(rest_fonts), key=rest_fonts.count)
                         if first_font != dominant_font:
                             definition_id.append(item.item_id)
@@ -155,7 +176,29 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                     if not has_separator:
                         all_definition_like = False
                         break
-            if all_definition_like:
+
+            total_items = len(block.items)
+            is_definition_list = all_definition_like or (
+                total_items >= 2 and (
+                    len(definition_id) / total_items >= 0.75
+                    or (total_items >= 3 and len(definition_id) >= total_items - 1)
+                )
+            )
+
+            if is_definition_list:
+                dotted = bool(block.items and block.items[0].marker_type in ("number_with_dot", "letter_with_dot"))
+                if dotted and block.items:
+                    cleaned_items = [
+                        re.sub(r'^\s*["»”’\'(\s]*', '', re.sub(r'\[\d+\]', '', it.text)).strip()
+                        for it in block.items
+                        if getattr(it, "text", "") and it.text.strip()
+                    ]
+                    has_lowercase = any(t and t[0].islower() for t in cleaned_items)
+                    has_comma_or_semicolon = any(t.rstrip(quote_close_chars).endswith((',', ';')) for t in cleaned_items)
+                    if has_lowercase or has_comma_or_semicolon:
+                        error = add_list_error(items_by_id, block.items[0].item_id, block.block_id, "LIST_MARKER_STYLE", msg_language)
+                        if error:
+                            matches.append(error)
                 continue
             inconsistent_list_ids = set()
             inconsistent_list_ids.update(quote_id + definition_id)
@@ -187,6 +230,9 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                 for item_id in inconsistent_list:
                     casing_error_ids.append(item_id)
                     inconsistent_list_ids.add(item_id)
+            dotted = bool(block.items and block.items[0].marker_type in ("number_with_dot", "letter_with_dot"))
+            phrase_list = dotted and not sentence_style and not inconsistent and not casing_error_ids
+
             for item in block.items:
                 if item.item_id in inconsistent_list_ids:
                     continue
@@ -206,7 +252,9 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                     elif item == block.items[-2]:
                         second_to_last = True
             
-                if item.marker_type =="number_with_dot" or item.marker_type == "letter_with_dot":
+                marker_for_check = "bullet" if phrase_list else item.marker_type
+
+                if not phrase_list and (item.marker_type =="number_with_dot" or item.marker_type == "letter_with_dot"):
                     if is_upper_and_dot(full_text):
                         continue
                     elif full_text.endswith(':'):
@@ -225,12 +273,16 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                     if item.item_id in neutral_id:
                         match = re.search(r'[a-zA-ZąćęłńóśźżĄĆĘŁŃÓŚŹŻ]', full_text)
                         if match:
-                            if not check_item(full_text[match.start():], last_item, second_to_last, language, sentence_style, dominant_ending, item.marker_type):
+                            if not check_item(full_text[match.start():], last_item, second_to_last, language, sentence_style, dominant_ending, marker_for_check):
                                 ending_error_ids.append(item.item_id)
                         continue
-                    if not check_item(full_text, last_item, second_to_last, language, sentence_style, dominant_ending, item.marker_type):
+                    if not check_item(full_text, last_item, second_to_last, language, sentence_style, dominant_ending, marker_for_check):
                         ending_error_ids.append(item.item_id)
                 
+            if phrase_list and block.items:
+                error = add_list_error(items_by_id, block.items[0].item_id, block.block_id, "LIST_MARKER_STYLE", msg_language)
+                if error:
+                    matches.append(error)
             for num in casing_error_ids:
                 error = add_list_error(items_by_id, num, block.block_id, "LIST_CASING", msg_language)
                 if error:
