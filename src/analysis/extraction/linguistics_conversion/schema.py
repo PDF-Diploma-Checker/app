@@ -210,7 +210,19 @@ class DocumentPatterns:
     )
 
 
-def classify_block_content(text: str, active_marker: str = None):
+STRICT_MARKERS = {"listing", "number_in_brackets"}
+SWITCHABLE_MARKERS = (
+    "bullet",
+    "dash",
+    "number_with_dot",
+    "number_with_bracket",
+    "letter_with_bracket",
+)
+
+
+def classify_block_content(
+    text: str, active_marker: str = None, in_bibliography: bool = False
+):
     """
     Classifies a block of text as either a 'list' or a 'paragraph' by matching it
     against predefined regular expression patterns.
@@ -219,6 +231,9 @@ def classify_block_content(text: str, active_marker: str = None):
         text (str): The text content to classify.
         active_marker (str, optional): The marker type of the currently active list,
             used to check for direct continuations. Defaults to None.
+        in_bibliography (bool, optional): Whether the classification takes place
+            within the bibliography section. Bracketed numbers like [1] are only
+            considered list markers when in_bibliography is True. Defaults to False.
 
     Returns:
         tuple[str, str | None]: A tuple containing the block type ('list' or 'paragraph')
@@ -227,12 +242,25 @@ def classify_block_content(text: str, active_marker: str = None):
     text = text.strip()
 
     if active_marker:
+        if active_marker == "number_in_brackets" and not in_bibliography:
+            return "paragraph", None
         pattern = DocumentPatterns.LIST_PATTERNS.get(active_marker)
         if pattern and pattern.match(text):
             return "list", active_marker
+        if active_marker in STRICT_MARKERS:
+            return "paragraph", None
+        for marker_type in SWITCHABLE_MARKERS:
+            if marker_type == active_marker:
+                continue
+            if marker_type == "dash" and not re.match(r"^[-−–—]\s", text):
+                continue
+            if DocumentPatterns.LIST_PATTERNS[marker_type].match(text):
+                return "list", marker_type
         return "paragraph", None
 
     for marker_type, pattern in DocumentPatterns.LIST_PATTERNS.items():
+        if marker_type == "number_in_brackets" and not in_bibliography:
+            continue
         if pattern.match(text):
             return "list", marker_type
     return "paragraph", None

@@ -3,14 +3,12 @@ Struct with methods converting converter_json's json into
 a form better suited for linguistics and LLM
 """
 
+import logging
 import re
 import statistics
 import unicodedata
 
-
-import re
-import statistics
-import unicodedata
+logger = logging.getLogger(__name__)
 
 
 from analysis.extraction.linguistics_conversion.schema import (
@@ -40,8 +38,50 @@ from analysis.extraction.linguistics_conversion.schema import (
     is_szewc_func,
 )
 
+from dataclasses import dataclass
+
+@dataclass
+class LineGeom:
+    """
+    Geometric layout properties of a single rendered text line,
+    used for paragraph break detection and list continuation heuristics.
+    """
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    first_word_w: float
+    pitch: float | None
+    ends_hyphen: bool
+    font_size: float | None = None
+
 
 class PDFMapper:
+    USE_GEOMETRY_HEURISTICS = True
+    USE_NESTED_LISTS = True
+
+    EQ_NUM_RE = re.compile(r"^\(\s*\d+(?:[.,]\s*\d+)*\s*\)$")
+    MATH_FONTS = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
+    MONOSPACE_FONTS = ("courier", "consolas", "mono", "code", "typewriter")
+    IMG_PATTERN = re.compile(
+        r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram)\s*(?:\d+|[IVX]+)",
+        re.IGNORECASE,
+    )
+    TAB_PATTERN = re.compile(
+        r"^(tabela|tab\.|table)\s*(?:\d+|[IVX]+)", re.IGNORECASE
+    )
+
+    def _use_geom(self) -> bool:
+        """
+        Determines whether geometry-based heuristics should be applied.
+        Disabled within the bibliography section.
+        """
+        return self.USE_GEOMETRY_HEURISTICS and not getattr(self, "in_bibliography_section", False)
+    
+    PITCH_TOL = 0.15
+    SPACE_W = 3.0
+    EARLY_SLACK = 4.0
+    
     TOP_MARGIN_THRESH = 70
     BOTTOM_MARGIN_OFFSET = 75
     MARGIN_INDENT_THRESH = 20
@@ -109,6 +149,90 @@ class PDFMapper:
         key = PDFMapper._strip_heading_number(text).rstrip(":. ")
         return bool(PDFMapper.AFTER_BIB_HEADING_RE.match(key))
 
+    @staticmethod
+    def _pitch_matches(pitch: float | None, ref_pitch: float | None, tol: float = 0.15) -> bool:
+        """
+        Checks whether the line pitch matches the reference pitch within tolerance.
+        """
+        if pitch is None or ref_pitch is None or ref_pitch <= 0:
+            return True            
+        return abs(pitch - ref_pitch) <= tol * ref_pitch
+
+    @staticmethod
+    def _ended_early(prev: LineGeom, next_first_word_w: float, content_right: float) -> bool:
+        """
+        Checks whether the previous line ended with sufficient room for the next word.
+        """
+        if prev.ends_hyphen:
+            return False
+        free = content_right - prev.x1
+        return free > next_first_word_w + PDFMapper.SPACE_W + PDFMapper.EARLY_SLACK
+
+    @staticmethod
+    def _indent_vs_block(line_x0: float, block_line_x0s: list[float], thresh: float = 10) -> bool:
+        """
+        Checks whether a line is indented relative to the median left margin of the block.
+        """
+        others = sorted(block_line_x0s)
+        median_x0 = others[len(others)//2]
+        return line_x0 - median_x0 > thresh
+
+    @classmethod
+    def _is_spans_monospace(cls, spans) -> bool:
+        """
+        Determines whether any span uses a monospace font family.
+        """
+        return any(
+            any(mono in (getattr(s, "font", "") or "").lower() for mono in cls.MONOSPACE_FONTS)
+            for s in spans
+        )
+
+    @staticmethod
+    def _block_text(b) -> str:
+        """
+        Extracts concatenated text from all spans across all lines in a text block.
+        """
+        return " ".join(s.text.strip() for l in b.lines for s in l.spans if s.text.strip())
+
+    def _math_like(self, b) -> bool:
+        """
+        Heuristically determines whether a text block represents a mathematical formula.
+        """
+        txt = self._block_text(b)
+        if not txt:
+            return False
+        spans = [s for l in b.lines for s in l.spans if s.text.strip()]
+        if not spans:
+            return False
+        mf = sum(any(m in (getattr(s, "font", "") or "").lower() for m in self.MATH_FONTS) for s in spans) / len(spans)
+        letters = sum(c.isalpha() for c in txt)
+        words = txt.split()
+        short_tokens = sum(len(w) <= 2 for w in words) / len(words) if words else 0.0
+        return mf > 0.4 or (len(txt) < 40 and short_tokens > 0.7) or letters / max(len(txt), 1) < 0.35
+
+    def _formula_regions(self, page, content_right: float | None):
+        """
+        Identifies bounding rectangles of formulas based on equation numbers and adjacent math blocks.
+        """
+        regions = []
+        for b in page.text_blocks:
+            t = self._block_text(b)
+            is_right_side = (content_right is None) or (b.bbox[0] > content_right - 80) or (b.bbox[2] > content_right - 50)
+            if self.EQ_NUM_RE.match(t) and is_right_side:
+                y0, y1 = b.bbox[1] - 8, b.bbox[3] + 8
+                changed = True
+                while changed:
+                    changed = False
+                    for c in page.text_blocks:
+                        if c is b or not self._math_like(c):
+                            continue
+                        if c.bbox[3] >= y0 - 6 and c.bbox[1] <= y1 + 6 and c.bbox[1] < y1 + 60:
+                            ny0, ny1 = min(y0, c.bbox[1]), max(y1, c.bbox[3])
+                            if (ny0, ny1) != (y0, y1):
+                                y0, y1, changed = ny0, ny1, True
+                regions.append((y0, y1))
+        return regions
+
     def __init__(self):
         # Stan wewnętrzny
         self.logical_blocks = []
@@ -116,6 +240,24 @@ class PDFMapper:
         self.list_buffer = []
         self.curr_line = 0
         self.last_y1 = None
+        self.in_bibliography_section = False
+        self._line_is_monospace = False
+        self.list_stack = []
+        self._block_seq = 0
+
+    def _classify_block_content(self, text: str, active_marker: str = None):
+        """
+        Classifies block content while taking monospace font and bibliography state into account.
+        """
+        block_type, marker_type = classify_block_content(
+            text,
+            active_marker=active_marker,
+            in_bibliography=getattr(self, "in_bibliography_section", False),
+        )
+        if marker_type == "listing" and active_marker != "listing":
+            if not getattr(self, "_line_is_monospace", False):
+                return "paragraph", None
+        return block_type, marker_type
 
     @staticmethod
     def is_continuation(last_item_bbox: list, current_block_bbox: list) -> bool:
@@ -135,6 +277,103 @@ class PDFMapper:
         return (
             abs(last_x0 - curr_x0) < PDFMapper.LIST_CONT_MAX_X_DIFF or curr_x0 > last_x0
         )
+        
+    TERMINAL = (".", "!", "?", ":", ";", ",")
+
+    def _line_ends_unit(
+        self,
+        prev_geom,
+        prev_text,
+        next_first_word_w,
+        content_right,
+        is_justified,
+        next_text="",
+    ):
+        """
+        Determines whether the previous line terminated a grammatical or semantic unit
+        based on terminal punctuation and early right-margin ending.
+        """
+        if prev_geom.ends_hyphen:
+            return False
+        first_clean_char = next((c for c in next_text.strip() if c.isalnum()), "")
+        if first_clean_char and first_clean_char.islower():
+            return False
+        ended_early = self._ended_early(prev_geom, next_first_word_w, content_right)
+        ends_punct = prev_text.rstrip().endswith(self.TERMINAL)
+        return ended_early and ends_punct
+
+    def _is_item_continuation(
+        self,
+        geom,
+        prev_geom,
+        item,
+        ref_pitch,
+        content_right,
+        line_text,
+        prev_text="",
+        is_justified=False,
+    ):
+        """
+        Determines whether the current line continues the active list item
+        using geometric layout, indent alignment, pitch, and punctuation checks.
+        """
+        if not self._use_geom():
+            return PDFMapper.is_continuation(item.bbox, [geom.x0, geom.y0, geom.x1, geom.y1])
+
+        first_clean_char = next((c for c in line_text.strip() if c.isalnum()), "")
+        is_lowercase_continuation = bool(first_clean_char and first_clean_char.islower())
+
+        if line_text.strip().isdigit():
+            result = False
+        elif self._classify_block_content(line_text, None)[0] == "list":
+            result = False
+        elif item.words and getattr(geom, "font_size", None) and (geom.font_size < statistics.median(w.size for w in item.words) - 1.2):
+            result = False
+        elif prev_geom and prev_geom.ends_hyphen:
+            result = True
+        elif not any(
+            abs(geom.x0 - cx) <= 8
+            for cx in ([item.bbox[0]] + ([item.words[0].bbox[0]] if item.words else []) + ([item.words[1].bbox[0]] if len(item.words) > 1 else []))
+        ):
+            result = False
+        elif (
+            ref_pitch is not None
+            and not self._pitch_matches(geom.pitch, ref_pitch, self.PITCH_TOL)
+            and not is_lowercase_continuation
+        ):
+            result = False
+        elif prev_geom and self._line_ends_unit(
+            prev_geom,
+            prev_text or item.text,
+            geom.first_word_w,
+            content_right,
+            is_justified,
+            next_text=line_text,
+        ):
+            result = False
+        elif prev_geom is None and (prev_text or item.text).rstrip().endswith((".", "!", "?")):
+            first_raw = line_text.strip()
+            if re.match(r"^\([a-z0-9]+\)", first_raw):
+                result = False
+            else:
+                first_clean_char = next((c for c in first_raw if c.isalnum()), "")
+                if not (first_clean_char and first_clean_char.islower()):
+                    result = False
+                else:
+                    result = True
+        else:
+            result = True
+
+        logger.info(
+            "CONT? line=%r x0=%.1f prev_end_early=%s justified=%s -> %s",
+            line_text[:40],
+            geom.x0,
+            self._ended_early(prev_geom, geom.first_word_w, content_right) if prev_geom else None,
+            is_justified,
+            result,
+        )
+        return result
+
 
     @staticmethod
     def _adjust_item_word_positions(item_words):
@@ -416,33 +655,35 @@ class PDFMapper:
                 bbox=bbox,
                 words=combined_words,
             )
-            self.logical_blocks.append(
-                ListBlock(
-                    block_id=self.paragraph_buffer[0]["block_id"],
-                    content=combined_content,
-                    bbox=bbox,
-                    type="list",
-                    is_bibliography=True,
-                    items=[item],
-                    words=combined_words,
-                )
+            list_block = ListBlock(
+                block_id=self.paragraph_buffer[0]["block_id"],
+                content=combined_content,
+                bbox=bbox,
+                type="list",
+                is_bibliography=True,
+                items=[item],
+                words=combined_words,
             )
+            list_block._seq = self._block_seq
+            self._block_seq += 1
+            self.logical_blocks.append(list_block)
         else:
-            self.logical_blocks.append(
-                ParagraphBlock(
-                    block_id=self.paragraph_buffer[0]["block_id"],
-                    content=combined_content,
-                    words=combined_words,
-                    type=block_type,
-                    is_widow=is_widow,
-                    is_bekart=is_bekart,
-                    is_szewc=is_szewc,
-                    debug_empty=debug_why_empty,
-                )
+            p_block = ParagraphBlock(
+                block_id=self.paragraph_buffer[0]["block_id"],
+                content=combined_content,
+                words=combined_words,
+                type=block_type,
+                is_widow=is_widow,
+                is_bekart=is_bekart,
+                is_szewc=is_szewc,
+                debug_empty=debug_why_empty,
             )
+            p_block._seq = self._block_seq
+            self._block_seq += 1
+            self.logical_blocks.append(p_block)
         self.paragraph_buffer.clear()
 
-    def _empty_list_buffer(self):
+    def _empty_list_buffer(self, reason: str = ""):
         """
         Processes and clears the current list buffer, aggregating accumulated list items
         into a finalized ListBlock. It combines text, words, and bounding boxes across
@@ -452,6 +693,14 @@ class PDFMapper:
         if not self.list_buffer:
             return
 
+        if getattr(self, "in_bibliography_section", False):
+            logger.info(
+                "EMPTY_LIST_BUFFER in bib: reason=%r, count=%d, first_item=%r",
+                reason,
+                len(self.list_buffer),
+                self.list_buffer[0]["item"].text[:60] if self.list_buffer else "",
+            )
+
         items = [data["item"] for data in self.list_buffer]
         all_words = []
         for item in items:
@@ -459,7 +708,8 @@ class PDFMapper:
 
         combined_content = "\n".join(item.text for item in items)
 
-        if len(items) > 1:
+        is_sublist = self.USE_NESTED_LISTS and (bool(self.list_stack) or reason == "koniec podlisty")
+        if len(items) > 1 or is_sublist:
             first_item_data = self.list_buffer[0]
 
             is_bibiography = (
@@ -472,10 +722,35 @@ class PDFMapper:
                 for item in items:
                     item.marker_type = dominant_marker
 
+            if not is_bibiography and any(getattr(item, "marker_type", "") == "number_in_brackets" for item in items):
+                for data in self.list_buffer:
+                    it = data["item"]
+                    p_block = ParagraphBlock(
+                        block_id=data["block_id"],
+                        content=data.get("original_text", it.text),
+                        words=it.words,
+                    )
+                    p_block._seq = data.get("_seq", self._block_seq)
+                    self._block_seq += 1
+                    self.logical_blocks.append(p_block)
+                self.list_buffer.clear()
+                return
+
             data = self.list_buffer[0]
             item = data["item"]
 
-            if item.marker_type == "listing":
+            is_code = item.marker_type == "listing"
+            if self.USE_GEOMETRY_HEURISTICS and not is_code and len(items) > 1:
+                is_monospace = any(
+                    any(mono in (getattr(w, "font", "") or "").lower() for mono in self.MONOSPACE_FONTS)
+                    for w in all_words
+                )
+                x0_values = [it.bbox[0] for it in items]
+                constant_x0 = (max(x0_values) - min(x0_values)) <= 5.0
+                if is_monospace and constant_x0:
+                    is_code = True
+
+            if is_code:
                 list_type = "code_snippet"
             else:
                 list_type = "list"
@@ -497,25 +772,105 @@ class PDFMapper:
                 max(b[2] for b in all_bboxes),
                 max(b[3] for b in all_bboxes),
             ]
+            new_list_block._seq = self.list_buffer[0].get("_seq", self._block_seq)
             self.logical_blocks.append(new_list_block)
         else:
             data = self.list_buffer[0]
             item = data["item"]
-            # if item.marker_type == "number_with_dot" or item.marker_type == "bullet":
-            self.logical_blocks.append(
-                ParagraphBlock(
-                    block_id=data["block_id"], content=item.text, words=item.words
-                )
+            p_block = ParagraphBlock(
+                block_id=data["block_id"],
+                content=data.get("original_text", item.text),
+                words=item.words,
             )
-            # else:
-            #    self.logical_blocks.append(ListBlock(
-            #        block_id=f"list_{data['block_id']}", content=item.text, words=item.words, items=[item], bbox=item.bbox
-            #    ))
+            p_block._seq = data.get("_seq", self._block_seq)
+            self.logical_blocks.append(p_block)
         self.list_buffer.clear()
+
+    def _flush_all_lists(self, reason: str = ""):
+        """
+        Flushes the current list buffer and unwinds any suspended lists from list_stack.
+        """
+        self._empty_list_buffer(reason)
+        while self.list_stack:
+            self.list_buffer = self.list_stack.pop()
+            self._empty_list_buffer(reason)
+
+    def _marker_x0(self):
+        """
+        Returns the x0 coordinate of the active list's most recent item.
+        Prefers the first word's bounding box (the marker), falls back to bbox[0].
+        """
+        if not self.list_buffer:
+            return None
+        last_item = self.list_buffer[-1]
+        if last_item.get("words"):
+            return last_item["words"][0].bbox[0]
+        return last_item.get("bbox", [0])[0]
+
+    def _handle_marker_line(self, new_marker: str, new_x0: float | None):
+        """
+        Replaces _close_if_marker_changed: manages list nesting and resumption based on marker x0.
+        - Deeper (x0 > cur_x0 + 12): suspends current list onto list_stack and starts sublist.
+        - Shallower (x0 < cur_x0 - 12): flushes sublist and restores matching parent list.
+        - Same level, different marker: flushes current list.
+        """
+        if not self.list_buffer:
+            return
+
+        cur_x0 = self._marker_x0()
+        cur_marker = self.list_buffer[-1]["item"].marker_type
+
+        NESTABLE_PARENTS = {"bullet", "dash", "number_with_dot",
+                    "number_with_bracket", "letter_with_bracket"}
+        NESTABLE_CHILDREN = {"bullet", "dash"}
+
+        can_nest = (
+            self.USE_NESTED_LISTS
+            and cur_marker in NESTABLE_PARENTS
+            and new_marker in NESTABLE_CHILDREN
+)
+
+        if (
+            can_nest
+            and new_x0 is not None
+            and cur_x0 is not None
+            and new_x0 > cur_x0 + 12
+        ):
+            self.list_stack.append(self.list_buffer)
+            self.list_buffer = []
+            return
+
+        if self.USE_NESTED_LISTS and new_x0 is not None and cur_x0 is not None:
+            while self.list_stack and new_x0 < cur_x0 - 12:
+                self._empty_list_buffer("koniec podlisty")
+                self.list_buffer = self.list_stack.pop()
+                cur_x0 = self._marker_x0()
+                if cur_x0 is None:
+                    break
+                cur_marker = self.list_buffer[-1]["item"].marker_type
+
+        if cur_marker != new_marker:
+            self._empty_list_buffer("zmiana typu markera")
+
+    def _close_if_marker_changed(self, new_marker: str):
+        """
+        Backwards-compatible wrapper calling _handle_marker_line without geometry.
+        """
+        self._handle_marker_line(new_marker, None)
 
     # Logika podziału i (wielokrotnych) spacji
     def _detect_paragraph_break(
-        self, current_y0, current_y1, line_x0, x0_margin, full_text, is_valid_list_cont
+        self,
+        current_y0,
+        current_y1,
+        line_x0,
+        x0_margin,
+        full_text,
+        is_valid_list_cont,
+        geom: LineGeom | None = None,
+        prev_geom: LineGeom | None = None,
+        content_right: float | None = None,
+        block_line_x0s: list[float] | None = None,
     ):
         """
         Determines whether the current text line indicates the start of a new paragraph
@@ -530,6 +885,10 @@ class PDFMapper:
             full_text (str): The text accumulated in the current line so far.
             is_valid_list_cont (bool): Indicates if the line has been identified as a
                 valid continuation of an ongoing list.
+            geom (LineGeom, optional): Geometry details of current line.
+            prev_geom (LineGeom, optional): Geometry details of previous line.
+            content_right (float, optional): Estimated right boundary of content on page.
+            block_line_x0s (list[float], optional): List of x0 positions of lines in current block.
 
         Returns:
             tuple[bool, str]: A tuple containing a boolean indicating if a paragraph
@@ -540,15 +899,22 @@ class PDFMapper:
 
         finished = True
         if full_text.strip():
-            finished = full_text.strip()[-1] in {".", "!", "?", ":", ";"}
+            stripped = full_text.strip()
+            finished = (
+                stripped[-1] in {".", "!", "?", ":", ";"}
+                or bool(self.IMG_PATTERN.match(stripped))
+                or bool(self.TAB_PATTERN.match(stripped))
+            )
         elif self.paragraph_buffer:
-            finished = self.paragraph_buffer[-1]["content"].strip()[-1] in {
-                ".",
-                "!",
-                "?",
-                ":",
-                ";",
-            }
+            p_content = self.paragraph_buffer[-1]["content"].strip()
+            finished = (
+                p_content[-1] in {".", "!", "?", ":", ";"}
+                or bool(self.IMG_PATTERN.match(p_content))
+                or bool(self.TAB_PATTERN.match(p_content))
+            )
+        elif self.list_buffer:
+            item_text = self.list_buffer[-1]["item"].text.strip()
+            finished = bool(item_text and item_text[-1] in {".", "!", "?", ":", ";"})
 
         # Wertykalna przerwa
         if self.last_y1 is not None:
@@ -572,18 +938,35 @@ class PDFMapper:
                 line_x0 > x0_margin + self.MARGIN_INDENT_THRESH
             ):
                 if not finished:
-                    is_new_paragraph = (
-                        False 
-                    )
+                    is_new_paragraph = False 
                 else:
                     is_new_paragraph = True
                     debug_reason = "wcięcie na początku bloku/strony"
             elif full_text.strip() and getattr(self, "in_bibliography_section", False):
-                # Specjalna reguła dla bibliografii (APA/Harvard): 
-                # Jeśli poprzednia linia kończy się kropką, a nowa linia nie ma wcięcia (wcięcie wiszące lub brak), to nowy wpis.
                 if finished and line_x0 <= x0_margin + self.MARGIN_INDENT_THRESH:
                     is_new_paragraph = True
                     debug_reason = "nowy wpis bibliografii (brak wcięcia)"
+            elif full_text.strip():
+                prev_type, _ = self._classify_block_content(full_text)
+                if prev_type == "list" and finished and line_x0 <= x0_margin + self.MARGIN_INDENT_THRESH:
+                    is_new_paragraph = True
+                    debug_reason = "koniec elementu listy i nowa linia od marginesu"
+
+        if (
+            self._use_geom()
+            and not is_new_paragraph
+            and geom is not None
+            and prev_geom is not None
+            and content_right is not None
+            and block_line_x0s
+        ):
+            if (
+                self._indent_vs_block(geom.x0, block_line_x0s)
+                and self._ended_early(prev_geom, geom.first_word_w, content_right)
+                and finished
+            ):
+                is_new_paragraph = True
+                debug_reason = "wcięcie względem bloku oraz przedwczesny koniec linii"
 
         if is_valid_list_cont:
             is_new_paragraph = False
@@ -720,7 +1103,6 @@ class PDFMapper:
             FinalDocument: The fully structured document containing categorized logical blocks,
             floating visual elements, and reference sections ready for NLP analysis.
         """
-        # 1. Reset
         self.__init__()
 
         new_doc = FinalDocument(
@@ -730,15 +1112,14 @@ class PDFMapper:
         )
         self.logical_blocks = new_doc.logical_blocks
 
-        # 2. Przetwarzanie stron
         for page in old_doc.pages:
             self._process_page(page, new_doc)
 
-        # 3. Opróżnianie pozostałości z buforów
-        self._empty_list_buffer()
+        self._flush_all_lists("koniec dokumentu")
         self._empty_paragraph_buffer("finalne opróżnienie")
 
-        # 4. Post-processing (Łączenie nagłówków i podpisy)
+        self.logical_blocks.sort(key=lambda b: getattr(b, "_seq", 0))
+
         self._merge_adjacent_headings()
         # self._assign_captions_to_visuals(old_doc.pages, new_doc)
         self._extract_acronyms_to_schema(new_doc)
@@ -768,10 +1149,8 @@ class PDFMapper:
         bottom_thresh = page.height - self.BOTTOM_MARGIN_OFFSET
         table_bboxes = [t.bbox for t in page.tables]
 
-        img_pattern = re.compile(
-            r"^(rysunek|rys\.|fot\.|schemat)\s*(?:\d+|[IVX]+)", re.IGNORECASE
-        )
-        tab_pattern = re.compile(r"^(tabela|tab\.)\s*(?:\d+|[IVX]+)", re.IGNORECASE)
+        img_pattern = self.IMG_PATTERN
+        tab_pattern = self.TAB_PATTERN
 
         geometry_classifier = GeometryClassifier()
         margins = geometry_classifier.calculate_margins(
@@ -779,7 +1158,44 @@ class PDFMapper:
         )
         x0_margin = margins["left"]
 
+        if self.USE_GEOMETRY_HEURISTICS:
+            xs = sorted(
+                l.bbox[2]
+                for b in page.text_blocks
+                for l in b.lines
+                if getattr(l, "alignement", "") == "justified"
+            )
+            content_right = (
+                xs[int(len(xs) * 0.9)]
+                if xs
+                else (
+                    sorted(l.bbox[2] for b in page.text_blocks for l in b.lines)[
+                        int(len([l.bbox[2] for b in page.text_blocks for l in b.lines]) * 0.9)
+                    ]
+                    if [l.bbox[2] for b in page.text_blocks for l in b.lines]
+                    else page.width - margins.get("right", 50)
+                )
+            )
+        else:
+            content_right = None
+
+        prev_geom: LineGeom | None = None
+        prev_line_text: str = ""
+        prev_line_justified: bool = False
+        ref_pitch: float | None = None
+        formula_regions = (
+            self._formula_regions(page, content_right) if self._use_geom() else []
+        )
+
         for block in page.text_blocks:
+            block_line_x0s = [
+                (
+                    next((s.bbox[0] for s in l.spans if s.text.strip()), l.spans[0].bbox[0])
+                    if l.spans
+                    else l.bbox[0]
+                )
+                for l in block.lines
+            ]
             current_marker = (
                 self.list_buffer[-1]["item"].marker_type if self.list_buffer else None
             )
@@ -797,34 +1213,112 @@ class PDFMapper:
             raw_block_text_for_check = "".join(
                 span.text for line in block.lines for span in line.spans
             ).strip()
+            sub_caption_pattern = re.compile(r"^\([a-z0-9]+\)\s+", re.IGNORECASE)
             is_visual_caption = bool(
                 img_pattern.match(raw_block_text_for_check)
                 or tab_pattern.match(raw_block_text_for_check)
+                or (sub_caption_pattern.match(raw_block_text_for_check) and bool(page.images or page.tables))
             )
-            if is_visual_caption and self.paragraph_buffer:
-                self._empty_paragraph_buffer("odcięcie - wykryto blok podpisu")
-                self.curr_line = 0
+            if is_visual_caption:
+                if self.paragraph_buffer:
+                    self._empty_paragraph_buffer("odcięcie - wykryto blok podpisu")
+                if self.list_buffer:
+                    self._flush_all_lists("odcięcie - wykryto blok podpisu")
 
-            # Filtr kontynuacji listy
             is_valid_list_cont = False
-            if self.list_buffer and not is_visual_caption:
+            fl_pitch = None
+            if raw_block_text_for_check.isdigit():
+                logger.info(
+                    "DIGIT BLOCK %r y0=%.1f y1=%.1f bottom_thresh=%.1f page_h=%.1f",
+                    raw_block_text_for_check,
+                    y0,
+                    y1,
+                    bottom_thresh,
+                    page.height,
+                )
+
+            if self.list_buffer and not is_visual_caption and not raw_block_text_for_check.isdigit():
                 last_item = self.list_buffer[-1]
-                is_page_transition = (self.last_y1 is None) or (y0 < self.last_y1 - 10)
-                last_x0 = last_item["bbox"][0]
+                item = last_item["item"]
+                last_item_page = item.words[-1].page_number if item.words else page.number
+                is_page_transition = (last_item_page != page.number) or (self.last_y1 is None) or (y0 < self.last_y1 - 10)
 
-                x_tolerance = 30 if is_page_transition else 20
+                if is_page_transition and page.images and any(img.bbox[3] <= y0 + 10 for img in page.images):
+                    self._flush_all_lists("obraz nad tekstem na nowej stronie")
 
-                if abs(last_x0 - x0) < x_tolerance or x0 > last_x0:
-                    is_valid_list_cont = True
+                if self.list_buffer and self._use_geom() and block.lines:
+                    first_line = block.lines[0]
+                    self._line_is_monospace = self._is_spans_monospace(first_line.spans)
+                    first_v_span = next((s for s in first_line.spans if s.text.strip()), first_line.spans[0] if first_line.spans else None)
+                    fl_x0 = first_v_span.bbox[0] if first_v_span else x0
+                    fl_x1 = first_line.spans[-1].bbox[2] if first_line.spans else x1
+                    fl_y0 = first_line.spans[0].bbox[1] if first_line.spans else y0
+                    fl_y1 = first_line.spans[-1].bbox[3] if first_line.spans else y1
+                    fl_word_w = (first_v_span.bbox[2] - first_v_span.bbox[0]) if first_v_span else 10.0
+                    fl_pitch = (fl_y1 - prev_geom.y1) if (prev_geom and prev_geom.y1 is not None and fl_y1 >= prev_geom.y1) else None
+                    fl_font_size = first_v_span.size if first_v_span else None
+                    fl_geom = LineGeom(
+                        x0=fl_x0,
+                        x1=fl_x1,
+                        y0=fl_y0,
+                        y1=fl_y1,
+                        first_word_w=fl_word_w,
+                        pitch=fl_pitch,
+                        ends_hyphen=bool(raw_block_text_for_check.endswith("-") or raw_block_text_for_check.endswith("–")),
+                        font_size=fl_font_size,
+                    )
+                    is_valid_list_cont = self._is_item_continuation(
+                        geom=fl_geom,
+                        prev_geom=prev_geom,
+                        item=item,
+                        ref_pitch=ref_pitch,
+                        content_right=content_right,
+                        line_text=raw_block_text_for_check,
+                        prev_text=prev_line_text,
+                        is_justified=prev_line_justified,
+                    )
+                elif self.list_buffer:
+                    last_x0 = last_item["bbox"][0]
 
-                    if not is_page_transition and self.last_y1 is not None:
-                        if (y0 - self.last_y1) > self.MIN_VERTICAL_GAP_LIST:
+                    x_tolerance = 30 if is_page_transition else 20
+
+                    if abs(last_x0 - x0) < x_tolerance or x0 > last_x0:
+                        is_valid_list_cont = True
+
+                        if not is_page_transition and self.last_y1 is not None:
+                            if (y0 - self.last_y1) > self.MIN_VERTICAL_GAP_LIST:
+                                is_valid_list_cont = False
+
+                        strict_x_offset = 20 if is_page_transition else 5
+                        if x0 < last_x0 - strict_x_offset:
                             is_valid_list_cont = False
 
-                    strict_x_offset = 20 if is_page_transition else 5
-                    if x0 < last_x0 - strict_x_offset:
-                        is_valid_list_cont = False
-            if y1 < self.TOP_MARGIN_THRESH or y0 > bottom_thresh:
+                    if is_valid_list_cont:
+                        text_x0 = item.words[1].bbox[0] if len(item.words) > 1 else last_x0
+                        ends_sentence = bool(
+                            re.search(r'[.!?…]["”»)\]]*$', item.text.rstrip())
+                        )
+                        if ends_sentence:
+                            is_indented = x0 > x0_margin + self.MARGIN_INDENT_THRESH
+                            if is_indented and (x0 < text_x0 - 3 or x0 > text_x0 + 5):
+                                is_valid_list_cont = False
+                            elif not is_indented and x0 <= last_x0 + 5:
+                                is_valid_list_cont = False
+
+                    if getattr(self, "in_bibliography_section", False):
+                        logger.info(
+                            "BIB CONT (legacy): line=%r x0=%.1f last_x0=%.1f -> %s",
+                            raw_block_text_for_check[:40],
+                            x0,
+                            last_x0,
+                            is_valid_list_cont,
+                        )
+
+            if (
+                y1 < self.TOP_MARGIN_THRESH
+                or y0 > bottom_thresh
+                or (y0 > page.height * 0.88 and re.fullmatch(r"\d{1,4}", raw_block_text_for_check))
+            ):
                 new_artifact = PageArtifact(
                     artifact_id=block.block_id,
                     type="nr strony (tymczasowo uproszczone)",
@@ -833,6 +1327,29 @@ class PDFMapper:
                     bbox=list(block.bbox),
                 )
                 new_doc.floating_elements.page_artifacts.append(new_artifact)
+                continue
+
+            if self._use_geom() and any(
+                y0r <= (y0 + y1) / 2 <= y1r for y0r, y1r in formula_regions
+            ):
+                if self.list_buffer:
+                    logger.info(
+                        "INTERRUPT formula inside list %r: block_id=%s, text=%r",
+                        self.list_buffer[0]["item"].text[:30],
+                        block.block_id,
+                        temp_text[:40],
+                    )
+                new_doc.floating_elements.page_artifacts.append(
+                    PageArtifact(
+                        artifact_id=f"eq_{block.block_id}",
+                        type="math_formula",
+                        page_number=page.number,
+                        text=temp_text,
+                        bbox=list(block.bbox),
+                    )
+                )
+                prev_geom = None
+                ref_pitch = None
                 continue
 
             for line_idx, line in enumerate(block.lines):
@@ -849,62 +1366,80 @@ class PDFMapper:
                 if self.is_inside_table(line_bbox, table_bboxes):
                     continue
 
+                line_y0 = line.spans[0].bbox[1] if line.spans else line.bbox[1]
+                line_y1 = line.spans[-1].bbox[3] if line.spans else line.bbox[3]
                 tmp_line_text = "".join(s.text for s in line.spans).strip()
+
+                if (
+                    line_y1 < self.TOP_MARGIN_THRESH
+                    or line_y0 > bottom_thresh
+                    or (line_y0 > page.height * 0.88 and re.fullmatch(r"\d{1,4}", tmp_line_text))
+                ):
+                    new_doc.floating_elements.page_artifacts.append(
+                        PageArtifact(
+                            artifact_id=f"{block.block_id}_l{line_idx}",
+                            type="nr strony (linia)",
+                            page_number=page.number,
+                            text=tmp_line_text.lower(),
+                            bbox=list(line.bbox),
+                        )
+                    )
+                    continue
+
                 if not tmp_line_text:
                     continue
                 tmp_line_text_sp = " ".join(
                     s.text.strip() for s in line.spans if s.text.strip()
                 )
+                self._line_is_monospace = self._is_spans_monospace(line.spans)
                 if line_idx == 0 and self._is_bib_heading_line(tmp_line_text_sp):
                     self._empty_paragraph_buffer("wykryto nagłówek bibliografii")
-                    self.curr_line = 0
-                    self._empty_list_buffer()
+                    self._flush_all_lists("wykryto nagłówek bibliografii")
                     self.in_bibliography_section = True
                     current_marker = None
                     is_valid_list_cont = False
                     hd_text, hd_words, _ = self._extract_words_with_spacing(
                         line, "", [], page.number, 0, line.spans[-1].bbox[2]
                     )
-                    self.curr_line = 0
-                    self.logical_blocks.append(
-                        ParagraphBlock(
-                            block_id=block.block_id,
-                            content=hd_text.strip(),
-                            words=hd_words,
-                            type="heading",
-                            debug_empty="nagłówek bibliografii (linia)",
-                        )
+                    hd_block = ParagraphBlock(
+                        block_id=block.block_id,
+                        content=hd_text.strip(),
+                        words=hd_words,
+                        type="heading",
+                        debug_empty="nagłówek bibliografii (linia)",
                     )
+                    hd_block._seq = self._block_seq
+                    self._block_seq += 1
+                    self.logical_blocks.append(hd_block)
                     self.last_y1 = line.spans[-1].bbox[3]
                     continue
 
                 if line_idx == 0 and getattr(self, "in_bibliography_section", False) and self._is_after_bib_heading_line(tmp_line_text_sp):
                     self._empty_paragraph_buffer("wykryto koniec bibliografii")
-                    self.curr_line = 0
-                    self._empty_list_buffer()
+                    self._flush_all_lists("wykryto koniec bibliografii")
                     self.in_bibliography_section = False
                     current_marker = None
                     is_valid_list_cont = False
                     hd_text, hd_words, _ = self._extract_words_with_spacing(
                         line, "", [], page.number, 0, line.spans[-1].bbox[2]
                     )
-                    self.curr_line = 0
-                    self.logical_blocks.append(
-                        ParagraphBlock(
-                            block_id=block.block_id,
-                            content=hd_text.strip(),
-                            words=hd_words,
-                            type="heading",
-                            debug_empty="koniec bibliografii (linia)",
-                        )
+                    hd_block = ParagraphBlock(
+                        block_id=block.block_id,
+                        content=hd_text.strip(),
+                        words=hd_words,
+                        type="heading",
+                        debug_empty="koniec bibliografii (linia)",
                     )
+                    hd_block._seq = self._block_seq
+                    self._block_seq += 1
+                    self.logical_blocks.append(hd_block)
                     self.last_y1 = line.spans[-1].bbox[3]
                     continue
 
-                line_type, _ = classify_block_content(tmp_line_text_sp, current_marker)
+                line_type, _ = self._classify_block_content(tmp_line_text_sp, current_marker)
 
                 if line_type == "list" and full_text.strip():
-                    prev_type, prev_marker = classify_block_content(
+                    prev_type, prev_marker = self._classify_block_content(
                         full_text, current_marker
                     )
 
@@ -945,11 +1480,19 @@ class PDFMapper:
                             )
                             self._empty_paragraph_buffer("odcięcie wstępu od listy")
 
-                        full_text, words_info, self.curr_line = "", [], 0
+                        full_text, words_info = "", []
                         is_valid_list_cont = False
 
                     elif prev_type == "list":
+                        item_x0 = words_info[0].bbox[0] if words_info else block.bbox[0]
+                        self._handle_marker_line(prev_marker, item_x0)
+                        ref_pitch = None
                         cleaned_text = strip_list_marker(full_text, prev_marker)
+                        if not self.list_buffer:
+                            item_seq = self._block_seq
+                            self._block_seq += 1
+                        else:
+                            item_seq = self.list_buffer[0].get("_seq", self._block_seq)
                         self.list_buffer.append(
                             {
                                 "item": ListItem(
@@ -963,12 +1506,14 @@ class PDFMapper:
                                 "block_id": block.block_id,
                                 "bbox": list(block.bbox),
                                 "original_text": full_text,
+                                "_seq": item_seq,
                             }
                         )
                         self._adjust_item_word_positions(
                             self.list_buffer[-1]["item"].words
                         )
-                        full_text, words_info, self.curr_line = "", [], 0
+                        full_text, words_info = "", []
+                        ref_pitch = None
 
                 line_x0 = block.bbox[0]
                 if line.spans:
@@ -985,6 +1530,19 @@ class PDFMapper:
                 current_y0 = line.spans[0].bbox[1] if line.spans else line.bbox[1]
                 current_y1 = line.spans[-1].bbox[3] if line.spans else line.bbox[3]
 
+                first_word_w = (first_valid_span.bbox[2] - first_valid_span.bbox[0]) if first_valid_span else 10.0
+                pitch = (current_y1 - prev_geom.y1) if (prev_geom and prev_geom.y1 is not None and current_y1 >= prev_geom.y1) else None
+                geom = LineGeom(
+                    x0=line_x0,
+                    x1=line_x1,
+                    y0=current_y0,
+                    y1=current_y1,
+                    first_word_w=first_word_w,
+                    pitch=pitch,
+                    ends_hyphen=bool(tmp_line_text.endswith("-") or tmp_line_text.endswith("–")),
+                    font_size=first_valid_span.size if first_valid_span else None,
+                )
+
                 # Detekcja nowego akapitu
                 is_new_paragraph, debug_reason = self._detect_paragraph_break(
                     current_y0,
@@ -993,16 +1551,29 @@ class PDFMapper:
                     x0_margin,
                     full_text,
                     is_valid_list_cont,
+                    geom=geom,
+                    prev_geom=prev_geom,
+                    content_right=content_right,
+                    block_line_x0s=block_line_x0s,
                 )
 
                 if is_new_paragraph and full_text.strip():
-                    curr_type, _ = classify_block_content(full_text, current_marker)
-                    next_line_type, _ = classify_block_content(
+                    curr_type, _ = self._classify_block_content(full_text, current_marker)
+                    next_line_type, _ = self._classify_block_content(
                         tmp_line_text_sp, current_marker
                     )
 
                     if curr_type == "list" and next_line_type != "list":
-                        is_new_paragraph = False
+                        item_text_x0 = (
+                            words_info[1].bbox[0]
+                            if len(words_info) > 1
+                            else None
+                        )
+                        aligned_to_text = (
+                            item_text_x0 is not None and abs(geom.x0 - item_text_x0) <= 8
+                        )
+                        if aligned_to_text or not self._use_geom():
+                            is_new_paragraph = False
 
                 if is_new_paragraph:
                     if full_text.strip():
@@ -1027,12 +1598,20 @@ class PDFMapper:
                                 )
                             )
                         else:
-                            prev_type, prev_marker = classify_block_content(
+                            prev_type, prev_marker = self._classify_block_content(
                                 full_text, current_marker
                             )
 
                             if prev_type == "list":
+                                item_x0 = words_info[0].bbox[0] if words_info else block.bbox[0]
+                                self._handle_marker_line(prev_marker, item_x0)
+                                ref_pitch = None
                                 cleaned_text = strip_list_marker(full_text, prev_marker)
+                                if not self.list_buffer:
+                                    item_seq = self._block_seq
+                                    self._block_seq += 1
+                                else:
+                                    item_seq = self.list_buffer[0].get("_seq", self._block_seq)
                                 self.list_buffer.append(
                                     {
                                         "item": ListItem(
@@ -1046,6 +1625,7 @@ class PDFMapper:
                                         "block_id": block.block_id,
                                         "bbox": list(block.bbox),
                                         "original_text": full_text,
+                                        "_seq": item_seq,
                                     }
                                 )
                                 self._adjust_item_word_positions(
@@ -1053,7 +1633,7 @@ class PDFMapper:
                                 )
                             else:
                                 if self.list_buffer and not is_visual_caption:
-                                    self._empty_list_buffer()
+                                    self._flush_all_lists("nowy akapit wewnątrz bloku")
                                 self.paragraph_buffer.append(
                                     {
                                         "content": full_text.strip(),
@@ -1066,12 +1646,15 @@ class PDFMapper:
 
                     if self.paragraph_buffer:
                         self._empty_paragraph_buffer(debug_reason)
-                        self.curr_line = 0
 
                 # Ekstrakcja słów do linijki
                 full_text, words_info, word_counter = self._extract_words_with_spacing(
                     line, full_text, words_info, page.number, word_counter, line_x1
                 )
+
+                prev_geom = geom
+                prev_line_text = tmp_line_text
+                prev_line_justified = (getattr(line, "alignement", "") == "justified")
 
             full_text = full_text.strip()
             if not full_text or len(full_text) < 2:
@@ -1116,8 +1699,7 @@ class PDFMapper:
 
             if is_hdr:
                 self._empty_paragraph_buffer("wykryto nagłówek")
-                self.curr_line = 0
-                self._empty_list_buffer()
+                self._flush_all_lists("wykryto nagłówek")
 
                 if heading_key.rstrip(":. ").startswith(self.BIB_HEADINGS):
                     self.in_bibliography_section = True
@@ -1130,23 +1712,34 @@ class PDFMapper:
                 else:
                     self.in_bibliography_section = False
 
-                self.logical_blocks.append(
-                    ParagraphBlock(
-                        block_id=block.block_id,
-                        content=full_text,
-                        words=words_info,
-                        type="heading",
-                        debug_empty="wykryto nagłówek",
-                    )
+                hd_block = ParagraphBlock(
+                    block_id=block.block_id,
+                    content=full_text,
+                    words=words_info,
+                    type="heading",
+                    debug_empty="wykryto nagłówek",
                 )
+                hd_block._seq = self._block_seq
+                self._block_seq += 1
+                self.logical_blocks.append(hd_block)
                 continue
 
-            block_type, marker_type = classify_block_content(full_text, current_marker)
+            self._line_is_monospace = self._is_spans_monospace(
+                [s for l in block.lines for s in l.spans]
+            )
+            block_type, marker_type = self._classify_block_content(full_text, current_marker)
 
             if block_type == "list":
                 self._empty_paragraph_buffer("wykryto listę")
-                self.curr_line = 0
+                item_x0 = words_info[0].bbox[0] if words_info else block.bbox[0]
+                self._handle_marker_line(marker_type, item_x0)
+                ref_pitch = None
                 cleaned_text = strip_list_marker(full_text, marker_type)
+                if not self.list_buffer:
+                    item_seq = self._block_seq
+                    self._block_seq += 1
+                else:
+                    item_seq = self.list_buffer[0].get("_seq", self._block_seq)
                 self.list_buffer.append(
                     {
                         "item": ListItem(
@@ -1160,9 +1753,11 @@ class PDFMapper:
                         "block_id": block.block_id,
                         "bbox": list(block.bbox),
                         "original_text": full_text,
+                        "_seq": item_seq,
                     }
                 )
                 self._adjust_item_word_positions(self.list_buffer[-1]["item"].words)
+                ref_pitch = None
             elif is_valid_list_cont:
                 last_item_data = self.list_buffer[-1]
                 connector = (
@@ -1182,8 +1777,11 @@ class PDFMapper:
                     max(last_item_data["item"].bbox[3], b[3]),
                 ]
                 last_item_data["bbox"] = last_item_data["item"].bbox
+                if fl_pitch and fl_pitch > 5.0:
+                    ref_pitch = fl_pitch
             else:
-                self._empty_list_buffer()
+                self._flush_all_lists("brak kontynuacji listy")
+                ref_pitch = None
                 self.paragraph_buffer.append(
                     {
                         "content": full_text,
@@ -1194,7 +1792,6 @@ class PDFMapper:
 
                 if is_visual_caption:
                     self._empty_paragraph_buffer("odcięcie - koniec bloku podpisu")
-                    self.curr_line = 0
 
         for table in page.tables:
             ve = VisualElement(
@@ -1327,17 +1924,16 @@ class PDFMapper:
         linguistic keywords, and verifies candidates by analyzing the vertical spatial gaps
         above and below the text block.
         """
-        img_pattern = re.compile(
-            r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram)\s*(?:\d+|[IVX]+)",
-            re.IGNORECASE,
-        )
-        tab_pattern = re.compile(
-            r"^(tabela|tab\.|table)\s*(?:\d+|[IVX]+)", re.IGNORECASE
-        )
+        img_pattern = self.IMG_PATTERN
+        tab_pattern = self.TAB_PATTERN
 
         reference_verbs = re.compile(
             r"\b(przedstawia|pokazuje|obrazuje|zawiera|zilustrowano|prezentuje|widać|zestawiono)\b",
             re.IGNORECASE,
+        )
+
+        list_marker_pattern = re.compile(
+            r"^(?:[-–—•●○■]|\d{1,3}[\.)]|[a-z]\))\s*", re.IGNORECASE
         )
 
         i = 0
@@ -1380,12 +1976,41 @@ class PDFMapper:
                 next_y0 = min(w.bbox[1] for w in next_w)
                 vertical_gap = next_y0 - curr_y1
 
-                if vertical_gap > 28 or vertical_gap < -10:
+                if vertical_gap > 18 or vertical_gap < -10:
+                    break
+
+                if block.content.strip().endswith("."):
+                    break
+
+                first_raw_word = next_w[0].text.strip()
+                first_few_words = " ".join(w.text for w in next_w[:3]).strip()
+                next_content = getattr(next_b, "content", "").strip()
+                if (
+                    list_marker_pattern.match(first_raw_word)
+                    or list_marker_pattern.match(first_few_words)
+                    or list_marker_pattern.match(next_content)
+                    or self._classify_block_content(first_few_words)[0] == "list"
+                    or self._classify_block_content(next_content)[0] == "list"
+                ):
+                    break
+
+                curr_size = words[0].size if words else None
+                next_size = next_w[0].size if next_w else None
+                if curr_size and next_size and abs(curr_size - next_size) > 0.4:
+                    break
+                if words and words[0].font and next_w[0].font and words[0].font != next_w[0].font:
+                    break
+                curr_x0 = words[0].bbox[0] if words else 0
+                next_x0 = next_w[0].bbox[0] if next_w else 0
+                if curr_x0 - next_x0 > 30:
+                    break
+
+                unique_lines_next = len(set(w.line for w in next_w))
+                if unique_lines_next > 2 or len(getattr(next_b, "content", "")) > 100:
                     break
 
                 unique_lines_curr = len(set(w.line for w in block.words))
-                unique_lines_next = len(set(w.line for w in next_w))
-                if (unique_lines_curr + unique_lines_next) > 5:
+                if (unique_lines_curr + unique_lines_next) > 4:
                     break
 
                 separator = " "
@@ -1396,10 +2021,11 @@ class PDFMapper:
                 old_len = len(block.content) + len(separator)
                 block.content += separator + getattr(next_b, "content", "").strip()
 
+                old_words_len = len(block.words)
                 for w in next_w:
                     w.start_char += old_len
                     w.end_char += old_len
-                    w.word_index += len(block.words)
+                    w.word_index += old_words_len
                     block.words.append(w)
 
                 self.logical_blocks.pop(i + 1)
