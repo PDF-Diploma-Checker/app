@@ -77,7 +77,7 @@ def check_item(full_text, last_item, second_to_last, text_language, sentence_sty
                     return full_text.endswith(('.', ':'))
                 return full_text[-1] == dominant_ending
             return full_text.endswith('.')
-        if marker_type in ("dash", "bullet") and not is_verb and ',' not in full_text[:-2]:
+        if (marker_type in ("dash", "bullet") and not is_verb and dominant_ending not in {',', ';'} and ',' not in full_text[:-2]):
             if len(full_text.split()) < 5 and full_text[-1].isalnum():
                 return True
         if is_en and dominant_ending:
