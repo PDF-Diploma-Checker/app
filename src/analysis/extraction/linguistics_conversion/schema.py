@@ -519,7 +519,7 @@ def is_bekart_func(combined_words):
             else:
                 words_line_buf += 1
 
-        if has_page_break and page_lines_buf <= 2:
+        if has_page_break and page_lines_buf <= 1:
             is_bekart = words_line_buf
         else:
             is_bekart = 0
