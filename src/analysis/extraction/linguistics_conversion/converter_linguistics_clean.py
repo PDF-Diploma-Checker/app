@@ -219,14 +219,16 @@ class PDFMapper:
             t = self._block_text(b)
             is_right_side = (content_right is None) or (b.bbox[0] > content_right - 80) or (b.bbox[2] > content_right - 50)
             if self.EQ_NUM_RE.match(t) and is_right_side:
-                y0, y1 = b.bbox[1] - 8, b.bbox[3] + 8
+                y0, y1 = b.bbox[1] - 25, b.bbox[3] + 25
                 changed = True
                 while changed:
                     changed = False
                     for c in page.text_blocks:
-                        if c is b or not self._math_like(c):
+                        if c is b:
                             continue
-                        if c.bbox[3] >= y0 - 6 and c.bbox[1] <= y1 + 6 and c.bbox[1] < y1 + 60:
+
+                        vertically_aligned = (c.bbox[3] >= y0 - 15 and c.bbox[1] <= y1 + 15)
+                        if vertically_aligned and (self._math_like(c) or c.bbox[2] < b.bbox[0]):
                             ny0, ny1 = min(y0, c.bbox[1]), max(y1, c.bbox[3])
                             if (ny0, ny1) != (y0, y1):
                                 y0, y1, changed = ny0, ny1, True
@@ -508,7 +510,7 @@ class PDFMapper:
         ratio = (math_chars_count + single_letter_count) / len(full_text)
 
         if ratio > 0.35:
-            return 0
+            return 3
         else:
             return 0
 
@@ -629,13 +631,28 @@ class PDFMapper:
         block_type = "acronyms" if is_acronym_block else "paragraph"
 
         if block_type == "paragraph":
-            # if PDFMapper.is_math(combined_words):
-            #    block_type = "math"
-            if PDFMapper.is_header(combined_words):
-                block_type = "heading"
-            elif PDFMapper.is_keywords(combined_words):
-                block_type = "keywords"
+            # Wyznaczamy średni rozmiar czcionki w bloku oraz pozycję Y
+            if combined_words:
+                avg_size = sum(w.size for w in combined_words) / len(combined_words)
+                min_y0 = min(w.bbox[1] for w in combined_words)
+                page_height = 842.0  # Domyślnie A4
+                
+                # Jeśli blok jest w dolnej części strony (poniżej 70% wysokości) 
+                # ORAZ czcionka jest wyraźnie mniejsza od głównej (o co najmniej 1.5 pt):
+                is_bottom_note = (
+                    min_y0 > (page_height * 0.70) 
+                    and avg_size <= (getattr(self, "main_font_size", 12.0) - 1.5)
+                )
+                
+                if is_bottom_note:
+                    block_type = "footnote"
 
+            # Klasyfikacja nagłówków i słów kluczowych wykonuje się tylko dla zwykłych akapitów
+            if block_type == "paragraph":
+                if PDFMapper.is_header(combined_words):
+                    block_type = "heading"
+                elif PDFMapper.is_keywords(combined_words):
+                    block_type = "keywords"
         # Przypisanie wdowy, szewca i bękarta tylko do bloku typu paragraf
         if block_type == "paragraph":
             is_widow = (
@@ -1122,6 +1139,8 @@ class PDFMapper:
             floating visual elements, and reference sections ready for NLP analysis.
         """
         self.__init__()
+
+        self.main_font_size = old_doc.get_most_common_font_size()
 
         new_doc = FinalDocument(
             metadata=old_doc.metadata,
@@ -2167,6 +2186,10 @@ class PDFMapper:
 
         citation_pattern = re.compile(r"\[([\d\s,\-]+)\]")
 
+        math_interval_context = re.compile(
+            r"\b(przedział\w*|przedziale\w*|zakres\w*|zakresie\w*|zbior\w*|zbiorze\w*|dziedzin\w*|wartość\w*|wartości\w*|interval|range)\s*$",
+            re.IGNORECASE)
+
         def extract_numbers_from_citation(cit_str):
             """
             Parses a citation string and extracts individual reference numbers,
@@ -2223,6 +2246,9 @@ class PDFMapper:
 
                     nums = extract_numbers_from_citation(cit_content)
 
+                    if "0" in nums or any(n == "0" for n in nums):
+                        continue
+                    
                     if nums and not nums.issubset(valid_bib_numbers):
                         start_pos, end_pos = match.span()
                         for word in words:
