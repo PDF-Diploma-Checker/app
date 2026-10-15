@@ -22,6 +22,7 @@ class WordInfo:  # Położenie XY oraz relatywne słowa
     page_number: int
     line: int = 0
     incorrect_bibliography: int = 0
+    is_index: bool = False
 
 
 @dataclass
@@ -70,15 +71,6 @@ class PageArtifact:  # Informacje o elementach pływających, takich jak numery 
     artifact_id: int
     type: str  # np. "page_number"
     page_number: int
-    text: str
-    bbox: List[float]
-
-
-@dataclass
-class Footnote:  # Informacje o przypisach (TODO)
-    footnote_id: int
-    page_number: int
-    marker: str
     text: str
     bbox: List[float]
 
@@ -153,7 +145,6 @@ class CodeSnippet:  # Informacje o fragmentach kodu (w tekście i jako elementy 
 @dataclass
 class FloatingElements:  # Informacje o wszystkich elementach pływających na stronie
     page_artifacts: List[PageArtifact] = field(default_factory=list)
-    footnotes: List[Footnote] = field(default_factory=list)
     visual_elements: List[VisualElement] = field(default_factory=list)
     equations: List[Equation] = field(default_factory=list)
 
@@ -456,6 +447,14 @@ def find_image_description(image_bbox: list, logical_blocks: list, priority_side
 
     return "", priority_side
 
+def is_index(word, line_font_size) -> bool:
+    """Checks whether something is an index."""
+
+    size = getattr(word, "size", line_font_size)
+    if size < line_font_size * 0.85:
+        return True
+    
+    return False
 
 def is_widow_func(combined_words):
     """
@@ -468,6 +467,9 @@ def is_widow_func(combined_words):
     Returns:
         int: The number of words constituting the widow (1 or 2), or 0 if no widow is detected.
     """
+    if not combined_words or getattr(combined_words[-1], "is_index", False):
+        return 0
+
     is_widow = 0
 
     if combined_words and len(combined_words) >= 10:
@@ -496,6 +498,8 @@ def is_bekart_func(combined_words):
     Returns:
         int: The number of words in the isolated line on the new page, or 0 if no bastard is detected.
     """
+    if not combined_words or getattr(combined_words[-1], "is_index", False):
+        return 0
     is_bekart = 0
 
     if combined_words:
@@ -539,6 +543,10 @@ def is_szewc_func(combined_words):
         int: The number of words in the isolated first line at the bottom of the page,
         or 0 if no shoemaker is detected.
     """
+
+    if not combined_words or getattr(combined_words[-1], "is_index", False):
+        return 0
+
     is_szewc = 0
 
     if combined_words:

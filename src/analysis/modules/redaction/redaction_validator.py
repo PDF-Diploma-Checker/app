@@ -345,27 +345,45 @@ class RedactionValidator:
             comment = "Orphan detected - Conjunction at the end of the line."
         else:
             comment = "Wykryto sierotę - spójnik na końcu linii."
+
+        MATH_FONTS = (
+            "math", "cmmi", "cmsy", "symbol", "rntx", "mnsymbol", "txmi", "nimbusrom"
+        )
+
+        most_common_size = self.document_data.get_most_common_font_size() or 10.0
+
         for page in self.document_data.pages:
             for block in page.text_blocks:
+                if getattr(block, "block_type", "text") in ("math", "equation", "formula"):
+                    continue
+
                 for line in block.lines:
                     if line.spans is None or len(line.spans) == 0:
                         continue
+
                     last_span = None
                     for span in line.spans[::-1]:
                         if span.text.strip() == "":
                             continue
                         last_span = span
                         break
+
                     if last_span is None:
                         continue
-                    if len(last_span.text) == 1:
-                        if last_span.text < "a" or last_span.text > "z":
+
+                    text_clean = last_span.text.strip()
+
+                    if not text_clean.isalpha():
+                        continue
+
+                    if len(text_clean) == 1:
+                        font_lower = getattr(last_span, "font", "").lower()
+                        if any(mf in font_lower for mf in MATH_FONTS):
+                            continue
+                        if getattr(last_span, "italic", False):
                             continue
 
-                        if (
-                            last_span.size
-                            < self.document_data.get_most_common_font_size() * 0.8
-                        ):
+                        if last_span.size < most_common_size * 0.88:
                             continue
 
                         rect = (
@@ -373,7 +391,7 @@ class RedactionValidator:
                             last_span.bbox[1] + 1,
                             page.width - 1,
                             last_span.bbox[3] - 1,
-                        )  # tested
+                        )
                         if self.document_data.is_rect_intersecting(rect, page) != []:
                             continue
 

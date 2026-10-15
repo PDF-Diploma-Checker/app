@@ -79,8 +79,8 @@ def extractPDF(file_path: str) -> DocumentData:
     all_spacings = []
 
     for page_index, page in enumerate(doc):
-        raw_dict = page.get_text("dict")
-        word_list = page.get_text("words")
+        raw_dict = page.get_text("dict", sort = True)
+        word_list = page.get_text("words", sort = True)
         p_width = page.rect.width
         p_height = page.rect.height
 
@@ -102,13 +102,25 @@ def extractPDF(file_path: str) -> DocumentData:
 
         drawings = page.get_drawings()
 
+        font_sizes = [
+            span["size"]
+            for b in raw_dict["blocks"] if b["type"] == 0
+            for line in b.get("lines", [])
+            for span in line.get("spans", [])
+        ]
+        dominant_font_size = statistics.mode(font_sizes) if font_sizes else None
+
         # table_bboxes = extract_tables(page, drawings, cur_page)
         last_block_btmline = None  # Ostatnia linia w bloku - do interlinii
+        prev_was_fn = False
+
         # Najpierw wyciągamy wszystkie bloki tekstowe ze strony
         for block in raw_dict["blocks"]:
             # typ 0 to tekst, typ 1 to obraz
             if block["type"] == 0:
                 is_ftr = geometry_classifier.is_footer(block, p_height, page_index + 1)
+                is_fn = geometry_classifier.is_footnote(block, p_height, dominant_font_size, prev_was_fn)
+                prev_was_fn = is_fn
                 text_block, last_block_btmline, current_span_id = parse_text_block(
                     block,
                     word_list,
@@ -118,11 +130,12 @@ def extractPDF(file_path: str) -> DocumentData:
                     current_span_id,
                     all_spacings,
                     is_ftr,
+                    is_fn,
                 )
 
                 if text_block.lines:
                     cur_page.text_blocks.append(text_block)
-                    if not is_ftr:
+                    if not is_ftr and not is_fn:
                         blank_page = False
 
         # Dopiero po zebraniu tekstu procesujemy obrazy rastrowe, aby opisy pod nimi były już dostępne
