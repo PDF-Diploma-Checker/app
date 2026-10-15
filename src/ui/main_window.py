@@ -50,6 +50,8 @@ from . import styles
 from .analysis_dialog import AnalysisDialog
 from .report_bug import send_report
 from .log_window import LogWindow
+from .i18n import t, language_signals
+from .language_switch import LanguageSwitch
 from PySide6.QtWidgets import QFrame
 from common.path import resource_path
 
@@ -77,7 +79,7 @@ class PDFReader(QMainWindow):
     Manages the user interface flow, PDF rendering, background background workers, and view states."""
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Diploma checker")
+        self.setWindowTitle(t("main.window_title"))
         self.resize(1300, 600)
         self.manager = SavingFiles()
         self.own_comments = []
@@ -105,6 +107,20 @@ class PDFReader(QMainWindow):
         self.overlay = QFrame(self)
         self.overlay.setStyleSheet(styles.OVERLAY_STYLE)
         self.overlay.hide()
+
+        language_signals.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, *_):
+        """Re-apply all reader texts after the UI language changes."""
+        self.setWindowTitle(t("main.window_title"))
+        self.v_label.setText(t("main.verification"))
+        if not getattr(self, "current_pdf_path", None):
+            self.title_label.setText(t("main.no_document"))
+        self.export_btn.setText(t("main.export_pdf"))
+        self.report_btn.setText(t("main.report_problem"))
+        self.logs_btn.setText(t("main.logs"))
+        if getattr(self, "current_pdf_path", None):
+            self.load_ai_analysis()
 
     def start_background_analysis(self, pdf_path, config_path):
         """Spawns a new QThread worker to perform document processing asynchronously."""
@@ -180,9 +196,9 @@ class PDFReader(QMainWindow):
         self.right_panel.setFixedWidth(300)
         self.right_panel.setStyleSheet(styles.RIGHT_PANEL_STYLE)
         right_layout = QVBoxLayout(self.right_panel)
-        v_label = QLabel("Weryfikacja")
-        v_label.setStyleSheet(styles.VERIFY_TITLE_STYLE)
-        right_layout.addWidget(v_label)
+        self.v_label = QLabel(t("main.verification"))
+        self.v_label.setStyleSheet(styles.VERIFY_TITLE_STYLE)
+        right_layout.addWidget(self.v_label)
         right_layout.addStretch()
 
         splitter.addWidget(self.thumb_area)
@@ -220,7 +236,7 @@ class PDFReader(QMainWindow):
         self.back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
         l.addWidget(self.back_btn)
 
-        self.title_label = QLabel("Brak dokumentu")
+        self.title_label = QLabel(t("main.no_document"))
         self.title_label.setStyleSheet(styles.NORMAL_LABEL_STYLE)
         l.addWidget(self.title_label)
         l.addStretch(1)
@@ -246,15 +262,17 @@ class PDFReader(QMainWindow):
         l.addWidget(self.zoom_label)
         l.addWidget(btn_in)
         l.addStretch(1)
-        l.addWidget(QLabel(" ", styleSheet=styles.LANG_BTN_STYLE))
+        self.lang_switch = LanguageSwitch()
+        l.addWidget(self.lang_switch)
+        l.addSpacing(15)
 
-        self.export_btn = QPushButton("Pobierz PDF z uwagami")
+        self.export_btn = QPushButton(t("main.export_pdf"))
         self.export_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE)
         self.export_btn.setCursor(Qt.PointingHandCursor)
         self.export_btn.clicked.connect(self.export_pdf_with_annotations)
         l.addWidget(self.export_btn)
 
-        self.report_btn = QPushButton("Zgłoś problem")
+        self.report_btn = QPushButton(t("main.report_problem"))
         self.report_btn.setStyleSheet(styles.RED_BUTTON_STYLE)
         self.report_btn.setCursor(Qt.PointingHandCursor)
         self.report_btn.clicked.connect(
@@ -262,7 +280,7 @@ class PDFReader(QMainWindow):
         )
         l.addWidget(self.report_btn)
 
-        self.logs_btn = QPushButton("Logi")
+        self.logs_btn = QPushButton(t("main.logs"))
         self.logs_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
         self.logs_btn.setCursor(Qt.PointingHandCursor)
         self.logs_btn.clicked.connect(self.show_log_window)
@@ -281,7 +299,7 @@ class PDFReader(QMainWindow):
     def open_file_dialog(self):
         """Opens a native system file dialog filtered for PDF files, allowing the user 
         to select and import a new document into the application index."""
-        path, _ = QFileDialog.getOpenFileName(self, "Wybierz PDF", "", "PDF Files (*.pdf)")
+        path, _ = QFileDialog.getOpenFileName(self, t("main.choose_pdf"), "", t("common.pdf_filter"))
         if path: 
             self.load_and_switch(path)
 
@@ -355,7 +373,7 @@ class PDFReader(QMainWindow):
         if self.pdf_view.selection_box.isVisible() and self.pdf_view.selection_box.geometry().contains(pos):
             return
 
-        tekst, ok = QInputDialog.getMultiLineText(self, "Własny komentarz", "Wpisz treść komentarza:")
+        tekst, ok = QInputDialog.getMultiLineText(self, t("main.own_comment_title"), t("main.own_comment_prompt"))
         
         if ok and tekst.strip():
             aktualna_strona = self.pdf_view.pageNavigator().currentPage()
@@ -385,7 +403,7 @@ class PDFReader(QMainWindow):
                 "strona": aktualna_strona + 1,
                 "wspolrzedne": {"x": pdf_x, "y": pdf_y},
                 "tekst_komentarza": tekst.strip(),
-                "znaleziony_tekst": "(Komentarz dodany w pustym miejscu)"
+                "znaleziony_tekst": t("main.comment_empty_spot")
             }
             marker = CommentMarker(comment_data, self.pdf_view.viewport())
             self.pdf_view.comment_markers.append(marker)
@@ -440,13 +458,13 @@ class PDFReader(QMainWindow):
             cg_layout.setContentsMargins(15, 12, 15, 12)
             cg_layout.setSpacing(4)
 
-            cg_title = QLabel("Ogólna ocena pracy")
+            cg_title = QLabel(t("main.overall_grade"))
             cg_title.setStyleSheet(styles.CONTENT_GRADE_TITLE)
 
-            cg_val = QLabel(f"{grade} <span style='font-size: 16px; color: #666;'>/ {max_grade} pkt</span>")
+            cg_val = QLabel(f"{grade} <span style='font-size: 16px; color: #666;'>/ {max_grade} {t('main.points')}</span>")
             cg_val.setStyleSheet(styles.CONTENT_GRADE_VALUE)
 
-            detale_lbl = QLabel(f"Podrozdziały poza tematem: <b>{off_topic}</b> ({p_off}%)")
+            detale_lbl = QLabel(t("main.off_topic", count=off_topic, percent=p_off))
             detale_lbl.setStyleSheet(styles.CONTENT_GRADE_DETAILS)
 
             cg_layout.addWidget(cg_title)
@@ -455,7 +473,7 @@ class PDFReader(QMainWindow):
 
             l.addWidget(cg_frame)
         else:
-            none_label = QLabel("Brak danych analizy merytorycznej")
+            none_label = QLabel(t("main.no_content_analysis"))
             none_label.setStyleSheet(styles.AI_NONE_LABEL_STYLE)
             l.addWidget(none_label)
 
@@ -486,7 +504,7 @@ class PDFReader(QMainWindow):
                 else:
                     icon_circle.setText("V")
                 icon_circle.setStyleSheet(styles.BADGE_ICON_SUCCESS)
-                text_lbl = QLabel("Tak")
+                text_lbl = QLabel(t("common.yes"))
             else:
                 badge.setStyleSheet(styles.BADGE_FRAME_ERROR)
                 cross_path = resource_path(os.path.join("ui", "assets", "cross.svg"))
@@ -495,7 +513,7 @@ class PDFReader(QMainWindow):
                 else:
                     icon_circle.setText("X")
                 icon_circle.setStyleSheet(styles.BADGE_ICON_ERROR)
-                text_lbl = QLabel("Nie")
+                text_lbl = QLabel(t("common.no"))
 
             text_lbl.setStyleSheet(styles.BADGE_TEXT_DEFAULT)
             badge_layout.addWidget(icon_circle)
@@ -509,7 +527,7 @@ class PDFReader(QMainWindow):
         graphics_layout.setContentsMargins(0, 4, 0, 0)
         graphics_layout.setSpacing(6)
 
-        graphics_header = QLabel("Weryfikacja rysunków i grafik")
+        graphics_header = QLabel(t("main.graphics_header"))
         graphics_header.setStyleSheet(styles.GRAPHICS_HEADER_STYLE)
         graphics_layout.addWidget(graphics_header)
 
@@ -522,7 +540,7 @@ class PDFReader(QMainWindow):
             graphics_layout.setContentsMargins(0, 4, 0, 0)
             graphics_layout.setSpacing(6)
 
-            graphics_header = QLabel("Weryfikacja rysunków i grafik")
+            graphics_header = QLabel(t("main.graphics_header"))
             graphics_header.setStyleSheet(styles.GRAPHICS_HEADER_STYLE)
             graphics_layout.addWidget(graphics_header)
 
@@ -530,14 +548,14 @@ class PDFReader(QMainWindow):
             font_errors = report_data.get('czcionki_obrazkow', [])
 
             if not quality_errors:
-                graphics_layout.addWidget(create_badge_row("Jakość obrazów (rozdzielczość/czytelność)", True))
+                graphics_layout.addWidget(create_badge_row(t("main.image_quality_ok"), True))
             else:
-                graphics_layout.addWidget(create_badge_row(f"Jakość obrazów (Błędy: {len(quality_errors)})", False))
+                graphics_layout.addWidget(create_badge_row(t("main.image_quality_errors", count=len(quality_errors)), False))
 
             if not font_errors:
-                graphics_layout.addWidget(create_badge_row("Spójność czcionek na rysunkach", True))
+                graphics_layout.addWidget(create_badge_row(t("main.font_consistency_ok"), True))
             else:
-                graphics_layout.addWidget(create_badge_row(f"Spójność czcionek (Błędy: {len(font_errors)})", False))
+                graphics_layout.addWidget(create_badge_row(t("main.font_consistency_errors", count=len(font_errors)), False))
         img_data = report_data.get("image_analysis", {})
         raster_nums = img_data.get("image_raster", [])
         
@@ -547,12 +565,12 @@ class PDFReader(QMainWindow):
             raster_box_layout.setContentsMargins(5, 5, 5, 5)
             raster_box_layout.setSpacing(4)
             
-            raster_title = QLabel("Wykryte rysunki rastrowe w dokumencie:")
+            raster_title = QLabel(t("main.raster_detected"))
             raster_title.setStyleSheet("color: #555; font-size: 11px; font-weight: bold; background: transparent;")
             raster_box_layout.addWidget(raster_title)
 
             for num in raster_nums:
-                num_line = QLabel(f"- Rys. {num}")
+                num_line = QLabel(t("main.figure_item", num=num))
                 num_line.setStyleSheet("color: #4A4A4A; font-size: 11px; background: transparent;")
                 raster_box_layout.addWidget(num_line)
 
@@ -566,7 +584,7 @@ class PDFReader(QMainWindow):
             stats_vbox.setContentsMargins(0, 4, 0, 0)
             stats_vbox.setSpacing(6)
 
-            stats_header = QLabel("Statystyki składniowe zdań")
+            stats_header = QLabel(t("main.stats_header"))
             stats_header.setStyleSheet(styles.STATS_HEADER_STYLE)
             stats_vbox.addWidget(stats_header)
 
@@ -588,16 +606,16 @@ class PDFReader(QMainWindow):
                 row_l.addWidget(lbl_val)
                 return row
 
-            stats_layout.addWidget(create_stat_row("Strona czynna (zalecana):", stats_data.get("active_ratio", "0%")))
-            stats_layout.addWidget(create_stat_row("Strona bierna:", stats_data.get("passive_ratio", "0%")))
-            stats_layout.addWidget(create_stat_row("Równoważniki zdań:", stats_data.get("verbless_ratio", "0%")))
+            stats_layout.addWidget(create_stat_row(t("main.stats_active"), stats_data.get("active_ratio", "0%")))
+            stats_layout.addWidget(create_stat_row(t("main.stats_passive"), stats_data.get("passive_ratio", "0%")))
+            stats_layout.addWidget(create_stat_row(t("main.stats_verbless"), stats_data.get("verbless_ratio", "0%")))
             
             stats_vbox.addWidget(stats_frame)
             l.addWidget(stats_container)
 
         l.addStretch()
         
-        self.raport_btn = QPushButton("Pobierz dokładny raport")
+        self.raport_btn = QPushButton(t("main.download_report"))
         self.raport_btn.setCursor(Qt.PointingHandCursor)
         self.raport_btn.setStyleSheet(styles.RAPORT_BTN_STYLE)
         self.raport_btn.clicked.connect(self.generate_detailed_report)
@@ -624,13 +642,13 @@ class PDFReader(QMainWindow):
         """Compiles both automated evaluation remarks and user annotation labels together, draws 
         native PyMuPDF shapes or sticky notes, and saves the verified copy as a new PDF file."""
         if not hasattr(self, 'current_pdf_path') or not self.current_pdf_path:
-            QMessageBox.warning(self, "Uwaga", "Brak załadowanego dokumentu do eksportu.")
+            QMessageBox.warning(self, t("common.warning"), t("main.no_doc_to_export"))
             return
 
         save_path, _ = QFileDialog.getSaveFileName(
-            self, "Zapisz PDF z uwagami", 
-            f"sprawdzony_{os.path.basename(self.current_pdf_path)}", 
-            "PDF Files (*.pdf)"
+            self, t("main.save_annotated_pdf"), 
+            f"{t('main.annotated_prefix')}{os.path.basename(self.current_pdf_path)}", 
+            t("common.pdf_filter")
         )
         
         if not save_path: return
@@ -652,23 +670,23 @@ class PDFReader(QMainWindow):
                         w = float(coords.get("w", 0))
                         h = float(coords.get("h", 0))
                         
-                        kat = str(err.get('category', err.get('kategoria', 'Błąd')))
+                        kat = str(err.get('category', err.get('kategoria', t('main.annot_default_category'))))
                         msg = str(err.get('comment', err.get('komentarz', '')))
                         txt = str(err.get('found_text', err.get('znaleziony_tekst', '')))
-                        opis = f"[{kat}]\n{msg}\n\nTekst: {txt}"
+                        opis = f"[{kat}]\n{msg}\n\n{t('main.annot_text', text=txt)}"
                         
                         if w > 0 and h > 0:
                             rect = fitz.Rect(x, y, x + w, y + h)
                             hl = page.add_highlight_annot(rect)
                             hl.set_colors(stroke=(1.0, 0.85, 0.85)) 
                             hl.set_opacity(0.6) 
-                            hl.set_info({"title": "Weryfikacja", "content": opis})
+                            hl.set_info({"title": t("main.annot_verification"), "content": opis})
                             hl.update()
                         else:
                             point = fitz.Point(x, y - 15) 
                             annot = page.add_text_annot(point, opis, icon="Comment")
                             annot.set_colors(stroke=(1.0, 0.7, 0.7)) 
-                            annot.set_info({"title": "Weryfikacja"})
+                            annot.set_info({"title": t("main.annot_verification")})
                             annot.update()
                 except Exception as e:
                     print(f"Błąd przy eksporcie błędu automatycznego: {e}")
@@ -691,23 +709,23 @@ class PDFReader(QMainWindow):
                             hl = page.add_highlight_annot(rect)
                             hl.set_colors(stroke=(0.85, 0.92, 1.0)) 
                             hl.set_opacity(0.5)
-                            hl.set_info({"title": "Mój komentarz", "content": tresc_komentarza})
+                            hl.set_info({"title": t("main.annot_my_comment"), "content": tresc_komentarza})
                             hl.update()
                         else:
                             point = fitz.Point(x, y - 15)
                             annot = page.add_text_annot(point, tresc_komentarza, icon="Note")
                             annot.set_colors(stroke=(0.2, 0.6, 1.0)) 
-                            annot.set_info({"title": "Mój komentarz"})
+                            annot.set_info({"title": t("main.annot_my_comment")})
                             annot.update()
                 except Exception as e:
                     print(f"Błąd przy eksporcie notatki użytkownika: {e}")
 
             doc.save(save_path)
             doc.close()
-            QMessageBox.information(self, "Sukces", f"PDF z uwagami został zapisany:\n{save_path}")
+            QMessageBox.information(self, t("common.success"), t("main.export_saved", path=save_path))
                         
         except Exception as e:
-            QMessageBox.critical(self, "Błąd", f"Błąd eksportu:\n{str(e)}")
+            QMessageBox.critical(self, t("common.error"), t("main.export_error", error=str(e)))
 
     def save_custom_comment(self, comment_data):
         """Passes a newly created runtime comment annotation map structure over to the 
@@ -1131,8 +1149,8 @@ class PDFReader(QMainWindow):
         """Removes a document from the system index and updates the start page dashboard 
         to reflect the changes."""
         reply = QMessageBox.question(
-            self, 'Potwierdzenie', 
-            "Czy na pewno chcesz usunąć ten dokument z listy?",
+            self, t("main.confirm_title"), 
+            t("main.confirm_delete"),
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No
         )
         
@@ -1170,7 +1188,7 @@ class PDFReader(QMainWindow):
         """Loads a PDF document from the specified file path into the QPdfDocument instance,
         sets up the application tracking variables, and triggers view refreshes."""
         if not path or not os.path.exists(path):
-            QMessageBox.critical(self, "Błąd", f"Nie można odnaleźć pliku:\n{path}")
+            QMessageBox.critical(self, t("common.error"), t("main.file_not_found", path=path))
             return
 
         self.current_pdf_path = path
@@ -1188,4 +1206,4 @@ class PDFReader(QMainWindow):
             
             print(f"Pomyślnie załadowano plik: {os.path.basename(path)}")
         else:
-            QMessageBox.critical(self, "Błąd", "Nie udało się poprawnie zainicjalizować dokumentu PDF.")
+            QMessageBox.critical(self, t("common.error"), t("main.pdf_init_failed"))

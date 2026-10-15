@@ -4,8 +4,7 @@ import json
 import logging
 from pathlib import Path
 import subprocess
-import spacy
-from huggingface_hub import hf_hub_download
+from importlib.util import find_spec
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +77,15 @@ def are_ai_models_downloaded():
 def download_specific_language(lang_code=None):
     """Zapewnia obecność pakietów językowych SpaCy."""
     os.environ["TQDM_DISABLE"] = "True"
-    try:
-        import pl_core_news_lg
-    except ImportError:
-        try:
-            spacy.cli.download("pl_core_news_lg")
-        except Exception:
-            pass
-        
-    try:
-        import en_core_web_lg
-    except ImportError:
-        try:
-            spacy.cli.download("en_core_web_lg")
-        except Exception:
-            pass
+    # find_spec only checks that the package is installed; importing it would pull in spaCy (~2.5 s).
+    for model in ("pl_core_news_lg", "en_core_web_lg"):
+        if find_spec(model) is None:
+            try:
+                import spacy.cli
+
+                spacy.cli.download(model)
+            except Exception:
+                pass
 
 
 def check_and_download_requirements(parent=None):
@@ -116,6 +109,9 @@ def check_and_download_requirements(parent=None):
 
 def download_ai_models_with_progress(progress_callback=None):
     """Pobiera modele AI z Hugging Face z opcjonalnym raportowaniem postępu (tylko na żądanie)."""
+    # huggingface_hub is only installed with the cpu/gpu extras.
+    from huggingface_hub import hf_hub_download
+
     try:
         if progress_callback:
             progress_callback(15, "Pobieranie modelu Gemma 3 (ok. 8GB)...")

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 import styles
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
 from common.system_info import build_system_report
+from .i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +43,11 @@ def _load_mail_config():
         ).decode("utf-8")
     except (ImportError, AttributeError, binascii.Error, UnicodeDecodeError) as e:
         logger.error("Invalid or missing common/report_mail_config.py: %r", e)
-        raise MailConfigError(
-            "Ta wersja aplikacji nie ma skonfigurowanego wysyłania zgłoszeń."
-        ) from e
+        raise MailConfigError(t("report.not_configured")) from e
 
     if not password:
         logger.error("report_mail_config.SENDER_PASSWORD_B64 is empty")
-        raise MailConfigError("Ta wersja aplikacji nie ma skonfigurowanego wysyłania zgłoszeń.")
+        raise MailConfigError(t("report.not_configured"))
 
     return report_mail_config, password
 
@@ -166,7 +165,7 @@ class ReportDialog(QDialog):
 
     def __init__(self, config, password, thesis_path=None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Zgłoś problem")
+        self.setWindowTitle(t("report.window_title"))
         self.setMinimumWidth(420)
 
         self.config = config
@@ -177,25 +176,14 @@ class ReportDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        info = QLabel(
-            "Zgłoszenie zostanie wysłane do twórców aplikacji, aby pomóc w zdiagnozowaniu "
-            "problemu. Zawiera:\n"
-            "• logi aplikacji,\n"
-            "• dane systemowe: wersję systemu i dystrybucji, model karty graficznej, "
-            "wersję sterowników i CUDA, wersje bibliotek,\n"
-            "• plik pracy dyplomowej (PDF)."
-        )
+        info = QLabel(t("report.info"))
         info.setWordWrap(True)
         layout.addWidget(info)
 
         self.consent = QCheckBox()
         consent_row = QHBoxLayout()
         consent_row.addWidget(self.consent, 0, Qt.AlignTop)
-        consent_label = QLabel(
-            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, "
-            "logów oraz pracy dyplomowej, w celu "
-            "diagnozowania błędów i rozwijania aplikacji."
-        )
+        consent_label = QLabel(t("report.consent"))
         consent_label.setWordWrap(True)
         consent_label.mousePressEvent = lambda _event: self.consent.toggle()
         consent_row.addWidget(consent_label, 1)
@@ -204,13 +192,13 @@ class ReportDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.addStretch()
 
-        self.cancel_btn = QPushButton("Anuluj")
+        self.cancel_btn = QPushButton(t("common.cancel"))
         self.cancel_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self.reject)
         buttons.addWidget(self.cancel_btn)
 
-        self.send_btn = QPushButton("Wyślij")
+        self.send_btn = QPushButton(t("report.send"))
         self.send_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE)
         self.send_btn.setCursor(Qt.PointingHandCursor)
         self.send_btn.setDefault(True)
@@ -226,7 +214,7 @@ class ReportDialog(QDialog):
         self.send_btn.setEnabled(False)
         self.cancel_btn.setEnabled(False)
         self.consent.setEnabled(False)
-        self.send_btn.setText("Wysyłanie...")
+        self.send_btn.setText(t("report.sending"))
 
         self._thread = QThread(self)
         self._sender = ReportSender(self.config, self.password, self.thesis_path)
@@ -254,19 +242,19 @@ class ReportDialog(QDialog):
 
     def _show_result(self, ok, error):
         if ok:
-            QMessageBox.information(self, "Wysłano", "Dziękujemy! Zgłoszenie zostało wysłane.")
+            QMessageBox.information(self, t("report.sent_title"), t("report.sent_text"))
             self.accept()
             return
 
         QMessageBox.warning(
             self,
-            "Nie udało się wysłać",
-            f"Nie udało się wysłać zgłoszenia.\n\n{error}",
+            t("report.failed_title"),
+            t("report.failed_text", error=error),
         )
         self._reset_buttons()
 
     def _reset_buttons(self):
-        self.send_btn.setText("Wyślij")
+        self.send_btn.setText(t("report.send"))
         self.send_btn.setEnabled(self.consent.isChecked())
         self.cancel_btn.setEnabled(True)
         self.consent.setEnabled(True)
@@ -284,7 +272,7 @@ def send_report(parent=None, thesis_path=None):
     try:
         config, password = _load_mail_config()
     except MailConfigError as e:
-        QMessageBox.warning(parent, "Zgłaszanie niedostępne", str(e))
+        QMessageBox.warning(parent, t("report.unavailable_title"), str(e))
         return
 
     if thesis_path and not Path(thesis_path).is_file():
