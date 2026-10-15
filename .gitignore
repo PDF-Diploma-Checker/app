@@ -26,3 +26,4 @@ app_config.json
 **/images/
 src/common/report_mail_config.py
 .ruff_cache/
+raport_bledow_redakcji.txt

@@ -33,6 +33,7 @@ from analysis.extraction.main_extractor import (
 from analysis.extraction.linguistics_conversion.schema import (
     PageArtifact,
     is_acronym,
+    is_index,
     is_widow_func,
     is_bekart_func,
     is_szewc_func,
@@ -219,7 +220,7 @@ class PDFMapper:
             t = self._block_text(b)
             is_right_side = (content_right is None) or (b.bbox[0] > content_right - 80) or (b.bbox[2] > content_right - 50)
             if self.EQ_NUM_RE.match(t) and is_right_side:
-                y0, y1 = b.bbox[1] - 25, b.bbox[3] + 25
+                y0, y1 = b.bbox[1] - 8, b.bbox[3] + 8
                 changed = True
                 while changed:
                     changed = False
@@ -227,7 +228,7 @@ class PDFMapper:
                         if c is b:
                             continue
 
-                        vertically_aligned = (c.bbox[3] >= y0 - 15 and c.bbox[1] <= y1 + 15)
+                        vertically_aligned = (c.bbox[3] >= y0 - 6 and c.bbox[1] <= y1 + 6)
                         if vertically_aligned and (self._math_like(c) or c.bbox[2] < b.bbox[0]):
                             ny0, ny1 = min(y0, c.bbox[1]), max(y1, c.bbox[3])
                             if (ny0, ny1) != (y0, y1):
@@ -622,6 +623,7 @@ class PDFMapper:
                         bbox=word.bbox,
                         page_number=word.page_number,
                         line=word.line,
+                        is_index = getattr(word, "is_index", False),
                     )
                 )
 
@@ -631,29 +633,18 @@ class PDFMapper:
         block_type = "acronyms" if is_acronym_block else "paragraph"
 
         if block_type == "paragraph":
-            # Wyznaczamy średni rozmiar czcionki w bloku oraz pozycję Y
             if combined_words:
                 avg_size = sum(w.size for w in combined_words) / len(combined_words)
                 min_y0 = min(w.bbox[1] for w in combined_words)
-                page_height = 842.0  # Domyślnie A4
-                
-                # Jeśli blok jest w dolnej części strony (poniżej 70% wysokości) 
-                # ORAZ czcionka jest wyraźnie mniejsza od głównej (o co najmniej 1.5 pt):
-                is_bottom_note = (
-                    min_y0 > (page_height * 0.70) 
-                    and avg_size <= (getattr(self, "main_font_size", 12.0) - 1.5)
-                )
-                
-                if is_bottom_note:
-                    block_type = "footnote"
+                page_num = combined_words[0].page_number
+                page_height = getattr(self, "page_heights", {}).get(page_num, 842.0)
 
-            # Klasyfikacja nagłówków i słów kluczowych wykonuje się tylko dla zwykłych akapitów
+
             if block_type == "paragraph":
                 if PDFMapper.is_header(combined_words):
                     block_type = "heading"
                 elif PDFMapper.is_keywords(combined_words):
                     block_type = "keywords"
-        # Przypisanie wdowy, szewca i bękarta tylko do bloku typu paragraf
         if block_type == "paragraph":
             is_widow = (
                 is_widow_func(combined_words)
@@ -1038,10 +1029,16 @@ class PDFMapper:
         m_gap = statistics.median(line_gaps) if line_gaps else 3.0
         prev_span_x1 = None
 
+        span_sizes = [s.size for s in line.spans if s.text.strip()]
+        line_base_size = statistics.mode(span_sizes) if span_sizes else getattr(self, "main_font_size", 12.0)
+
         for span in line.spans:
             word_text = span.text.replace("\u200b", "").strip()
             if not word_text:
                 continue
+
+            is_span_index = is_index(span, line_base_size)
+
 
             is_combining = all(
                 unicodedata.category(ch).startswith("M") for ch in word_text
@@ -1105,6 +1102,7 @@ class PDFMapper:
                         bbox=approx_bbox,
                         page_number=page_num,
                         line=self.curr_line,
+                        is_index = is_span_index,
                     )
                 )
 
@@ -1141,6 +1139,7 @@ class PDFMapper:
         self.__init__()
 
         self.main_font_size = old_doc.get_most_common_font_size()
+        self.page_heights = {page.number: page.height for page in old_doc.pages}
 
         new_doc = FinalDocument(
             metadata=old_doc.metadata,
@@ -1148,6 +1147,7 @@ class PDFMapper:
             reference_sections=ReferenceSections(),
         )
         self.logical_blocks = new_doc.logical_blocks
+
 
         for page in old_doc.pages:
             self._process_page(page, new_doc)
@@ -1225,6 +1225,17 @@ class PDFMapper:
         )
 
         for block in page.text_blocks:
+            if getattr(block, "block_type", "") == "footnote":
+                new_doc.floating_elements.page_artifacts.append(
+                    PageArtifact(
+                        artifact_id=f"fn_{block.block_id}",
+                        type="footnote",
+                        page_number=page.number,
+                        text=self._block_text(block),
+                        bbox=list(block.bbox),
+                    )
+                )
+                continue
             block_line_x0s = [
                 (
                     next((s.bbox[0] for s in l.spans if s.text.strip()), l.spans[0].bbox[0])
