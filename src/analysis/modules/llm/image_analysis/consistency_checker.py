@@ -1,7 +1,7 @@
 from llama_cpp import Llama
 import json
 import logging
-import config
+from analysis.modules.llm import config
 
 logger = logging.getLogger(__name__)
 

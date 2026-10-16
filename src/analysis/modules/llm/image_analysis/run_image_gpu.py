@@ -9,10 +9,10 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
-import config
-from llava_engine import LlavaEngine
-from reference_matcher import ReferenceMatcher
-from consistency_checker import ConsistencyChecker
+from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.llava_engine import LlavaEngine
+from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
+from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
 
 logger = logging.getLogger(__name__)
 
