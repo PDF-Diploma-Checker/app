@@ -3,6 +3,7 @@ import os
 import sys
 
 if getattr(sys, "frozen", False):
+    # Windowed build has no console: stdout/stderr are None and break tqdm & co.
     for _name in ("stdout", "stderr"):
         if getattr(sys, _name) is None:
             setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from analysis.modules.llm.config import check_and_download_requirements, java_available
+from ui import styles
 from ui.main_window import PDFReader
 
 SMOKE_MODULES = [
@@ -59,7 +61,7 @@ def smoke_test():
 
 def main():
     app = QApplication(sys.argv)
-    app.setStyle("Fusion")
+    styles.apply_global_style(app)
     check_and_download_requirements()
     if not java_available():
         QMessageBox.warning(

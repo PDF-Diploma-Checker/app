@@ -15,8 +15,8 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))      # Ścieżka do 'llm' (dla config.py)
 sys.path.append(str(current_dir.parents[3]))  # Ścieżka do 'src'
 
-import config 
-from reference_matcher import ReferenceMatcher
+from analysis.modules.llm import config 
+from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 
 def dump_diagnostics_to_file(pdf_path, output_filename="wynik_teksty.txt"):
     logger.info(f"Rozpoczynam zrzucanie tekstów dla pliku: {pdf_path}")

@@ -1,4 +1,4 @@
-from models import ModuleResult
+from common.models import ModuleResult
 import logging
 
 logger = logging.getLogger(__name__)
