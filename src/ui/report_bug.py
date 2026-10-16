@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
 )
 
-import styles
+from . import styles
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
 from common.system_info import build_system_report
 
