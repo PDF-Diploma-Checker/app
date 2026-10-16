@@ -1,5 +1,6 @@
-from models import InputDocument
-from pipeline import AnalysisPipeline
+from app.pipeline import AnalysisPipeline
+from common.models import InputDocument
+
 
 def run_analysis_for_pdf(pdf_path, config_path=None, progress_callback=None, use_llm=True, language="pl"):
     if not pdf_path:
@@ -8,15 +9,15 @@ def run_analysis_for_pdf(pdf_path, config_path=None, progress_callback=None, use
     input_document = InputDocument(
         pdf_path=pdf_path,
         language=language,
-        config_path=config_path
+        config_path=config_path,
     )
 
     pipeline = AnalysisPipeline()
-    
+
     return pipeline.run(
-        input_document, 
-        progress_callback=progress_callback, 
-        use_llm=use_llm, 
+        input_document,
+        progress_callback=progress_callback,
+        use_llm=use_llm,
         config_path=config_path,
-        language=language
+        language=language,
     )

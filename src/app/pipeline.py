@@ -1,33 +1,14 @@
-import os
-import sys
 import concurrent.futures
-import threading
+import importlib
 import logging
-
-# Configure module logger
-logger = logging.getLogger(__name__)
-
-if getattr(sys, "frozen", False):
-    BASE_DIR = sys._MEIPASS
-    SRC_DIR = os.path.join(BASE_DIR, "src")
-else:
-    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    SRC_DIR = os.path.join(BASE_DIR, "src")
-
-EXTRACTION_DIR = os.path.join(SRC_DIR, "analysis", "extraction")
-COMMON_DIR = os.path.join(SRC_DIR, "common")
-LINGUISTICS_DIR = os.path.join(SRC_DIR, "analysis", "modules", "linguistics")
-LLM_DIR = os.path.join(SRC_DIR, "analysis", "modules", "llm")
-REDACTION_DIR = os.path.join(SRC_DIR, "analysis", "modules", "redaction")
-from common.path import resource_path
-
-for path in [SRC_DIR, BASE_DIR, EXTRACTION_DIR, COMMON_DIR, LINGUISTICS_DIR, LLM_DIR, REDACTION_DIR]:
-    if path not in sys.path:
-        sys.path.insert(0, path)
+import os
+import threading
 
 from analysis.extraction.service import ExtractionService
 from analysis.modules.linguistics.linguistics_service import LinguisticsService
 from common.models import FinalReport, ModuleResult
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisPipeline:
@@ -37,40 +18,6 @@ class AnalysisPipeline:
         self.llm_service = None
 
     def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True):
-        def cleanup_text_llm_instances():
-            """Frees LLM instances from text modules to limit VRAM usage before SOTA."""
-            try:
-                from analysis.modules.llm import get_summary as _get_summary_mod
-                from analysis.modules.llm import goal_realization as _goal_realization_mod
-                from analysis.modules.llm import get_purpose as _get_purpose_mod
-
-                llm_obj = getattr(_get_summary_mod, "_LLM", None)
-                if llm_obj is not None:
-                    close_fn = getattr(llm_obj, "close", None)
-                    if callable(close_fn):
-                        close_fn()
-                    _get_summary_mod._LLM = None
-
-                llm_obj = getattr(_goal_realization_mod, "_LLM", None)
-                if llm_obj is not None:
-                    close_fn = getattr(llm_obj, "close", None)
-                    if callable(close_fn):
-                        close_fn()
-                    _goal_realization_mod._LLM = None
-
-                model_cache = getattr(_get_purpose_mod, "_LLAMA_MODELS", None)
-                if isinstance(model_cache, dict):
-                    for model in list(model_cache.values()):
-                        close_fn = getattr(model, "close", None)
-                        if callable(close_fn):
-                            close_fn()
-                    model_cache.clear()
-            except Exception:
-                pass
-
-            import gc
-            gc.collect()
-
         def report_progress(value, text):
             if progress_callback:
                 progress_callback(value, text)
@@ -108,14 +55,14 @@ class AnalysisPipeline:
         def task_llm():
             ling_ready_event.wait()
             try:
-                from llm_task import run_task_llm
+                from app.llm_task import run_task_llm
 
                 return run_task_llm(
                     doc_obj=doc_obj,
                     pdf_path=pdf_path,
                     language=language,
                     use_llm=use_llm,
-                    check_images=check_images
+                    check_images=check_images,
                 )
 
             except Exception as e:
@@ -123,10 +70,8 @@ class AnalysisPipeline:
                 return None, None, "LLM analysis error."
 
         def task_linguistics():
-            _tool = None
-            original_lt = None
             try:
-                import language_tool_python
+                import language_tool_python  # noqa: F401  (warm up before the LLM thread starts)
             except Exception as e:
                 logger.warning(f"[PIPELINE] Warning during LanguageTool startup: {e}")
             finally:
@@ -134,22 +79,11 @@ class AnalysisPipeline:
 
             try:
                 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
-                import importlib.util
 
                 mapper = PDFMapper()
 
-                ling_path = resource_path("src/analysis/modules/linguistics/run_linguistics.py")
-                if not os.path.exists(ling_path):
-                    ling_path = resource_path("analysis/modules/linguistics/run_linguistics.py")
-
-                spec = importlib.util.spec_from_file_location(
-                    "analysis.modules.linguistics.run_linguistics",
-                    ling_path,
-                )
-                ling_module = importlib.util.module_from_spec(spec)
-                ling_module.__package__ = "analysis.modules.linguistics"
-                sys.modules["analysis.modules.linguistics.run_linguistics"] = ling_module
-                spec.loader.exec_module(ling_module)
+                # Regular import so PyInstaller can see run_linguistics and everything it imports.
+                ling_module = importlib.import_module("analysis.modules.linguistics.run_linguistics")
 
                 raw_blocks = mapper.map_to_schema(doc_obj)
 
@@ -176,15 +110,6 @@ class AnalysisPipeline:
                     "passive_ratio": "0%",
                     "verbless_ratio": "0%",
                 }
-            finally:
-                if _tool is not None:
-                    try:
-                        _tool.close()
-                    except Exception:
-                        pass
-                if original_lt is not None:
-                    import language_tool_python
-                    language_tool_python.LanguageTool = original_lt
 
         def task_redaction():
             try:
@@ -273,9 +198,9 @@ class AnalysisPipeline:
         image_analysis["image_raster"] = raster_figure_numbers
         final_report.llm_result["image_analysis"] = image_analysis
         final_report.llm_result["statystyki_zdan"] = ling_stats
-        
-        final_report.llm_result["language"] = language 
-        
+
+        final_report.llm_result["language"] = language
+
         final_report.linguistics_errors = all_errors
 
         return final_report

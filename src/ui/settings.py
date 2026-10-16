@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLineEdit, QComboBox, QFileDialog, QMessageBox, QGroupBox, QFormLayout
 )
 from PySide6.QtCore import Qt
+from analysis.modules.llm import config as app_config
 
 class SettingsDialog(QDialog):
     """Okno dialogowe do zarządzania plikiem app_config.json"""
@@ -14,8 +15,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Ustawienia aplikacji")
         self.setFixedSize(500, 380)
         
-        self.config_dir = Path.home() / ".pdf_diploma_checker"
-        self.config_path = self.config_dir / "app_config.json"
+        self.config_path = app_config.APP_CONFIG_PATH
         
         self.setup_ui()
         self.load_config()
@@ -79,44 +79,40 @@ class SettingsDialog(QDialog):
             self.input_model_dir.setText(os.path.normpath(dir_path))
 
     def load_config(self):
-        if self.config_path.exists():
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.input_model_dir.setText(data.get("model_dir", ""))
-                    
-                    device = data.get("device", "cuda")
-                    idx = self.combo_device.findText(device)
-                    if idx >= 0: self.combo_device.setCurrentIndex(idx)
-                    
-                    self.input_gpu_layers.setText(str(data.get("n_gpu_layers", 25)))
-                    
-                    lang = data.get("language", "pl")
-                    idx_lang = self.combo_language.findText(lang)
-                    if idx_lang >= 0: self.combo_language.setCurrentIndex(idx_lang)
-            except Exception as e:
-                print(f"Błąd wczytywania konfiguracji: {e}")
+        data = app_config.load_config()
+        self.input_model_dir.setText(data.get("model_dir", ""))
+        idx = self.combo_device.findText(data.get("device", "cpu"))
+        if idx >= 0:
+            self.combo_device.setCurrentIndex(idx)
+        self.input_gpu_layers.setText(str(data.get("n_gpu_layers", 0)))
+        idx = self.combo_language.findText(data.get("language", "pl"))
+        if idx >= 0:
+            self.combo_language.setCurrentIndex(idx)
+
 
     def save_config(self):
         try:
-            self.config_dir.mkdir(parents=True, exist_ok=True)
-            
-            try:
-                gpu_layers = int(self.input_gpu_layers.text().strip())
-            except ValueError:
-                gpu_layers = 25
+            gpu_layers = int(self.input_gpu_layers.text().strip())
+        except ValueError:
+            gpu_layers = 25
 
-            config_data = {
-                "device": self.combo_device.currentText(),
-                "n_gpu_layers": gpu_layers,
-                "model_dir": self.input_model_dir.text().strip(),
-                "language": self.combo_language.currentText()
-            }
-
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=2, ensure_ascii=False)
-
-            QMessageBox.information(self, "Sukces", f"Zapisano ustawienia w:\n{self.config_path}")
-            self.accept()
+        data = app_config.load_config()
+        data.update({
+            "device": self.combo_device.currentText(),
+            "n_gpu_layers": gpu_layers,
+            "model_dir": self.input_model_dir.text().strip(),
+            "language": self.combo_language.currentText(),
+        })
+        try:
+            app_config.save_config(data)
+            app_config.reload_config()
         except Exception as e:
-            QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać pliku: {str(e)}")
+            QMessageBox.critical(self, "Błąd", f"Nie udało się zapisać pliku: {e}")
+            return
+
+        QMessageBox.information(
+            self, "Sukces",
+            f"Zapisano ustawienia w:\n{self.config_path}\n\n"
+            "Zmiana urządzenia lub liczby warstw GPU zadziała po ponownym uruchomieniu aplikacji.",
+        )
+        self.accept()

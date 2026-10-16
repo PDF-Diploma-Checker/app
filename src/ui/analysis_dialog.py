@@ -1,14 +1,22 @@
+import logging
 import os
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-    QPushButton, QFrame, QProgressBar, QWidget, QFileDialog, QCheckBox, QMessageBox
-)
-from PySide6.QtCore import Qt, Signal, QThread, QSize
-from PySide6.QtGui import QPixmap, QIcon
-from . import styles
 
-from common.path import resource_path
-from analysis.modules.llm.config import are_ai_models_downloaded, download_specific_language, download_ai_models_with_progress
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+)
+
+from analysis.modules.llm.config import (
+    are_ai_models_downloaded,
+    download_ai_models_with_progress,
+    download_specific_language,
+    llm_runtime_available,
+)
+
+from . import icons, styles
+
+logger = logging.getLogger(__name__)
 
 
 class FileBadge(QFrame):
@@ -16,87 +24,98 @@ class FileBadge(QFrame):
 
     def __init__(self, filename, parent=None):
         super().__init__(parent)
+        self.setObjectName("FileBadge")
         self.setStyleSheet(styles.FILE_BADGE_FRAME)
-        self.setFixedHeight(90)
-        
+        self.setFixedHeight(80)
+
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(15, 10, 15, 10)
-        layout.setSpacing(15)
+        layout.setContentsMargins(16, 12, 12, 12)
+        layout.setSpacing(14)
 
         self.icon_label = QLabel()
-        icon_path = resource_path(os.path.join("ui", "assets", "file_json.svg"))
-        if os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path).scaled(35, 35, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self.icon_label.setPixmap(pixmap)
-        else:
-            self.icon_label.setText("📄")
-            self.icon_label.setStyleSheet("font-size: 24px; border: none;")
-        self.icon_label.setFixedSize(40, 40)
+        self.icon_label.setFixedSize(46, 46)
         self.icon_label.setAlignment(Qt.AlignCenter)
-        self.icon_label.setScaledContents(False)
-        self.icon_label.setStyleSheet(styles.FILE_BADGE_INNER_LABELS)
+        self.icon_label.setPixmap(icons.pixmap("json", styles.PRIMARY, 24))
+        self.icon_label.setStyleSheet(
+            f"background-color: {styles.PRIMARY_50}; border: none; border-radius: 10px;"
+        )
 
         text_container = QWidget()
         text_container.setStyleSheet(styles.FILE_BADGE_INNER_LABELS)
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(2)
+        text_layout.setSpacing(0)
 
         self.name_label = QLabel(filename)
+        self.name_label.setToolTip(filename)
         self.name_label.setStyleSheet(styles.FILE_BADGE_NAME_LABEL)
 
         self.info_label = QLabel("Plik konfiguracyjny JSON")
         self.info_label.setStyleSheet(styles.FILE_BADGE_INFO_LABEL)
-        
+
         text_layout.addWidget(self.name_label)
         text_layout.addWidget(self.info_label)
 
         self.del_btn = QPushButton()
-        self.del_btn.setFixedSize(30, 30)
-        
-        trash_path = resource_path(os.path.join("ui", "assets", "trash.svg"))
-        if os.path.exists(trash_path):
-            self.del_btn.setIcon(QIcon(trash_path))
-            self.del_btn.setIconSize(QSize(20, 20))
-        else:
-            self.del_btn.setText("usuń")
-        
+        self.del_btn.setFixedSize(32, 32)
+        self.del_btn.setToolTip("Usuń plik")
+        self.del_btn.setAccessibleName("Usuń plik konfiguracyjny")
+        self.del_btn.setIcon(icons.icon("trash", styles.TEXT_2, 17))
+        self.del_btn.setIconSize(QSize(17, 17))
         self.del_btn.setCursor(Qt.PointingHandCursor)
         self.del_btn.setStyleSheet(styles.ICON_BUTTON_STYLE)
         self.del_btn.clicked.connect(self.removed.emit)
 
         layout.addWidget(self.icon_label)
-        layout.addWidget(text_container)
-        layout.addStretch()
+        layout.addWidget(text_container, 1)
         layout.addWidget(self.del_btn)
 
 
 class ConfigDropFrame(QFrame):
     fileDropped = Signal(str)
+    clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
+        self.setObjectName("DropZone")
+        self.setCursor(Qt.PointingHandCursor)
+
+    def _set_drag(self, active):
+        self.setProperty("drag", active)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and urls[0].toLocalFile().lower().endswith('.json'):
+            if urls and urls[0].toLocalFile().lower().endswith(".json"):
+                self._set_drag(True)
                 event.acceptProposedAction()
                 return
         event.ignore()
 
+    def dragLeaveEvent(self, event):
+        self._set_drag(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event):
+        self._set_drag(False)
         urls = event.mimeData().urls()
         if urls:
             file_path = urls[0].toLocalFile()
             self.fileDropped.emit(file_path)
 
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
 
 class PipelineWorker(QThread):
-    progress_update = Signal(int, str) 
-    finished_success = Signal(dict) 
-    finished_error = Signal(str) 
+    progress_update = Signal(int, str)
+    finished_success = Signal(dict)
+    finished_error = Signal(str)
 
     def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False):
         super().__init__()
@@ -116,41 +135,41 @@ class PipelineWorker(QThread):
 
             self.progress_update.emit(40, "Uruchamianie silnika analizy...")
             from app.entry import run_analysis_for_pdf
-            
+
             final_report = run_analysis_for_pdf(
-                pdf_path=self.pdf_path, 
+                pdf_path=self.pdf_path,
                 config_path=self.config_path,
                 progress_callback=self.progress_update.emit,
                 use_llm=self.use_llm,
-                language=self.language
+                language=self.language,
             )
-            
+
             report_objects = getattr(final_report, "linguistics_errors", [])
             ui_report = []
             for error in report_objects:
                 if isinstance(error, dict):
-                    page_nr = error.get('page', error.get('page_number', error.get('page_start', 1)))
-                    bbox = error.get('bbox', error.get('bounding_box', None))
-                    single_x = error.get('x', None)
-                    single_y = error.get('y', None)
-                    err_coord = error.get('error_coordinate', None) 
-                    category = error.get('category', error.get('ruleId', 'Błąd językowy'))
-                    text = error.get('content', error.get('text', error.get('matched_text', '[Brak textu]')))
-                    comment = error.get('message', error.get('msg', error.get('comments', 'Znaleziono błąd.')))
+                    page_nr = error.get("page", error.get("page_number", error.get("page_start", 1)))
+                    bbox = error.get("bbox", error.get("bounding_box", None))
+                    single_x = error.get("x", None)
+                    single_y = error.get("y", None)
+                    err_coord = error.get("error_coordinate", None)
+                    category = error.get("category", error.get("ruleId", "Błąd językowy"))
+                    text = error.get("content", error.get("text", error.get("matched_text", "[Brak tekstu]")))
+                    comment = error.get("message", error.get("msg", error.get("comments", "Znaleziono błąd.")))
                 else:
-                    page_nr = getattr(error, 'page', getattr(error, 'page_number', getattr(error, 'page_start', 1)))
-                    bbox = getattr(error, 'bbox', getattr(error, 'bounding_box', None))
-                    single_x = getattr(error, 'x', None)
-                    single_y = getattr(error, 'y', None)
-                    err_coord = getattr(error, 'error_coordinate', None)
-                    category = getattr(error, 'category', getattr(error, 'ruleId', 'Błąd językowy'))
-                    text = getattr(error, 'content', getattr(error, 'text', getattr(error, 'matched_text', '[Brak textu]')))
-                    comment = getattr(error, 'message', getattr(error, 'msg', getattr(error, 'comments', 'Znaleziono błąd.')))
+                    page_nr = getattr(error, "page", getattr(error, "page_number", getattr(error, "page_start", 1)))
+                    bbox = getattr(error, "bbox", getattr(error, "bounding_box", None))
+                    single_x = getattr(error, "x", None)
+                    single_y = getattr(error, "y", None)
+                    err_coord = getattr(error, "error_coordinate", None)
+                    category = getattr(error, "category", getattr(error, "ruleId", "Błąd językowy"))
+                    text = getattr(error, "content", getattr(error, "text", getattr(error, "matched_text", "[Brak tekstu]")))
+                    comment = getattr(error, "message", getattr(error, "msg", getattr(error, "comments", "Znaleziono błąd.")))
 
                 if not isinstance(page_nr, int) or page_nr <= 0:
                     page_nr = 1
-                
-                x, y, w, h = 50.0, 50.0, 20.0, 20.0 
+
+                x, y, w, h = 50.0, 50.0, 20.0, 20.0
                 if err_coord and isinstance(err_coord, list) and len(err_coord) > 0:
                     first_coord = err_coord[0]
                     if isinstance(first_coord, dict) and "coordinates" in first_coord:
@@ -170,318 +189,445 @@ class PipelineWorker(QThread):
                         x, y = float(bbox[0]), float(bbox[1])
                 elif single_x is not None and single_y is not None:
                     x, y = float(single_x), float(single_y)
-                
-                if w <= 0: w = 20.0
-                if h <= 0: h = 20.0
+
+                if w <= 0:
+                    w = 20.0
+                if h <= 0:
+                    h = 20.0
 
                 ui_report.append({
                     "page": page_nr,
                     "category": str(category),
                     "found_text": str(text),
                     "comment": str(comment),
-                    "coords": {"x": x, "y": y, "w": w, "h": h}
+                    "coords": {"x": x, "y": y, "w": w, "h": h},
                 })
-            
+
             sota_data = getattr(final_report, "llm_result", None)
             ui_data = {
                 "errors": ui_report,
                 "sota": sota_data if isinstance(sota_data, dict) else None,
-                "language": self.language 
+                "language": self.language,
             }
             self.finished_success.emit(ui_data)
-            
+
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.exception("Analysis pipeline failed")
             self.finished_error.emit(str(e))
 
 
+
+
 class AnalysisDialog(QDialog):
+    CONFIG_SIZE = (640, 720)
+    PROGRESS_SIZE = (640, 300)
+
     def __init__(self, pdf_path, parent=None):
         super().__init__(parent)
         self.pdf_path = pdf_path
+        self.setObjectName("AnalysisDialog")
         self.setWindowTitle("Przeanalizuj dokument")
-        self.setFixedSize(800, 700)
+        self.setFixedSize(*self.CONFIG_SIZE)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setStyleSheet(styles.DIALOG_STYLE)
-        
-        self.config_file_path = None 
-        self.models_available = are_ai_models_downloaded()
+
+        self.config_file_path = None
+        self.ai_available = llm_runtime_available()
+        self.models_available = are_ai_models_downloaded() if self.ai_available else False
         self.should_download_models = False
-        
+        self._gpu_info_ready = False
+
         self.setup_ui()
 
     def check_gpu_vram(self):
+        """Return (gpu name, VRAM in GB). Torch is imported lazily: it is slow and optional."""
         try:
             import torch
             if torch.cuda.is_available():
                 device = torch.cuda.current_device()
                 name = torch.cuda.get_device_name(device)
-                vram_gb = torch.cuda.get_device_properties(device).total_memory / (1024**3)
+                vram_gb = torch.cuda.get_device_properties(device).total_memory / (1024 ** 3)
                 return name, vram_gb
         except Exception:
             pass
         return None, 0.0
 
+    def _ensure_gpu_info(self):
+        """Fill the GPU hint label once, the first time the detailed mode is selected."""
+        if self._gpu_info_ready:
+            return
+        self._gpu_info_ready = True
+
+        gpu_name, vram_gb = self.check_gpu_vram()
+        if gpu_name:
+            if vram_gb >= 8.0:
+                color, bg = styles.SUCCESS, styles.SUCCESS_BG
+                rec_text = (
+                    f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>"
+                    "Tryb dokładny (AI) powinien działać płynnie."
+                )
+            else:
+                color, bg = styles.WARNING, styles.WARNING_BG
+                rec_text = (
+                    f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>"
+                    "<b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli."
+                )
+        else:
+            color, bg = styles.WARNING, styles.WARNING_BG
+            rec_text = (
+                "<b>Brak wspieranego GPU (NVIDIA).</b><br>"
+                "Tryb dokładny użyje procesora (CPU) i analiza będzie trwała bardzo długo."
+            )
+
+        self.gpu_info_label.setText(rec_text)
+        self.gpu_info_label.setStyleSheet(
+            f"font-size: 13px; color: {color}; background-color: {bg}; "
+            "border: none; border-radius: 8px; padding: 8px 10px;"
+        )
+
+    @staticmethod
+    def _field_label(text):
+        label = QLabel(text)
+        label.setStyleSheet(styles.FIELD_LABEL_STYLE)
+        return label
+
+    @staticmethod
+    def _segment(buttons):
+        """Wrap checkable buttons into a segmented control and make them mutually exclusive."""
+        frame = QFrame()
+        frame.setObjectName("Segment")
+        frame.setStyleSheet(styles.SEGMENT_STYLE)
+        lay = QHBoxLayout(frame)
+        lay.setContentsMargins(3, 3, 3, 3)
+        lay.setSpacing(2)
+        group = QButtonGroup(frame)
+        group.setExclusive(True)
+        for btn in buttons:
+            btn.setCheckable(True)
+            btn.setFixedHeight(42)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(styles.MODE_BTN_STYLE)
+            group.addButton(btn)
+            lay.addWidget(btn, 1)
+        return frame
+
     def setup_ui(self):
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(30, 20, 30, 30)
-        self.main_layout.setSpacing(12)
+        self.main_layout.setContentsMargins(32, 28, 32, 28)
+        self.main_layout.setSpacing(20)
 
         header = QHBoxLayout()
+        header.setSpacing(12)
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
         self.title_label = QLabel("Przeanalizuj dokument")
-        self.title_label.setStyleSheet("font-size: 20px; font-weight: bold; border: none;")
-        self.close_btn = QPushButton("✕")
-        self.close_btn.setFixedSize(30, 30)
-        self.close_btn.setStyleSheet("border: none; font-size: 18px; color: #666; background: transparent;")
+        self.title_label.setStyleSheet(
+            f"font-size: 21px; font-weight: 600; color: {styles.TEXT}; border: none; background: transparent;"
+        )
+        shown_name = os.path.basename(self.pdf_path) if self.pdf_path else ""
+        self.subtitle_label = QLabel(shown_name)
+        self.subtitle_label.setToolTip(self.pdf_path or "")
+        self.subtitle_label.setStyleSheet(styles.SUBTITLE_STYLE)
+        title_col.addWidget(self.title_label)
+        title_col.addWidget(self.subtitle_label)
+
+        self.close_btn = QPushButton()
+        self.close_btn.setFixedSize(36, 36)
+        self.close_btn.setToolTip("Zamknij")
+        self.close_btn.setAccessibleName("Zamknij okno")
+        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setIcon(icons.icon("close", styles.TEXT_2, 20, 2.25))
+        self.close_btn.setIconSize(QSize(20, 20))
+        self.close_btn.setStyleSheet(styles.ICON_BUTTON_STYLE)
         self.close_btn.clicked.connect(self.reject)
-        header.addWidget(self.title_label)
-        header.addStretch()
-        header.addWidget(self.close_btn)
+        header.addLayout(title_col, 1)
+        header.addWidget(self.close_btn, alignment=Qt.AlignTop)
         self.main_layout.addLayout(header)
 
         self.config_widget = QWidget()
-        self.config_widget.setStyleSheet("border: none;")
+        self.config_widget.setStyleSheet("background: transparent;")
         config_layout = QVBoxLayout(self.config_widget)
         config_layout.setContentsMargins(0, 0, 0, 0)
-        config_layout.setSpacing(12)
+        config_layout.setSpacing(20)
+
+        # --- configuration file -------------------------------------------------
+        file_section = QVBoxLayout()
+        file_section.setSpacing(8)
+        file_section.addWidget(self._field_label("Plik konfiguracyjny"))
 
         self.json_frame = ConfigDropFrame()
         self.json_frame.setStyleSheet(styles.JSON_FRAME_STYLE)
-        self.json_frame.setFixedHeight(240)
+        self.json_frame.setFixedHeight(230)
         json_inner_layout = QVBoxLayout(self.json_frame)
+        json_inner_layout.setContentsMargins(24, 16, 24, 16)
         json_inner_layout.setSpacing(6)
 
-        self.json_icon = QLabel("{JSON}")
-        self.json_icon.setFixedSize(60, 60)
+        self.json_icon = QLabel()
+        self.json_icon.setFixedSize(70, 70)
         self.json_icon.setAlignment(Qt.AlignCenter)
+        self.json_icon.setPixmap(icons.pixmap("json", styles.PRIMARY, 32))
         self.json_icon.setStyleSheet(styles.JSON_ICON_CIRCLE)
-        self.drop_label = QLabel("Przeciągnij tu plik konfiguracyjny", styleSheet="font-weight: bold; border: none;")
+        self.json_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        self.drop_label = QLabel("Przeciągnij tu plik")
+        self.drop_label.setStyleSheet(styles.DRAG_TEXT_STYLE)
+        self.drop_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+
+        or_row = QHBoxLayout()
+        or_row.setSpacing(4)
+        or_row.setAlignment(Qt.AlignCenter)
+        or_lbl = QLabel("albo")
+        or_lbl.setStyleSheet(styles.OR_LABEL_STYLE.replace("13px", "14px"))
+        or_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.add_json_btn = QPushButton("+ Dodaj plik konfiguracyjny")
+        self.add_json_btn.setFixedHeight(42)
         self.add_json_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE)
         self.add_json_btn.setCursor(Qt.PointingHandCursor)
+        or_row.addWidget(or_lbl)
 
         json_inner_layout.addStretch()
         json_inner_layout.addWidget(self.json_icon, alignment=Qt.AlignCenter)
         json_inner_layout.addWidget(self.drop_label, alignment=Qt.AlignCenter)
-        json_inner_layout.addWidget(QLabel("albo", styleSheet="border:none;"), alignment=Qt.AlignCenter)
+        json_inner_layout.addLayout(or_row)
         json_inner_layout.addWidget(self.add_json_btn, alignment=Qt.AlignCenter)
         json_inner_layout.addStretch()
-        config_layout.addWidget(self.json_frame)
+        file_section.addWidget(self.json_frame)
 
         self.badge_container = QWidget()
-        self.badge_container.setStyleSheet("border: none;")
+        self.badge_container.setStyleSheet("background: transparent;")
         self.badge_layout = QVBoxLayout(self.badge_container)
         self.badge_layout.setContentsMargins(0, 0, 0, 0)
         self.badge_container.setVisible(False)
-        config_layout.addWidget(self.badge_container)
+        file_section.addWidget(self.badge_container)
+        config_layout.addLayout(file_section)
 
+        # --- language -------------------------------------------------------------
         lang_section = QVBoxLayout()
-        lang_section.setSpacing(4)
-        lang_title = QLabel("Język pisania pracy:")
-        lang_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #333;")
-        
-        lang_buttons_layout = QHBoxLayout()
+        lang_section.setSpacing(8)
         self.btn_lang_pl = QPushButton("Polski (PL)")
-        self.btn_lang_pl.setCheckable(True)
-        self.btn_lang_pl.setChecked(True)
-        self.btn_lang_pl.setStyleSheet(styles.MODE_BTN_STYLE)
-        self.btn_lang_pl.setFixedHeight(45)
-        
         self.btn_lang_en = QPushButton("Angielski (EN)")
-        self.btn_lang_en.setCheckable(True)
-        self.btn_lang_en.setStyleSheet(styles.MODE_BTN_STYLE)
-        self.btn_lang_en.setFixedHeight(45)
-        
-        self.btn_lang_pl.clicked.connect(lambda: self.btn_lang_en.setChecked(False))
-        self.btn_lang_en.clicked.connect(lambda: self.btn_lang_pl.setChecked(False))
-        
-        lang_buttons_layout.addWidget(self.btn_lang_pl)
-        lang_buttons_layout.addWidget(self.btn_lang_en)
-        lang_section.addWidget(lang_title)
-        lang_section.addLayout(lang_buttons_layout)
+        lang_segment = self._segment([self.btn_lang_pl, self.btn_lang_en])
+        self.btn_lang_pl.setChecked(True)
+        lang_section.addWidget(self._field_label("Język pisania pracy"))
+        lang_section.addWidget(lang_segment)
         config_layout.addLayout(lang_section)
 
+        # --- analysis mode --------------------------------------------------------
         mode_section = QVBoxLayout()
-        mode_section.setSpacing(4)
-        mode_title = QLabel("Tryb analizy:")
-        mode_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #333;")
-
-        modes_layout = QHBoxLayout()
+        mode_section.setSpacing(8)
         self.btn_szybki = QPushButton("Tryb szybki")
-        self.btn_szybki.setCheckable(True)
-        self.btn_szybki.setChecked(True)
-        self.btn_szybki.setStyleSheet(styles.MODE_BTN_STYLE)
-        self.btn_szybki.setFixedHeight(45)
-
         self.btn_dokladny = QPushButton("Tryb dokładny")
-        self.btn_dokladny.setCheckable(True)
-        self.btn_dokladny.setStyleSheet(styles.MODE_BTN_STYLE)
-        self.btn_dokladny.setFixedHeight(45)
+        mode_segment = self._segment([self.btn_szybki, self.btn_dokladny])
+        self.btn_szybki.setChecked(True)
+
+        self.mode_hint_label = QLabel("Szybka analiza reguł, bez użycia modeli AI.")
+        self.mode_hint_label.setWordWrap(True)
+        self.mode_hint_label.setStyleSheet(styles.HINT_STYLE)
+
+        if not self.ai_available:
+            self.btn_dokladny.setEnabled(False)
+            self.btn_dokladny.setToolTip(
+                "Ta wersja aplikacji nie zawiera modułu AI. Użyj wersji z AI (cpu/gpu)."
+            )
+            self.mode_hint_label.setText(
+                "Tryb dokładny jest niedostępny: ta wersja aplikacji nie zawiera modułu AI."
+            )
 
         self.cb_images = QCheckBox("Analiza obrazów i grafik (wymaga dużo VRAM)")
-        self.cb_images.setStyleSheet(styles.CHECKBOX_STYLE)
+        self.cb_images.setStyleSheet(styles.checkbox_style())
         self.cb_images.setChecked(True)
         self.cb_images.setVisible(False)
 
-        gpu_name, vram_gb = self.check_gpu_vram()
         self.gpu_info_label = QLabel()
         self.gpu_info_label.setWordWrap(True)
-        
-        if gpu_name:
-            if vram_gb >= 8.0:
-                color = "#2CA05A" 
-                rec_text = f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>Tryb dokładny (AI) powinien działać płynnie."
-            else:
-                color = "#D32F2F" 
-                rec_text = f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br><b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli."
-        else:
-             color = "#D32F2F"
-             rec_text = "<b>Brak wspieranego GPU (NVIDIA).</b><br>Tryb dokładny użyje procesora (CPU) i analiza będzie trwała bardzo długo."
-             
-        self.gpu_info_label.setText(rec_text)
-        self.gpu_info_label.setStyleSheet(f"font-size: 11px; color: {color}; margin-top: 4px; background: transparent; border: none;")
-        self.gpu_info_label.setVisible(False) 
+        self.gpu_info_label.setVisible(False)
 
-        modes_layout.addWidget(self.btn_szybki)
-        modes_layout.addWidget(self.btn_dokladny)
-
-        mode_section.addWidget(mode_title)     
-        mode_section.addLayout(modes_layout)  
+        mode_section.addWidget(self._field_label("Tryb analizy"))
+        mode_section.addWidget(mode_segment)
+        mode_section.addWidget(self.mode_hint_label)
         mode_section.addWidget(self.cb_images)
         mode_section.addWidget(self.gpu_info_label)
 
         def on_szybki_clicked():
+            self.btn_szybki.setChecked(True)
             self.btn_dokladny.setChecked(False)
             self.cb_images.setVisible(False)
             self.gpu_info_label.setVisible(False)
-            
+            self.mode_hint_label.setVisible(True)
+
         def on_dokladny_clicked():
-            if not are_ai_models_downloaded():
+            if not are_ai_models_downloaded() and not self.should_download_models:
                 reply = QMessageBox.question(
                     self,
                     "Brak modeli AI",
-                    "Modele AI (Gemma i LLaVA) nie zostały znalezione na dysku.\n"
+                    "Modele AI (Gemma i LLaVA, ok. 9 GB) nie zostały znalezione na dysku.\n"
                     "Czy chcesz zezwolić na ich pobranie teraz? (Może to potrwać zależnie od łącza)",
                     QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    QMessageBox.No,
                 )
-                if reply == QMessageBox.Yes:
-                    self.should_download_models = True
-                    self.models_available = True
-                else:
+                if reply != QMessageBox.Yes:
                     self.btn_dokladny.setChecked(False)
                     self.btn_szybki.setChecked(True)
                     return
+                self.should_download_models = True
+                self.models_available = True
 
             self.btn_szybki.setChecked(False)
+            self.btn_dokladny.setChecked(True)
+            self._ensure_gpu_info()
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
-            
+            self.mode_hint_label.setVisible(False)
+
         self.btn_szybki.clicked.connect(on_szybki_clicked)
         self.btn_dokladny.clicked.connect(on_dokladny_clicked)
 
         config_layout.addLayout(mode_section)
         config_layout.addStretch(1)
-        self.main_layout.addWidget(self.config_widget)
+        self.main_layout.addWidget(self.config_widget, 1)
 
+        # --- progress view ----------------------------------------------------------
         self.progress_widget = QWidget()
         self.progress_widget.setVisible(False)
+        self.progress_widget.setStyleSheet("background: transparent;")
         progress_layout = QVBoxLayout(self.progress_widget)
-        progress_layout.setSpacing(25)
-        
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(14)
+
         self.progress_label = QLabel("Przygotowywanie do analizy...")
         self.progress_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setStyleSheet(
+            f"font-size: 15px; color: {styles.TEXT_3}; background: transparent; border: none;"
+        )
+
         self.pbar = QProgressBar()
         self.pbar.setStyleSheet(styles.PROGRESS_BAR_STYLE)
         self.pbar.setRange(0, 100)
         self.pbar.setValue(0)
         self.pbar.setTextVisible(False)
-        
-        self.cancel_btn = QPushButton("Anuluj")
-        self.cancel_btn.setStyleSheet(styles.DELETE_BTN_STYLE)
+
+        self.cancel_btn = QPushButton("Anuluj analizę")
+        self.cancel_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self.cancel_analysis)
-        
+
         progress_layout.addStretch()
         progress_layout.addWidget(self.progress_label)
         progress_layout.addWidget(self.pbar)
-        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignCenter)
+        progress_layout.addSpacing(8)
+        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
         progress_layout.addStretch()
+        self.main_layout.addWidget(self.progress_widget, 1)
 
-        self.main_layout.addWidget(self.progress_widget)
+        # --- footer -------------------------------------------------------------------
+        self.footer = QWidget()
+        self.footer.setStyleSheet("background: transparent;")
+        footer_layout = QHBoxLayout(self.footer)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+        footer_layout.setSpacing(8)
 
-        self.analyze_btn = QPushButton("Analizuj")
+        self.dismiss_btn = QPushButton("Anuluj")
+        self.dismiss_btn.setFixedHeight(48)
+        self.dismiss_btn.setCursor(Qt.PointingHandCursor)
+        self.dismiss_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.dismiss_btn.clicked.connect(self.reject)
+
+        self.analyze_btn = QPushButton("Rozpocznij analizę")
+        self.analyze_btn.setFixedHeight(48)
+        self.analyze_btn.setCursor(Qt.PointingHandCursor)
+        self.analyze_btn.setDefault(True)
         self.analyze_btn.setStyleSheet(styles.ANALIZA_BTN_STYLE)
         self.analyze_btn.clicked.connect(self.start_analysis)
-        self.main_layout.addWidget(self.analyze_btn)
+
+        footer_layout.addStretch(1)
+        footer_layout.addWidget(self.dismiss_btn)
+        footer_layout.addWidget(self.analyze_btn)
+        self.main_layout.addWidget(self.footer)
 
         self.add_json_btn.clicked.connect(self.open_file_dialog)
+        self.json_frame.clicked.connect(self.open_file_dialog)
         self.json_frame.fileDropped.connect(self.set_config_file)
 
     def open_file_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Wybierz plik konfiguracyjny", "", "JSON Files (*.json)")
-        if path: self.set_config_file(path)
+        if path:
+            self.set_config_file(path)
+
+    def _clear_badge(self):
+        while self.badge_layout.count():
+            item = self.badge_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
     def set_config_file(self, path):
         self.config_file_path = path
-        while self.badge_layout.count():
-            item = self.badge_layout.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
-        self.json_frame.setFixedHeight(180)
+        self._clear_badge()
         badge = FileBadge(os.path.basename(path))
         badge.removed.connect(self.remove_config_file)
         self.badge_layout.addWidget(badge)
         self.badge_container.setVisible(True)
+        self.json_frame.setVisible(False)
 
     def remove_config_file(self):
         self.config_file_path = None
         self.badge_container.setVisible(False)
-        while self.badge_layout.count():
-            item = self.badge_layout.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
-        self.json_frame.setFixedHeight(220)
+        self._clear_badge()
+        self.json_frame.setVisible(True)
+
+    def _resize_keep_center(self, size):
+        """Resize the fixed-size dialog around its current centre."""
+        centre = self.geometry().center()
+        self.setFixedSize(*size)
+        self.move(centre.x() - size[0] // 2, centre.y() - size[1] // 2)
 
     def start_analysis(self):
+        self._resize_keep_center(self.PROGRESS_SIZE)
         self.config_widget.setVisible(False)
-        self.analyze_btn.setVisible(False)
+        self.footer.setVisible(False)
         self.progress_widget.setVisible(True)
         self.title_label.setText("Analizowanie...")
-        
-        is_detailed = self.btn_dokladny.isChecked()
-        choosen_lg = "pl" if self.btn_lang_pl.isChecked() else "en"
-                
-        self.run_pipeline_worker(is_detailed, choosen_lg)
 
-    def run_pipeline_worker(self, is_detailed, choosen_lg):
+        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
+        chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
+
+        self.run_pipeline_worker(is_detailed, chosen_lang)
+
+    def run_pipeline_worker(self, is_detailed, chosen_lang):
         self.worker = PipelineWorker(
-            pdf_path=self.pdf_path, 
-            config_path=self.config_file_path, 
-            use_llm=is_detailed, 
-            language=choosen_lg,
-            download_models_flag=self.should_download_models
+            pdf_path=self.pdf_path,
+            config_path=self.config_file_path,
+            use_llm=is_detailed,
+            language=chosen_lang,
+            download_models_flag=self.should_download_models,
         )
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)
-        self.worker.finished_error.connect(lambda msg: self.reject())
+        self.worker.finished_error.connect(self.on_analysis_error)
         self.worker.start()
 
     def on_analysis_success(self, final_report):
         self.final_report = final_report
         self.accept()
 
+    def on_analysis_error(self, message):
+        """Tell the user what went wrong and return to the settings screen."""
+        QMessageBox.critical(self, "Błąd analizy", message or "Nieznany błąd. Szczegóły są w logach aplikacji.")
+        self.reset_ui_state()
+
     def cancel_analysis(self):
-        if hasattr(self, 'worker') and self.worker.isRunning():
+        if hasattr(self, "worker") and self.worker.isRunning():
             self.worker.terminate()
             self.worker.wait()
         self.reset_ui_state()
 
     def reset_ui_state(self):
+        self._resize_keep_center(self.CONFIG_SIZE)
         self.pbar.setValue(0)
         self.progress_label.setText("Przygotowywanie do analizy...")
         self.progress_widget.setVisible(False)
         self.config_widget.setVisible(True)
-        self.analyze_btn.setVisible(True)
+        self.footer.setVisible(True)
         self.close_btn.setEnabled(True)
         self.title_label.setText("Przeanalizuj dokument")
 

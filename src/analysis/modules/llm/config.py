@@ -1,154 +1,193 @@
-import sys
-import os
+"""Per-user config and helpers for the optional AI mode.
+
+Never import llama_cpp / torch / huggingface_hub at module level:
+the base build ships without them.
+"""
+
+import functools
+import importlib.util
 import json
 import logging
-from pathlib import Path
+import os
+import shutil
 import subprocess
-import spacy
-from huggingface_hub import hf_hub_download
+import sys
+from pathlib import Path
+
+from common.path import APP_CONFIG_PATH, DATA_DIR, DEFAULT_MODEL_DIR
 
 logger = logging.getLogger(__name__)
 
+FROZEN = getattr(sys, "frozen", False)
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
-def get_app_dir():
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).resolve().parent
-    else:
-        return Path(__file__).resolve().parent.parent.parent
+SPACY_MODELS = {"pl": "pl_core_news_lg", "en": "en_core_web_lg"}
+DEFAULT_EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 
-APP_DIR = get_app_dir()
-APP_CONFIG_PATH = APP_DIR / "app_config.json"
-THESIS_DIR = Path.home() / "theses"
+GEMMA_REPO = "nocturne23/gemma-3-12b-it-Q4_K_M-GGUF"
+GEMMA_FILE = "gemma-3-12b-it-q4_k_m.gguf"  # exact name from the repo (case matters on Linux)
+LLAVA_REPO = "cjpais/llava-1.6-mistral-7b-gguf"
+LLAVA_FILE = "llava-v1.6-mistral-7b.Q4_K_M.gguf"
+MMPROJ_FILE = "mmproj-model-f16.gguf"
 
-def ensure_and_load_config():
-    if not APP_CONFIG_PATH.exists():
-        default_config = {
-            "device": "cuda",
-            "n_gpu_layers": 25,
-            "model_dir": str(Path.home() / "models"),
-            "language": "pl",
-            "embedding_model": "paraphrase-multilingual-MiniLM-L12-v2",
-            "thesis_path": str(THESIS_DIR / "jost2.pdf"),
-            "output_dir": str(APP_DIR / "output")
-        }
-        try:
-            APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            with APP_CONFIG_PATH.open("w", encoding="utf-8") as file:
-                json.dump(default_config, file, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"[CONFIG] Nie udało się utworzyć app_config.json: {e}")
 
+def llm_runtime_available():
+    """True when this build/environment contains llama-cpp-python (cpu/gpu variant)."""
+    return importlib.util.find_spec("llama_cpp") is not None
+
+
+@functools.lru_cache(maxsize=1)
+def _default_device():
+    if not llm_runtime_available():
+        return "cpu"
     try:
-        with APP_CONFIG_PATH.open("r", encoding="utf-8") as file:
-            config = json.load(file)
-            if isinstance(config, dict):
-                return config
-    except Exception as e:
-        print(f"[CONFIG] Błąd odczytu app_config.json: {e}")
+        import llama_cpp
+        return "cuda" if llama_cpp.llama_supports_gpu_offload() else "cpu"
+    except Exception:
+        return "cpu"
 
+
+def default_config():
+    device = _default_device()
     return {
-        "device": "cuda",
-        "n_gpu_layers": 25,
-        "model_dir": str(Path.home() / "models"),
-        "language": "pl"
+        "device": device,
+        "n_gpu_layers": 25 if device == "cuda" else 0,
+        "model_dir": str(DEFAULT_MODEL_DIR),
+        "language": "pl",
+        "embedding_model": DEFAULT_EMBEDDING_MODEL,
     }
 
-_CONFIG = ensure_and_load_config()
 
-DEVICE = str(_CONFIG.get("device", "cuda")).lower().strip()
-N_GPU_LAYERS = int(_CONFIG.get("n_gpu_layers", 25))
+def save_config(cfg):
+    APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = APP_CONFIG_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(APP_CONFIG_PATH)
 
-MODEL_DIR = Path(str(_CONFIG.get("model_dir", Path.home() / "models"))).expanduser()
-LANGUAGE = str(_CONFIG.get("language", "pl")).lower().strip()
 
-MODEL_PATH = MODEL_DIR / "gemma3_12b" / "gemma-3-12b-it-Q4_K_M.gguf"
-LLAVA_MODEL_PATH = MODEL_DIR / "llava-v1.6-mistral-7b.Q4_K_M.gguf"
-LLAVA_MMPROJ_PATH = MODEL_DIR / "mmproj-model-f16.gguf"
+def load_config():
+    """Defaults overlaid with the user's file; creates the file on first run."""
+    cfg = default_config()
+    try:
+        data = json.loads(APP_CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            cfg.update(data)
+    except FileNotFoundError:
+        try:
+            save_config(cfg)
+        except OSError:
+            logger.exception("Cannot create %s", APP_CONFIG_PATH)
+    except Exception:
+        logger.exception("Cannot read %s, using defaults", APP_CONFIG_PATH)
+    return cfg
 
-THESIS_PATH = Path(str(_CONFIG.get("thesis_path", THESIS_DIR / "jost2.pdf"))).expanduser()
-OUTPUT_DIR = Path(str(_CONFIG.get("output_dir", APP_DIR / "output"))).expanduser()
-EMBEDDING_MODEL = str(_CONFIG.get("embedding_model", "paraphrase-multilingual-MiniLM-L12-v2"))
 
+def _apply(cfg):
+    global DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL
+    global MODEL_PATH, LLAVA_MODEL_PATH, LLAVA_MMPROJ_PATH, OUTPUT_DIR, THESIS_PATH
+
+    DEVICE = str(cfg.get("device", "cpu")).lower().strip()
+    try:
+        N_GPU_LAYERS = int(cfg.get("n_gpu_layers", 0))
+    except (TypeError, ValueError):
+        N_GPU_LAYERS = 0
+    MODEL_DIR = Path(str(cfg.get("model_dir") or DEFAULT_MODEL_DIR)).expanduser()
+    LANGUAGE = str(cfg.get("language", "pl")).lower().strip()
+    EMBEDDING_MODEL = str(cfg.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+
+    MODEL_PATH = MODEL_DIR / "gemma3_12b" / GEMMA_FILE
+    LLAVA_MODEL_PATH = MODEL_DIR / LLAVA_FILE
+    LLAVA_MMPROJ_PATH = MODEL_DIR / MMPROJ_FILE
+
+    OUTPUT_DIR = Path(str(cfg.get("output_dir") or DATA_DIR / "output")).expanduser()
+    THESIS_PATH = Path(str(cfg.get("thesis_path") or Path.home() / "theses" / "thesis.pdf")).expanduser()
+
+
+def reload_config():
+    _apply(load_config())
+
+
+reload_config()
+
+
+# --------------------------------------------------------------------------- checks
 
 def are_ai_models_downloaded():
-    """Sprawdza, czy wszystkie wymagane pliki modeli AI fizycznie istnieją na dysku."""
-    return MODEL_PATH.exists() and LLAVA_MODEL_PATH.exists() and LLAVA_MMPROJ_PATH.exists()
+    return all(p.is_file() for p in (MODEL_PATH, LLAVA_MODEL_PATH, LLAVA_MMPROJ_PATH))
+
+
+def java_available():
+    java = shutil.which("java")
+    if not java:
+        return False
+    try:
+        subprocess.run(
+            [java, "-version"], check=True, capture_output=True, timeout=15,
+            stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def download_specific_language(lang_code=None):
-    """Zapewnia obecność pakietów językowych SpaCy."""
-    os.environ["TQDM_DISABLE"] = "True"
-    try:
-        import pl_core_news_lg
-    except ImportError:
-        try:
-            spacy.cli.download("pl_core_news_lg")
-        except Exception:
-            pass
-        
-    try:
-        import en_core_web_lg
-    except ImportError:
-        try:
-            spacy.cli.download("en_core_web_lg")
-        except Exception:
-            pass
+    """spaCy models are installed by uv (source) or bundled (frozen); never pip-install at runtime."""
+    names = [SPACY_MODELS[lang_code]] if lang_code in SPACY_MODELS else list(SPACY_MODELS.values())
+    for name in names:
+        if importlib.util.find_spec(name) is None:
+            raise RuntimeError(
+                f"Brakuje modelu językowego {name}. "
+                + ("Ta kompilacja aplikacji jest niekompletna." if FROZEN else "Uruchom ponownie setup (uv sync).")
+            )
 
 
 def check_and_download_requirements(parent=None):
-    """
-    Sprawdza Javę i pakiety SpaCy. NIE pobiera ciężkich modeli AI automatycznie bez pytania!
-    """
-    os.environ["TQDM_DISABLE"] = "True"
-    
-    try:
-        subprocess.run(["java", "-version"], check=True, capture_output=True)
-    except Exception:
-        print("[SETUP] Ostrzeżenie: Java nie została zainstalowana w systemie.")
-
+    """Startup check. Never blocks the app and never downloads anything."""
+    if not java_available():
+        logger.warning("Java not found: LanguageTool (linguistic analysis) will be unavailable")
     try:
         download_specific_language()
-    except Exception as e:
-        print(f"[SETUP] Błąd pobierania języków SpaCy: {e}")
-
+    except Exception:
+        logger.exception("spaCy model check failed")
     return True
 
 
+# --------------------------------------------------------------------------- downloads
+
 def download_ai_models_with_progress(progress_callback=None):
-    """Pobiera modele AI z Hugging Face z opcjonalnym raportowaniem postępu (tylko na żądanie)."""
+    """Download the optional AI models (only when the user asks for it)."""
+    if not llm_runtime_available():
+        raise RuntimeError("Ta wersja aplikacji nie zawiera modułu AI (llama-cpp-python).")
+
+    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+    from huggingface_hub import hf_hub_download, snapshot_download
+
+    def report(value, text):
+        if progress_callback:
+            progress_callback(value, text)
+
     try:
-        if progress_callback:
-            progress_callback(15, "Pobieranie modelu Gemma 3 (ok. 8GB)...")
-            
-        if not MODEL_PATH.exists():
+        if not MODEL_PATH.is_file():
+            report(15, "Pobieranie modelu Gemma 3 (ok. 8 GB)...")
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(
-                repo_id="nocturne23/gemma-3-12b-it-Q4_K_M-GGUF",
-                filename="gemma-3-12b-it-q4_k_m.gguf",
-                local_dir=str(MODEL_DIR / "gemma3_12b")
-            )
+            hf_hub_download(repo_id=GEMMA_REPO, filename=GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
 
-        if progress_callback:
-            progress_callback(50, "Pobieranie modeli LLaVA...")
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        if not LLAVA_MODEL_PATH.is_file():
+            report(50, "Pobieranie modelu LLaVA...")
+            hf_hub_download(repo_id=LLAVA_REPO, filename=LLAVA_FILE, local_dir=str(MODEL_DIR))
 
-        if not LLAVA_MODEL_PATH.exists():
-            LLAVA_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(
-                repo_id="cjpais/llava-1.6-mistral-7b-gguf",
-                filename="llava-v1.6-mistral-7b.Q4_K_M.gguf",
-                local_dir=str(MODEL_DIR)
-            )
+        if not LLAVA_MMPROJ_PATH.is_file():
+            report(70, "Pobieranie projektora LLaVA...")
+            hf_hub_download(repo_id=LLAVA_REPO, filename=MMPROJ_FILE, local_dir=str(MODEL_DIR))
 
-        if not LLAVA_MMPROJ_PATH.exists():
-            LLAVA_MMPROJ_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(
-                repo_id="cjpais/llava-1.6-mistral-7b-gguf",
-                filename="mmproj-model-f16.gguf",
-                local_dir=str(MODEL_DIR)
-            )
-            
-        if progress_callback:
-            progress_callback(90, "Modele AI zostały pobrane pomyślnie.")
-            
+        report(80, "Pobieranie modelu embeddingów...")
+        repo = f"sentence-transformers/{EMBEDDING_MODEL}"
+        try:
+            snapshot_download(repo, local_files_only=True)
+        except Exception:
+            snapshot_download(repo)
+
+        report(90, "Modele AI zostały pobrane pomyślnie.")
     except Exception as e:
-        raise RuntimeError(f"Błąd pobierania modeli: {str(e)}")
+        raise RuntimeError(f"Błąd pobierania modeli: {e}") from e
