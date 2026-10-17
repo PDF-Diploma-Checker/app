@@ -167,11 +167,12 @@ PL = {
             "• logi aplikacji,\n"
             "• dane systemowe: wersję systemu i dystrybucji, model karty graficznej, "
             "wersję sterowników i CUDA, wersje bibliotek,\n"
-            "• plik pracy dyplomowej (PDF)."
+            "• plik pracy dyplomowej (PDF),\n"
+            "• Twój opis problemu (jeśli go dodasz)."
         ),
         "consent": (
             "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, "
-            "logów oraz pracy dyplomowej, w celu "
+            "logów, pracy dyplomowej oraz opisu problemu, w celu "
             "diagnozowania błędów i rozwijania aplikacji."
         ),
         "send": "Wyślij",
@@ -181,6 +182,14 @@ PL = {
         "failed_title": "Wysyłanie zakończone niepowodzeniem",
         "failed_text": "Wysyłanie zakończone niepowodzeniem.\n\n{error}",
         "unavailable_title": "Zgłaszanie niedostępne",
+        "message_label": "Opisz, co jest nie tak (opcjonalnie):",
+        "message_placeholder": "Np. co robiłeś/aś, gdy wystąpił problem, co się stało i czego się spodziewałeś/aś.",
+        "err_network": "Nie można połączyć się z serwerem zgłoszeń. Sprawdź połączenie z internetem.",
+        "err_timeout": "Serwer zgłoszeń nie odpowiedział na czas. Spróbuj ponownie za chwilę.",
+        "err_ip_limit": "Z tego komputera wysłano już dziś kilka zgłoszeń. Spróbuj ponownie jutro.",
+        "err_daily_limit": "Serwer przyjął dziś maksymalną liczbę zgłoszeń. Spróbuj ponownie jutro.",
+        "err_too_large": "Zgłoszenie jest za duże, aby je wysłać.",
+        "err_server": "Serwer zgłoszeń nie przyjął zgłoszenia (kod {code}).",
     },
 }
 
@@ -351,11 +360,12 @@ EN = {
             "• application logs,\n"
             "• system data: OS and distribution version, graphics card model, "
             "driver and CUDA versions, library versions,\n"
-            "• the thesis file (PDF)."
+            "• the thesis file (PDF),\n"
+            "• your description of the problem (if you add one)."
         ),
         "consent": (
-            "I agree to share my system data, logs and thesis with the application "
-            "developers for the purpose of diagnosing errors and improving the application."
+            "I agree to share my system data, logs, thesis and problem description with the "
+            "application developers for the purpose of diagnosing errors and improving the application."
         ),
         "send": "Send",
         "sending": "Sending...",
@@ -364,6 +374,14 @@ EN = {
         "failed_title": "Sending failed",
         "failed_text": "Failed to send the report.\n\n{error}",
         "unavailable_title": "Reporting unavailable",
+        "message_label": "Describe what went wrong (optional):",
+        "message_placeholder": "E.g. what you were doing when the problem occurred, what happened and what you expected.",
+        "err_network": "Cannot reach the report server. Check your internet connection.",
+        "err_timeout": "The report server did not answer in time. Try again in a moment.",
+        "err_ip_limit": "Several reports have already been sent from this computer today. Try again tomorrow.",
+        "err_daily_limit": "The server has reached today's limit of reports. Try again tomorrow.",
+        "err_too_large": "The report is too large to send.",
+        "err_server": "The report server did not accept the report (code {code}).",
     },
 }
 
