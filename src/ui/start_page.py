@@ -10,6 +10,8 @@ from PySide6.QtWidgets import (
 from common.path import resource_path
 
 from . import icons, styles
+from .i18n import language_signals, t
+from .language_switch import LanguageSwitch
 from .settings import SettingsDialog
 
 # Column widths shared by the table header and every row, so they always line up.
@@ -21,12 +23,24 @@ COLUMN_GAP = 16
 MAX_CONTENT_WIDTH = 1240
 
 
-def _plural_docs(n):
+def _t(key, default):
+    """Translate `key`; use the Polish default while the key is missing from i18n."""
+    try:
+        text = t(key)
+    except Exception:
+        return default
+    return default if not text or text == key else text
+
+
+def _docs_count_text(n):
+    """"1 dokument" / "2 dokumenty" / "5 dokumentów" (the languages define the three forms)."""
     if n == 1:
-        return "1 dokument"
-    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        return f"{n} dokumenty"
-    return f"{n} dokumentów"
+        text = _t("start.docs_one", "{n} dokument")
+    elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        text = _t("start.docs_few", "{n} dokumenty")
+    else:
+        text = _t("start.docs_many", "{n} dokumentów")
+    return text.replace("{n}", str(n))
 
 
 def _file_size_text(path):
@@ -144,6 +158,8 @@ class StartPage(QWidget):
         self.search_text = ""
 
         self.setup_ui()
+        self.retranslate_ui()
+        language_signals.changed.connect(self.retranslate_ui)
 
     def dragEnterEvent(self, event):
         """Accept initial window dragging protocols if the user enters the active landing space with system URL"""
@@ -226,11 +242,13 @@ class StartPage(QWidget):
         bar.addWidget(brand)
         bar.addStretch(1)
 
+        self.lang_switch = LanguageSwitch()
+        bar.addWidget(self.lang_switch)
+        bar.addSpacing(6)
+
         self.settings_btn = QPushButton()
         self.settings_btn.setFixedSize(42, 42)
         self.settings_btn.setCursor(Qt.PointingHandCursor)
-        self.settings_btn.setToolTip("Ustawienia")
-        self.settings_btn.setAccessibleName("Ustawienia")
         self.settings_btn.setStyleSheet(styles.ICON_BUTTON_STYLE)
         self.settings_btn.setIcon(icons.icon("settings", styles.TEXT_2, 22))
         self.settings_btn.setIconSize(QSize(22, 22))
@@ -244,12 +262,12 @@ class StartPage(QWidget):
 
         titles = QVBoxLayout()
         titles.setSpacing(2)
-        title = QLabel("Dokumenty")
-        title.setStyleSheet(styles.HEADER_TITLE_STYLE)
-        subtitle = QLabel("Twoje prace w formacie PDF i ich konfiguracja weryfikacji.")
-        subtitle.setStyleSheet(styles.SUBTITLE_STYLE)
-        titles.addWidget(title)
-        titles.addWidget(subtitle)
+        self.title_label = QLabel()
+        self.title_label.setStyleSheet(styles.HEADER_TITLE_STYLE)
+        self.subtitle_label = QLabel()
+        self.subtitle_label.setStyleSheet(styles.SUBTITLE_STYLE)
+        titles.addWidget(self.title_label)
+        titles.addWidget(self.subtitle_label)
         head.addLayout(titles)
         head.addStretch(1)
         return head
@@ -272,15 +290,15 @@ class StartPage(QWidget):
         self.pdf_icon.setStyleSheet(styles.PDF_ICON_LABEL_STYLE.replace("35px", "38px"))
         self.pdf_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        txt_drag = QLabel("Przeciągnij tu plik")
-        txt_drag.setStyleSheet(styles.DRAG_TEXT_STYLE)
-        txt_drag.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.txt_drag = QLabel()
+        self.txt_drag.setStyleSheet(styles.DRAG_TEXT_STYLE)
+        self.txt_drag.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        or_label = QLabel("albo")
-        or_label.setStyleSheet(styles.OR_LABEL_STYLE)
-        or_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.or_label = QLabel()
+        self.or_label.setStyleSheet(styles.OR_LABEL_STYLE)
+        self.or_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        self.add_btn = QPushButton("  Dodaj plik")
+        self.add_btn = QPushButton()
         self.add_btn.setIcon(icons.icon("plus", "#FFFFFF", 18, 2.5, disabled="#FFFFFF"))
         self.add_btn.setIconSize(QSize(18, 18))
         self.add_btn.setFixedHeight(46)
@@ -290,8 +308,8 @@ class StartPage(QWidget):
 
         up_layout.addStretch()
         up_layout.addWidget(self.pdf_icon, alignment=Qt.AlignCenter)
-        up_layout.addWidget(txt_drag, alignment=Qt.AlignCenter)
-        up_layout.addWidget(or_label, alignment=Qt.AlignCenter)
+        up_layout.addWidget(self.txt_drag, alignment=Qt.AlignCenter)
+        up_layout.addWidget(self.or_label, alignment=Qt.AlignCenter)
         up_layout.addWidget(self.add_btn, alignment=Qt.AlignCenter)
         up_layout.addStretch()
 
@@ -313,14 +331,12 @@ class StartPage(QWidget):
         search_section.setContentsMargins(24, 22, 24, 18)
         search_section.setSpacing(12)
 
-        section_title = QLabel("Moje dokumenty")
-        section_title.setStyleSheet(styles.SECTION_TITLE_STYLE)
+        self.section_title = QLabel()
+        self.section_title.setStyleSheet(styles.SECTION_TITLE_STYLE)
         self.count_label = QLabel("")
         self.count_label.setStyleSheet(styles.MUTED_LABEL_STYLE)
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Szukaj po nazwie pliku")
-        self.search_input.setAccessibleName("Szukaj dokumentów")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.addAction(icons.icon("search", "#9CA3AF", 16), QLineEdit.LeadingPosition)
         self.search_input.setStyleSheet(styles.SEARCH_STYLE)
@@ -328,7 +344,7 @@ class StartPage(QWidget):
         self.search_input.setFixedHeight(42)
         self.search_input.textChanged.connect(self.on_search)
 
-        self.sort_btn = QPushButton("  Sortuj od: najnowszego")
+        self.sort_btn = QPushButton()
         self.sort_btn.setIcon(icons.icon("sort", styles.TEXT_3, 15))
         self.sort_btn.setIconSize(QSize(15, 15))
         self.sort_btn.setStyleSheet(styles.SORT_BTN_STYLE)
@@ -337,7 +353,7 @@ class StartPage(QWidget):
         self.sort_btn.setFixedHeight(42)
         self.sort_btn.clicked.connect(self.toggle_sort)
 
-        search_section.addWidget(section_title)
+        search_section.addWidget(self.section_title)
         search_section.addWidget(self.count_label)
         search_section.addStretch(1)
         search_section.addWidget(self.search_input)
@@ -364,10 +380,25 @@ class StartPage(QWidget):
 
     def toggle_sort(self):
         self.sort_newest = not self.sort_newest
-        if self.sort_newest:
-            self.sort_btn.setText("  Sortuj od: najnowszego")
-        else:
-            self.sort_btn.setText("  Sortuj od: najstarszego")
+        self._update_sort_text()
+        self._apply_sort_and_render()
+
+    def _update_sort_text(self):
+        self.sort_btn.setText("  " + (t("start.sort_newest") if self.sort_newest else t("start.sort_oldest")))
+
+    def retranslate_ui(self, *_):
+        """Re-apply all texts after the UI language changes."""
+        self.title_label.setText(t("start.title"))
+        self.subtitle_label.setText(_t("start.subtitle", "Twoje prace w formacie PDF i ich konfiguracja weryfikacji."))
+        self.settings_btn.setToolTip(t("start.settings_tooltip"))
+        self.settings_btn.setAccessibleName(t("start.settings_tooltip"))
+        self.txt_drag.setText(t("start.drag_here"))
+        self.or_label.setText(t("common.or"))
+        self.add_btn.setText("  " + t("start.add_file"))
+        self.section_title.setText(t("start.my_documents"))
+        self.search_input.setPlaceholderText(t("start.search_placeholder"))
+        self.search_input.setAccessibleName(t("start.search_placeholder"))
+        self._update_sort_text()
         self._apply_sort_and_render()
 
     def render_doc_list(self, pliki):
@@ -386,7 +417,7 @@ class StartPage(QWidget):
         filtered = [p for p in self.all_files if self.search_text in p.get('file_name', '').lower()]
         filtered.sort(key=lambda x: (x.get('date_added', ''), x.get('file_name', '')), reverse=self.sort_newest)
 
-        self.count_label.setText(_plural_docs(len(filtered)))
+        self.count_label.setText(_docs_count_text(len(filtered)))
         self._clear_table()
 
         if not filtered:
@@ -401,14 +432,14 @@ class StartPage(QWidget):
         header_layout.setContentsMargins(24, 12, 24, 12)
         header_layout.setSpacing(COLUMN_GAP)
 
-        h_name = QLabel("Nazwa pliku")
+        h_name = QLabel(t("start.col_name"))
         h_name.setStyleSheet(styles.TABLE_HEADER_ROW_TEXT)
         h_name.setContentsMargins(ICON_W + 12, 0, 0, 0)
         h_name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        h_config = QLabel("Plik konfiguracyjny")
+        h_config = QLabel(t("start.col_config"))
         h_config.setStyleSheet(styles.TABLE_HEADER_ROW_TEXT)
         h_config.setFixedWidth(STATUS_W)
-        h_date = QLabel("Data dodania")
+        h_date = QLabel(t("start.col_date"))
         h_date.setStyleSheet(styles.TABLE_HEADER_ROW_TEXT)
         h_date.setFixedWidth(DATE_W)
 
@@ -423,9 +454,9 @@ class StartPage(QWidget):
         for p in filtered:
             has_config = p.get('plik_konfiguracyjny', p.get('config_path') is not None or True)
             self.add_row(
-                name=p.get('file_name', 'Nieznany'),
+                name=p.get('file_name', t("start.unknown_name")),
                 path=p.get('local_path', ''),
-                date=p.get('date_added', 'Brak daty'),
+                date=p.get('date_added', t("start.no_date")),
                 has_config=has_config,
             )
 
@@ -444,12 +475,15 @@ class StartPage(QWidget):
         circle.setStyleSheet(f"background-color: {styles.NEUTRAL_BG}; border-radius: 12px;")
 
         if has_documents:
-            title_text = "Brak wyników"
+            title_text = _t("start.no_results_title", "Brak wyników")
             shown = self.search_text.strip()
-            body_text = f"Żaden dokument nie pasuje do „{shown}”." if shown else "Żaden dokument nie pasuje do wyszukiwania."
+            if shown:
+                body_text = _t("start.no_results_body_query", "Żaden dokument nie pasuje do „{query}”.").replace("{query}", shown)
+            else:
+                body_text = _t("start.no_results_body", "Żaden dokument nie pasuje do wyszukiwania.")
         else:
-            title_text = "Nie masz jeszcze dokumentów"
-            body_text = "Dodaj pierwszy plik PDF, aby rozpocząć weryfikację."
+            title_text = _t("start.empty_title", "Nie masz jeszcze dokumentów")
+            body_text = _t("start.empty_body", "Dodaj pierwszy plik PDF, aby rozpocząć weryfikację.")
         title = QLabel(title_text)
         title.setStyleSheet(styles.EMPTY_TITLE_STYLE)
         body = QLabel(body_text)
@@ -479,13 +513,13 @@ class StartPage(QWidget):
             badge.setStyleSheet(styles.BADGE_FRAME_SUCCESS)
             icon_circle.setPixmap(icons.pixmap("check", "#FFFFFF", 12, 3))
             icon_circle.setStyleSheet(styles.BADGE_ICON_SUCCESS)
-            text_lbl.setText("Skonfigurowany")
+            text_lbl.setText(t("start.config_attached"))
             text_lbl.setStyleSheet(styles.BADGE_TEXT_SUCCESS)
         else:
             badge.setStyleSheet(styles.BADGE_FRAME_ERROR)
             icon_circle.setPixmap(icons.pixmap("alert", "#FFFFFF", 12, 3))
             icon_circle.setStyleSheet(styles.BADGE_ICON_ERROR)
-            text_lbl.setText("Wymaga konfiguracji")
+            text_lbl.setText(t("start.config_missing"))
             text_lbl.setStyleSheet(styles.BADGE_TEXT_ERROR)
 
         badge_layout.addWidget(icon_circle)
@@ -522,7 +556,7 @@ class StartPage(QWidget):
         name_btn.clicked.connect(lambda _, p=path: self.openRequested.emit(p))
 
         size_text = _file_size_text(path)
-        subtitle = QLabel(f"PDF · {size_text}" if size_text else "Plik PDF")
+        subtitle = QLabel(f"PDF · {size_text}" if size_text else t("start.pdf_file"))
         subtitle.setStyleSheet(styles.TABLE_ROW_SUBTITLE)
 
         text_vbox.addWidget(name_btn, alignment=Qt.AlignLeft)
@@ -545,8 +579,8 @@ class StartPage(QWidget):
 
         del_btn = TrashButton()
         del_btn.setFixedSize(ACTION_W, ACTION_W)
-        del_btn.setToolTip("Usuń")
-        del_btn.setAccessibleName(f"Usuń {name}")
+        del_btn.setToolTip(t("start.delete"))
+        del_btn.setAccessibleName(f"{t('start.delete')} {name}")
         del_btn.clicked.connect(lambda _=False, p=path: self.deleteRequested.emit(p))
 
         row_l.addWidget(name_cell, 1)

@@ -15,8 +15,18 @@ from analysis.modules.llm.config import (
 )
 
 from . import icons, styles
+from .i18n import t
 
 logger = logging.getLogger(__name__)
+
+
+def _t(key, default):
+    """Translate `key`; use the Polish default while the key is missing from i18n."""
+    try:
+        text = t(key)
+    except Exception:
+        return default
+    return default if not text or text == key else text
 
 
 class FileBadge(QFrame):
@@ -50,7 +60,7 @@ class FileBadge(QFrame):
         self.name_label.setToolTip(filename)
         self.name_label.setStyleSheet(styles.FILE_BADGE_NAME_LABEL)
 
-        self.info_label = QLabel("Plik konfiguracyjny JSON")
+        self.info_label = QLabel(t("analysis.config_info"))
         self.info_label.setStyleSheet(styles.FILE_BADGE_INFO_LABEL)
 
         text_layout.addWidget(self.name_label)
@@ -58,8 +68,8 @@ class FileBadge(QFrame):
 
         self.del_btn = QPushButton()
         self.del_btn.setFixedSize(32, 32)
-        self.del_btn.setToolTip("Usuń plik")
-        self.del_btn.setAccessibleName("Usuń plik konfiguracyjny")
+        self.del_btn.setToolTip(t("analysis.delete"))
+        self.del_btn.setAccessibleName(t("analysis.delete"))
         self.del_btn.setIcon(icons.icon("trash", styles.TEXT_2, 17))
         self.del_btn.setIconSize(QSize(17, 17))
         self.del_btn.setCursor(Qt.PointingHandCursor)
@@ -127,13 +137,13 @@ class PipelineWorker(QThread):
 
     def run(self):
         try:
-            self.progress_update.emit(5, "Sprawdzanie wymagań językowych...")
+            self.progress_update.emit(5, t("analysis.checking_language"))
             download_specific_language(self.language)
 
             if self.use_llm and self.download_models_flag:
                 download_ai_models_with_progress(self.progress_update.emit)
 
-            self.progress_update.emit(40, "Uruchamianie silnika analizy...")
+            self.progress_update.emit(40, t("analysis.starting_engine"))
             from app.entry import run_analysis_for_pdf
 
             final_report = run_analysis_for_pdf(
@@ -226,7 +236,7 @@ class AnalysisDialog(QDialog):
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.setObjectName("AnalysisDialog")
-        self.setWindowTitle("Przeanalizuj dokument")
+        self.setWindowTitle(t("analysis.title"))
         self.setFixedSize(*self.CONFIG_SIZE)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setStyleSheet(styles.DIALOG_STYLE)
@@ -262,22 +272,13 @@ class AnalysisDialog(QDialog):
         if gpu_name:
             if vram_gb >= 8.0:
                 color, bg = styles.SUCCESS, styles.SUCCESS_BG
-                rec_text = (
-                    f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>"
-                    "Tryb dokładny (AI) powinien działać płynnie."
-                )
+                rec_text = t("analysis.gpu_ok", name=gpu_name, vram=f"{vram_gb:.1f}")
             else:
                 color, bg = styles.WARNING, styles.WARNING_BG
-                rec_text = (
-                    f"Wykryto GPU: <b>{gpu_name}</b> ({vram_gb:.1f} GB VRAM).<br>"
-                    "<b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli."
-                )
+                rec_text = t("analysis.gpu_low", name=gpu_name, vram=f"{vram_gb:.1f}")
         else:
             color, bg = styles.WARNING, styles.WARNING_BG
-            rec_text = (
-                "<b>Brak wspieranego GPU (NVIDIA).</b><br>"
-                "Tryb dokładny użyje procesora (CPU) i analiza będzie trwała bardzo długo."
-            )
+            rec_text = t("analysis.gpu_none")
 
         self.gpu_info_label.setText(rec_text)
         self.gpu_info_label.setStyleSheet(
@@ -320,7 +321,7 @@ class AnalysisDialog(QDialog):
         header.setSpacing(12)
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
-        self.title_label = QLabel("Przeanalizuj dokument")
+        self.title_label = QLabel(t("analysis.title"))
         self.title_label.setStyleSheet(
             f"font-size: 21px; font-weight: 600; color: {styles.TEXT}; border: none; background: transparent;"
         )
@@ -333,8 +334,8 @@ class AnalysisDialog(QDialog):
 
         self.close_btn = QPushButton()
         self.close_btn.setFixedSize(36, 36)
-        self.close_btn.setToolTip("Zamknij")
-        self.close_btn.setAccessibleName("Zamknij okno")
+        self.close_btn.setToolTip(_t("common.close", "Zamknij"))
+        self.close_btn.setAccessibleName(_t("common.close", "Zamknij"))
         self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.setIcon(icons.icon("close", styles.TEXT_2, 20, 2.25))
         self.close_btn.setIconSize(QSize(20, 20))
@@ -353,7 +354,7 @@ class AnalysisDialog(QDialog):
         # --- configuration file -------------------------------------------------
         file_section = QVBoxLayout()
         file_section.setSpacing(8)
-        file_section.addWidget(self._field_label("Plik konfiguracyjny"))
+        file_section.addWidget(self._field_label(_t("analysis.config_file", "Plik konfiguracyjny")))
 
         self.json_frame = ConfigDropFrame()
         self.json_frame.setStyleSheet(styles.JSON_FRAME_STYLE)
@@ -369,17 +370,17 @@ class AnalysisDialog(QDialog):
         self.json_icon.setStyleSheet(styles.JSON_ICON_CIRCLE)
         self.json_icon.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
-        self.drop_label = QLabel("Przeciągnij tu plik")
+        self.drop_label = QLabel(t("analysis.drag_config"))
         self.drop_label.setStyleSheet(styles.DRAG_TEXT_STYLE)
         self.drop_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
 
         or_row = QHBoxLayout()
         or_row.setSpacing(4)
         or_row.setAlignment(Qt.AlignCenter)
-        or_lbl = QLabel("albo")
+        or_lbl = QLabel(t("common.or"))
         or_lbl.setStyleSheet(styles.OR_LABEL_STYLE.replace("13px", "14px"))
         or_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.add_json_btn = QPushButton("+ Dodaj plik konfiguracyjny")
+        self.add_json_btn = QPushButton(t("analysis.add_config"))
         self.add_json_btn.setFixedHeight(42)
         self.add_json_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE)
         self.add_json_btn.setCursor(Qt.PointingHandCursor)
@@ -404,36 +405,38 @@ class AnalysisDialog(QDialog):
         # --- language -------------------------------------------------------------
         lang_section = QVBoxLayout()
         lang_section.setSpacing(8)
-        self.btn_lang_pl = QPushButton("Polski (PL)")
-        self.btn_lang_en = QPushButton("Angielski (EN)")
+        self.btn_lang_pl = QPushButton(t("analysis.lang_pl"))
+        self.btn_lang_en = QPushButton(t("analysis.lang_en"))
         lang_segment = self._segment([self.btn_lang_pl, self.btn_lang_en])
         self.btn_lang_pl.setChecked(True)
-        lang_section.addWidget(self._field_label("Język pisania pracy"))
+        lang_section.addWidget(self._field_label(t("analysis.thesis_language")))
         lang_section.addWidget(lang_segment)
         config_layout.addLayout(lang_section)
 
         # --- analysis mode --------------------------------------------------------
         mode_section = QVBoxLayout()
         mode_section.setSpacing(8)
-        self.btn_szybki = QPushButton("Tryb szybki")
-        self.btn_dokladny = QPushButton("Tryb dokładny")
+        self.btn_szybki = QPushButton(t("analysis.mode_fast"))
+        self.btn_dokladny = QPushButton(t("analysis.mode_detailed"))
         mode_segment = self._segment([self.btn_szybki, self.btn_dokladny])
         self.btn_szybki.setChecked(True)
 
-        self.mode_hint_label = QLabel("Szybka analiza reguł, bez użycia modeli AI.")
+        self.mode_hint_label = QLabel(_t("analysis.mode_fast_hint", "Szybka analiza reguł, bez użycia modeli AI."))
         self.mode_hint_label.setWordWrap(True)
         self.mode_hint_label.setStyleSheet(styles.HINT_STYLE)
 
         if not self.ai_available:
             self.btn_dokladny.setEnabled(False)
             self.btn_dokladny.setToolTip(
-                "Ta wersja aplikacji nie zawiera modułu AI. Użyj wersji z AI (cpu/gpu)."
+                _t("analysis.ai_unavailable_tooltip",
+                   "Ta wersja aplikacji nie zawiera modułu AI. Użyj wersji z AI (cpu/gpu).")
             )
             self.mode_hint_label.setText(
-                "Tryb dokładny jest niedostępny: ta wersja aplikacji nie zawiera modułu AI."
+                _t("analysis.ai_unavailable_hint",
+                   "Tryb dokładny jest niedostępny: ta wersja aplikacji nie zawiera modułu AI.")
             )
 
-        self.cb_images = QCheckBox("Analiza obrazów i grafik (wymaga dużo VRAM)")
+        self.cb_images = QCheckBox(t("analysis.images_checkbox"))
         self.cb_images.setStyleSheet(styles.checkbox_style())
         self.cb_images.setChecked(True)
         self.cb_images.setVisible(False)
@@ -442,7 +445,7 @@ class AnalysisDialog(QDialog):
         self.gpu_info_label.setWordWrap(True)
         self.gpu_info_label.setVisible(False)
 
-        mode_section.addWidget(self._field_label("Tryb analizy"))
+        mode_section.addWidget(self._field_label(t("analysis.mode")))
         mode_section.addWidget(mode_segment)
         mode_section.addWidget(self.mode_hint_label)
         mode_section.addWidget(self.cb_images)
@@ -459,9 +462,8 @@ class AnalysisDialog(QDialog):
             if not are_ai_models_downloaded() and not self.should_download_models:
                 reply = QMessageBox.question(
                     self,
-                    "Brak modeli AI",
-                    "Modele AI (Gemma i LLaVA, ok. 9 GB) nie zostały znalezione na dysku.\n"
-                    "Czy chcesz zezwolić na ich pobranie teraz? (Może to potrwać zależnie od łącza)",
+                    t("analysis.no_models_title"),
+                    t("analysis.no_models_text"),
                     QMessageBox.Yes | QMessageBox.No,
                     QMessageBox.No,
                 )
@@ -494,7 +496,7 @@ class AnalysisDialog(QDialog):
         progress_layout.setContentsMargins(0, 0, 0, 0)
         progress_layout.setSpacing(14)
 
-        self.progress_label = QLabel("Przygotowywanie do analizy...")
+        self.progress_label = QLabel(t("analysis.preparing"))
         self.progress_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.progress_label.setWordWrap(True)
         self.progress_label.setStyleSheet(
@@ -507,7 +509,7 @@ class AnalysisDialog(QDialog):
         self.pbar.setValue(0)
         self.pbar.setTextVisible(False)
 
-        self.cancel_btn = QPushButton("Anuluj analizę")
+        self.cancel_btn = QPushButton(t("common.cancel"))
         self.cancel_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self.cancel_analysis)
@@ -527,13 +529,13 @@ class AnalysisDialog(QDialog):
         footer_layout.setContentsMargins(0, 0, 0, 0)
         footer_layout.setSpacing(8)
 
-        self.dismiss_btn = QPushButton("Anuluj")
+        self.dismiss_btn = QPushButton(t("common.cancel"))
         self.dismiss_btn.setFixedHeight(48)
         self.dismiss_btn.setCursor(Qt.PointingHandCursor)
         self.dismiss_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
         self.dismiss_btn.clicked.connect(self.reject)
 
-        self.analyze_btn = QPushButton("Rozpocznij analizę")
+        self.analyze_btn = QPushButton(t("analysis.analyze"))
         self.analyze_btn.setFixedHeight(48)
         self.analyze_btn.setCursor(Qt.PointingHandCursor)
         self.analyze_btn.setDefault(True)
@@ -550,7 +552,7 @@ class AnalysisDialog(QDialog):
         self.json_frame.fileDropped.connect(self.set_config_file)
 
     def open_file_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Wybierz plik konfiguracyjny", "", "JSON Files (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, t("analysis.choose_config"), "", t("common.json_filter"))
         if path:
             self.set_config_file(path)
 
@@ -586,7 +588,7 @@ class AnalysisDialog(QDialog):
         self.config_widget.setVisible(False)
         self.footer.setVisible(False)
         self.progress_widget.setVisible(True)
-        self.title_label.setText("Analizowanie...")
+        self.title_label.setText(t("analysis.analyzing"))
 
         is_detailed = self.btn_dokladny.isChecked() and self.ai_available
         chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
@@ -612,7 +614,11 @@ class AnalysisDialog(QDialog):
 
     def on_analysis_error(self, message):
         """Tell the user what went wrong and return to the settings screen."""
-        QMessageBox.critical(self, "Błąd analizy", message or "Nieznany błąd. Szczegóły są w logach aplikacji.")
+        QMessageBox.critical(
+            self,
+            _t("analysis.error_title", "Błąd analizy"),
+            message or _t("analysis.unknown_error", "Nieznany błąd. Szczegóły są w logach aplikacji."),
+        )
         self.reset_ui_state()
 
     def cancel_analysis(self):
@@ -624,12 +630,12 @@ class AnalysisDialog(QDialog):
     def reset_ui_state(self):
         self._resize_keep_center(self.CONFIG_SIZE)
         self.pbar.setValue(0)
-        self.progress_label.setText("Przygotowywanie do analizy...")
+        self.progress_label.setText(t("analysis.preparing"))
         self.progress_widget.setVisible(False)
         self.config_widget.setVisible(True)
         self.footer.setVisible(True)
         self.close_btn.setEnabled(True)
-        self.title_label.setText("Przeanalizuj dokument")
+        self.title_label.setText(t("analysis.title"))
 
     def update_progress(self, value, text):
         self.pbar.setValue(value)
