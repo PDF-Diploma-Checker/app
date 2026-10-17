@@ -4,7 +4,7 @@ import os
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from analysis.modules.llm.config import (
@@ -12,19 +12,25 @@ from analysis.modules.llm.config import (
     download_ai_models_with_progress,
     download_specific_language,
     llm_runtime_available,
+    load_config,
+    save_config,
 )
 
 from . import icons, styles
 from .i18n import t
+from .message_box import MessageBox
 
 logger = logging.getLogger(__name__)
+
+# key in the user's app_config.json: the requirements file (JSON) used last, offered again next time
+LAST_CONFIG_KEY = "last_config_file"
 
 
 
 class FileBadge(QFrame):
     removed = Signal()
 
-    def __init__(self, filename, parent=None):
+    def __init__(self, filename, parent=None, *, info_text=None):
         super().__init__(parent)
         self.setObjectName("FileBadge")
         self.setStyleSheet(styles.FILE_BADGE_FRAME)
@@ -52,7 +58,7 @@ class FileBadge(QFrame):
         self.name_label.setToolTip(filename)
         self.name_label.setStyleSheet(styles.FILE_BADGE_NAME_LABEL)
 
-        self.info_label = QLabel(t("analysis.config_info"))
+        self.info_label = QLabel(info_text or t("analysis.config_info"))
         self.info_label.setStyleSheet(styles.FILE_BADGE_INFO_LABEL)
 
         text_layout.addWidget(self.name_label)
@@ -240,6 +246,7 @@ class AnalysisDialog(QDialog):
         self._gpu_info_ready = False
 
         self.setup_ui()
+        self._restore_last_config()
 
     def check_gpu_vram(self):
         """Return (gpu name, VRAM in GB). Torch is imported lazily: it is slow and optional."""
@@ -450,14 +457,14 @@ class AnalysisDialog(QDialog):
 
         def on_dokladny_clicked():
             if not are_ai_models_downloaded() and not self.should_download_models:
-                reply = QMessageBox.question(
+                reply = MessageBox.question(
                     self,
                     t("analysis.no_models_title"),
                     t("analysis.no_models_text"),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
+                    MessageBox.Yes | MessageBox.No,
+                    MessageBox.No,
                 )
-                if reply != QMessageBox.Yes:
+                if reply != MessageBox.Yes:
                     self.btn_dokladny.setChecked(False)
                     self.btn_szybki.setChecked(True)
                     return
@@ -552,10 +559,34 @@ class AnalysisDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
-    def set_config_file(self, path):
+    def _restore_last_config(self):
+        """Offer the requirements file used last time again; the trash icon on the badge lets the user pick another."""
+        try:
+            path = load_config().get(LAST_CONFIG_KEY)
+        except Exception:
+            logger.exception("Could not read the last used configuration file")
+            return
+        if isinstance(path, str) and path.lower().endswith(".json") and os.path.isfile(path):
+            self.set_config_file(path, remembered=True)
+
+    def _remember_config_file(self):
+        """Store the chosen file as the latest one (or forget it when the analysis runs without a file)."""
+        try:
+            cfg = load_config()
+            if cfg.get(LAST_CONFIG_KEY) == self.config_file_path:
+                return
+            if self.config_file_path:
+                cfg[LAST_CONFIG_KEY] = self.config_file_path
+            else:
+                cfg.pop(LAST_CONFIG_KEY, None)
+            save_config(cfg)
+        except Exception:
+            logger.exception("Could not remember the configuration file")
+
+    def set_config_file(self, path, remembered=False):
         self.config_file_path = path
         self._clear_badge()
-        badge = FileBadge(os.path.basename(path))
+        badge = FileBadge(os.path.basename(path), info_text=t("analysis.config_last") if remembered else None)
         badge.removed.connect(self.remove_config_file)
         self.badge_layout.addWidget(badge)
         self.badge_container.setVisible(True)
@@ -574,6 +605,7 @@ class AnalysisDialog(QDialog):
         self.move(centre.x() - size[0] // 2, centre.y() - size[1] // 2)
 
     def start_analysis(self):
+        self._remember_config_file()
         self._resize_keep_center(self.PROGRESS_SIZE)
         self.config_widget.setVisible(False)
         self.footer.setVisible(False)
@@ -604,7 +636,7 @@ class AnalysisDialog(QDialog):
 
     def on_analysis_error(self, message):
         """Tell the user what went wrong and return to the settings screen."""
-        QMessageBox.critical(
+        MessageBox.critical(
             self,
             t("analysis.error_title"),
             message or t("analysis.unknown_error"),

@@ -9,6 +9,7 @@ PL = {
         "or": "albo",
         "yes": "Tak",
         "no": "Nie",
+        "ok": "OK",
         "close": "Zamknij",
         "pdf_filter": "Pliki PDF (*.pdf)",
         "json_filter": "Pliki JSON (*.json)",
@@ -105,6 +106,7 @@ PL = {
         "title": "Przeanalizuj dokument",
         "analyzing": "Analizowanie...",
         "config_info": "Plik konfiguracyjny JSON",
+        "config_last": "Ostatnio używany plik",
         "delete": "usuń",
         "drag_config": "Przeciągnij tu plik konfiguracyjny",
         "add_config": "+ Dodaj plik konfiguracyjny",
@@ -158,6 +160,11 @@ PL = {
         "window_title": "Logi aplikacji",
         "file": "Plik logu: {path}",
     },
+    "update": {
+        "message": "Dostępna nowa wersja DiplomaChecker: {new} (masz {current}).",
+        "download": "Pobierz",
+        "skip": "Pomiń tę wersję",
+    },
     "report": {
         "window_title": "Zgłoś problem",
         "not_configured": "Ta wersja aplikacji nie ma skonfigurowanego wysyłania zgłoszeń.",
@@ -202,6 +209,7 @@ EN = {
         "or": "or",
         "yes": "Yes",
         "no": "No",
+        "ok": "OK",
         "close": "Close",
         "pdf_filter": "PDF Files (*.pdf)",
         "json_filter": "JSON Files (*.json)",
@@ -298,6 +306,7 @@ EN = {
         "title": "Analyze document",
         "analyzing": "Analyzing...",
         "config_info": "JSON configuration file",
+        "config_last": "Last used file",
         "delete": "delete",
         "drag_config": "Drag a configuration file here",
         "add_config": "+ Add configuration file",
@@ -350,6 +359,11 @@ EN = {
     "logs": {
         "window_title": "Application logs",
         "file": "Log file: {path}",
+    },
+    "update": {
+        "message": "A new version of DiplomaChecker is available: {new} (you have {current}).",
+        "download": "Download",
+        "skip": "Skip this version",
     },
     "report": {
         "window_title": "Report a problem",
