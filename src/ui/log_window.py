@@ -8,6 +8,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QVBoxLayout, QPlainTextEdit, QLabel
 
 from common.logging_setup import get_log_queue, get_log_file_path
+from .i18n import t, language_signals
 
 POLL_INTERVAL_MS = 200
 MAX_BLOCK_COUNT = 5000
@@ -18,7 +19,7 @@ class LogWindow(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Logi aplikacji")
+        self.setWindowTitle(t("logs.window_title"))
         self.resize(800, 500)
 
         self._queue = get_log_queue()
@@ -31,7 +32,7 @@ class LogWindow(QDialog):
         self.text_view.setLineWrapMode(QPlainTextEdit.NoWrap)
         layout.addWidget(self.text_view)
 
-        self.path_label = QLabel(f"Plik logu: {get_log_file_path()}", self)
+        self.path_label = QLabel(t("logs.file", path=get_log_file_path()), self)
         self.path_label.setStyleSheet("color: #666;")
         layout.addWidget(self.path_label)
 
@@ -39,6 +40,12 @@ class LogWindow(QDialog):
         self._timer.setInterval(POLL_INTERVAL_MS)
         self._timer.timeout.connect(self._drain_queue)
         self._timer.start()
+
+        language_signals.changed.connect(self.retranslate_ui)
+
+    def retranslate_ui(self, *_):
+        self.setWindowTitle(t("logs.window_title"))
+        self.path_label.setText(t("logs.file", path=get_log_file_path()))
 
     def _drain_queue(self):
         """Pull every record currently waiting in the queue and append it."""
