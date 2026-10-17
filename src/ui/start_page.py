@@ -14,6 +14,7 @@ from . import icons, styles
 from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
 from .settings import SettingsDialog
+from .update_banner import UpdateBanner
 
 # Column widths shared by the table header and every row, so they always line up.
 ICON_W = 38
@@ -158,6 +159,7 @@ class StartPage(QWidget):
         self.setup_ui()
         self.retranslate_ui()
         language_signals.changed.connect(self.retranslate_ui)
+        self.update_banner.start_check()     # background check; the notice stays hidden unless a newer release exists
 
     def dragEnterEvent(self, event):
         """Accept initial window dragging protocols if the user enters the active landing space with system URL"""
@@ -181,6 +183,9 @@ class StartPage(QWidget):
         main_layout.setSpacing(0)
 
         main_layout.addWidget(self._build_app_bar())
+
+        self.update_banner = UpdateBanner()
+        main_layout.addWidget(self.update_banner)
 
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent;")

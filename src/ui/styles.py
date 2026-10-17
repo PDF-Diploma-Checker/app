@@ -124,9 +124,36 @@ def _load_bundled_fonts():
         pass
 
 
+def _light_palette():
+    """Fixed light colours for everything the stylesheet does not colour itself (dialog backgrounds, plain
+    labels, check boxes, ...), so a dark system theme cannot turn parts of the UI dark."""
+    from PySide6.QtGui import QColor, QPalette
+
+    palette = QPalette()
+    colors = {
+        QPalette.Window: SURFACE, QPalette.WindowText: TEXT,
+        QPalette.Base: SURFACE, QPalette.AlternateBase: BG,
+        QPalette.Text: TEXT, QPalette.Button: SURFACE, QPalette.ButtonText: TEXT,
+        QPalette.BrightText: "#FFFFFF", QPalette.PlaceholderText: "#9CA3AF",
+        QPalette.ToolTipBase: TEXT, QPalette.ToolTipText: "#FFFFFF",
+        QPalette.Highlight: PRIMARY, QPalette.HighlightedText: "#FFFFFF",
+        QPalette.Link: PRIMARY_PRESSED, QPalette.LinkVisited: PRIMARY_PRESSED,
+    }
+    for role, color in colors.items():
+        palette.setColor(role, QColor(color))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        palette.setColor(QPalette.Disabled, role, QColor("#9CA3AF"))
+    return palette
+
+
 def apply_global_style(app):
     """Call once after creating QApplication (before showing any window)."""
     app.setStyle("Fusion")
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme"):          # Qt 6.8+: do not follow the system dark/light setting
+        from PySide6.QtCore import Qt
+        hints.setColorScheme(Qt.ColorScheme.Light)
+    app.setPalette(_light_palette())
     _load_bundled_fonts()
     app.setStyleSheet(APP_STYLE)
 

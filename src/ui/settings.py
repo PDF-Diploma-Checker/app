@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLayout, QFrame, QListView, QStyledItemDelegate,
-    QPushButton, QLineEdit, QComboBox, QFileDialog, QMessageBox,
+    QPushButton, QLineEdit, QComboBox, QFileDialog,
 )
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
@@ -9,6 +9,7 @@ from analysis.modules.llm import config as app_config
 
 from . import icons, styles
 from .i18n import t
+from .message_box import MessageBox
 
 CONTROL_WIDTH = 150
 CONTROL_HEIGHT = 40
@@ -265,10 +266,10 @@ class SettingsDialog(QDialog):
             app_config.save_config(data)
             app_config.reload_config()
         except Exception as e:
-            QMessageBox.critical(self, t("common.error"), t("settings.save_failed", error=str(e)))
+            MessageBox.critical(self, t("common.error"), t("settings.save_failed", error=str(e)))
             return
 
-        QMessageBox.information(
+        MessageBox.information(
             self, t("common.success"),
             t("settings.saved", path=self.config_path) + "\n\n"
             + t("settings.restart_note"),

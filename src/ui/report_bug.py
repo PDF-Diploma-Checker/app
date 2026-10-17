@@ -16,12 +16,13 @@ import requests
 from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QVBoxLayout,
 )
 
 from . import styles
 from .i18n import t
+from .message_box import MessageBox, fit_minimum_height
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
 from common.system_info import build_system_report
 
@@ -192,7 +193,7 @@ class ReportDialog(QDialog):
     def __init__(self, url, thesis_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("report.window_title"))
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(480)
 
         self.url = url
         self.thesis_path = thesis_path
@@ -243,6 +244,8 @@ class ReportDialog(QDialog):
 
         layout.addLayout(buttons)
 
+        fit_minimum_height(self)     # keeps the dialog from shrinking until the texts overlap
+
     def _limit_message(self):
         """Keep the description within MAX_USER_MESSAGE_CHARS."""
         text = self.message_edit.toPlainText()
@@ -288,11 +291,11 @@ class ReportDialog(QDialog):
 
     def _show_result(self, ok, error):
         if ok:
-            QMessageBox.information(self, t("report.sent_title"), t("report.sent_text"))
+            MessageBox.information(self, t("report.sent_title"), t("report.sent_text"))
             self.accept()
             return
 
-        QMessageBox.warning(self, t("report.failed_title"), t("report.failed_text", error=error))
+        MessageBox.warning(self, t("report.failed_title"), t("report.failed_text", error=error))
         self._reset_buttons()
 
     def _reset_buttons(self):
@@ -315,7 +318,7 @@ def send_report(parent=None, thesis_path=None):
     try:
         url = _load_report_url()
     except ReportConfigError as e:
-        QMessageBox.warning(parent, t("report.unavailable_title"), str(e))
+        MessageBox.warning(parent, t("report.unavailable_title"), str(e))
         return
 
     if thesis_path and not Path(thesis_path).is_file():
