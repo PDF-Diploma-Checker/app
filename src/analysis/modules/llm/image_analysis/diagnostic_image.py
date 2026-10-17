@@ -17,8 +17,8 @@ sys.path.append(str(current_dir.parent))
 # Ścieżka do folderu 'src'
 sys.path.append(str(current_dir.parents[3]))
 
-import config 
-from reference_matcher import ReferenceMatcher
+from analysis.modules.llm import config 
+from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 def run_diagnostics(pdf_path):
     logger.info(f"Rozpoczynam zoptymalizowaną diagnostykę dla: {pdf_path}")
     

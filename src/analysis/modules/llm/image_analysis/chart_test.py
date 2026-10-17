@@ -12,7 +12,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
-import config
+from analysis.modules.llm import config
 
 logger = logging.getLogger(__name__)
 
