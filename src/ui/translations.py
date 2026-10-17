@@ -178,8 +178,8 @@ PL = {
         "sending": "Wysyłanie...",
         "sent_title": "Wysłano",
         "sent_text": "Dziękujemy! Zgłoszenie zostało wysłane.",
-        "failed_title": "Nie udało się wysłać",
-        "failed_text": "Nie udało się wysłać zgłoszenia.\n\n{error}",
+        "failed_title": "Wysyłanie zakończone niepowodzeniem",
+        "failed_text": "Wysyłanie zakończone niepowodzeniem.\n\n{error}",
         "unavailable_title": "Zgłaszanie niedostępne",
     },
 }
