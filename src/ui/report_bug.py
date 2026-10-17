@@ -1,55 +1,74 @@
-"""Email logs, system info and the opened thesis to the developers over SMTP."""
+"""Send logs, system info and the opened thesis to the developers through the report relay.
 
-import base64
-import binascii
+The app never holds mail credentials: it POSTs the report to a small relay (a Cloudflare Worker)
+that checks size and rate limits and forwards it by e-mail. See relay/README.md.
+"""
+
 import io
 import logging
-import smtplib
-import ssl
 import sys
 import zipfile
 from datetime import datetime
-from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
+import requests
 from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
+    QVBoxLayout,
 )
 
 from . import styles
+from .i18n import t
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
 from common.system_info import build_system_report
-from .i18n import t
 
 logger = logging.getLogger(__name__)
 
-SMTP_TIMEOUT_S = 30
-MAX_THESIS_BYTES = 18_000_000
+REQUEST_TIMEOUT_S = (10, 120)        # connect, read
+MAX_THESIS_BYTES = 10_000_000        # keep in sync with MAX_THESIS_BYTES in relay/src/index.js
+MAX_USER_MESSAGE_CHARS = 3000
+
+# relay error code -> translation key
+_ERROR_KEYS = {
+    "ip_limit": "report.err_ip_limit",
+    "daily_limit": "report.err_daily_limit",
+    "too_large": "report.err_too_large",
+    "thesis_too_large": "report.err_too_large",
+}
 
 
-class MailConfigError(Exception):
-    """Mail config is missing or invalid; the message is shown to the user."""
+class ReportConfigError(Exception):
+    """The relay address is missing or invalid; the message is shown to the user."""
 
 
-def _load_mail_config():
-    """Return the config module and decoded password; raise MailConfigError if unusable."""
+class ReportError(Exception):
+    """Sending failed; the message is shown to the user."""
+
+
+def _load_report_url():
+    """Return the relay URL from common/report_config.py; raise ReportConfigError if unusable."""
 
     try:
-        from common import report_mail_config
-        password = base64.b64decode(
-            report_mail_config.SENDER_PASSWORD_B64, validate=True
-        ).decode("utf-8")
-    except (ImportError, AttributeError, binascii.Error, UnicodeDecodeError) as e:
-        logger.error("Invalid or missing common/report_mail_config.py: %r", e)
-        raise MailConfigError(t("report.not_configured")) from e
+        from common import report_config
+        url = (report_config.REPORT_URL or "").strip()
+    except (ImportError, AttributeError) as e:
+        logger.error("Invalid or missing common/report_config.py: %r", e)
+        raise ReportConfigError(t("report.not_configured")) from e
 
-    if not password:
-        logger.error("report_mail_config.SENDER_PASSWORD_B64 is empty")
-        raise MailConfigError(t("report.not_configured"))
+    local = url.lower().startswith(("http://127.0.0.1", "http://localhost"))   # for testing only
+    if not (url.lower().startswith("https://") or local):
+        logger.error("report_config.REPORT_URL is empty or not https")
+        raise ReportConfigError(t("report.not_configured"))
 
-    return report_mail_config, password
+    # the relay answers only on /report: add it when the address was given without a path
+    parts = urlparse(url)
+    if parts.path in ("", "/"):
+        url = urlunparse(parts._replace(path="/report"))
+
+    return url
 
 
 def _build_system_info():
@@ -80,74 +99,81 @@ def build_diagnostic_zip(system_info):
     return buffer.getvalue()
 
 
-def _build_message(config, thesis_path):
-    """Build the report email.
+def _error_text(status, response):
+    """User-facing text for a non-200 answer of the relay."""
 
-    System info is collected once (it spawns subprocesses). The body is set before
-    attachments, and a thesis over MAX_THESIS_BYTES is skipped to stay under Gmail's 25 MB limit.
-    """
+    try:
+        code = response.json().get("error", "")
+    except (ValueError, AttributeError):
+        code = ""
+    key = _ERROR_KEYS.get(code)
+    if key:
+        return t(key)
+    return t("report.err_server", code=status)
+
+
+def _post_report(url, thesis_path, user_message):
+    """Collect the report and POST it to the relay. Raises ReportError on failure."""
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    msg = EmailMessage()
-    msg["Subject"] = f"Zgloszenie problemu - {APP_NAME} - {timestamp}"
-    msg["From"] = config.SENDER_EMAIL
-    msg["To"] = config.RECIPIENT_EMAIL
-
     system_info = _build_system_info()
     logger.info("System info for bug report:\n%s", system_info)
-    body = system_info
-    thesis_bytes = None
 
+    files = {}
+    thesis_note = ""
     if thesis_path is not None:
         thesis_path = Path(thesis_path)
         size = thesis_path.stat().st_size
         if size > MAX_THESIS_BYTES:
             logger.warning("Thesis too large to attach (%d bytes): %s", size, thesis_path)
-            body += f"\nPraca NIE zostala dolaczona - plik za duzy ({size / 1e6:.1f} MB).\n"
+            thesis_note = f"\nPraca NIE zostala dolaczona - plik za duzy ({size / 1e6:.1f} MB).\n"
         else:
-            thesis_bytes = thesis_path.read_bytes()
-            body += f"\nDolaczono prace: {thesis_path.name}\n"
+            files["thesis"] = (thesis_path.name, thesis_path.read_bytes(), "application/pdf")
 
-    msg.set_content(body)
-    msg.add_attachment(
+    files["logs"] = (
+        f"diploma_checker_logi_{timestamp}.zip",
         build_diagnostic_zip(system_info),
-        maintype="application",
-        subtype="zip",
-        filename=f"diploma_checker_logi_{timestamp}.zip",
+        "application/zip",
     )
-    if thesis_bytes is not None:
-        msg.add_attachment(
-            thesis_bytes,
-            maintype="application",
-            subtype="pdf",
-            filename=thesis_path.name,
-        )
+    data = {
+        "consent": "1",   # the dialog only sends after the user ticked the consent box
+        "message": (user_message or "").strip(),
+        "system_info": system_info + thesis_note,
+    }
 
-    return msg
+    try:
+        response = requests.post(
+            url, data=data, files=files, timeout=REQUEST_TIMEOUT_S,
+            headers={"User-Agent": f"{APP_NAME}-report"},
+        )
+    except requests.Timeout as e:
+        raise ReportError(t("report.err_timeout")) from e
+    except requests.RequestException as e:
+        logger.warning("Report request failed: %r", e)
+        raise ReportError(t("report.err_network")) from e
+
+    if response.status_code != 200:
+        logger.warning("Relay %s answered %s: %s", url, response.status_code, response.text[:200])
+        raise ReportError(_error_text(response.status_code, response))
 
 
 class ReportSender(QObject):
-    """Sends the report email off the GUI thread."""
+    """Sends the report off the GUI thread."""
 
     finished = Signal(bool, str)
 
-    def __init__(self, config, password, thesis_path):
+    def __init__(self, url, thesis_path, user_message=""):
         super().__init__()
-        self.config = config
-        self.password = password
+        self.url = url
         self.thesis_path = thesis_path
+        self.user_message = user_message
 
     def run(self):
         try:
-            msg = _build_message(self.config, self.thesis_path)
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(
-                self.config.SMTP_HOST, self.config.SMTP_PORT,
-                context=context, timeout=SMTP_TIMEOUT_S,
-            ) as server:
-                server.login(self.config.SENDER_EMAIL, self.password)
-                server.send_message(msg)
+            _post_report(self.url, self.thesis_path, self.user_message)
+        except ReportError as e:
+            self.finished.emit(False, str(e))
+            return
         except Exception as e:
             logger.exception("Failed to send bug report")
             self.finished.emit(False, str(e))
@@ -163,13 +189,12 @@ class ReportDialog(QDialog):
     The consent text is a separate QLabel because QCheckBox text can't word-wrap.
     """
 
-    def __init__(self, config, password, thesis_path=None, parent=None):
+    def __init__(self, url, thesis_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("report.window_title"))
         self.setMinimumWidth(420)
 
-        self.config = config
-        self.password = password
+        self.url = url
         self.thesis_path = thesis_path
         self._thread = None
         self._sender = None
@@ -179,6 +204,15 @@ class ReportDialog(QDialog):
         info = QLabel(t("report.info"))
         info.setWordWrap(True)
         layout.addWidget(info)
+
+        message_label = QLabel(t("report.message_label"))
+        layout.addWidget(message_label)
+
+        self.message_edit = QPlainTextEdit()
+        self.message_edit.setPlaceholderText(t("report.message_placeholder"))
+        self.message_edit.setMinimumHeight(110)
+        self.message_edit.textChanged.connect(self._limit_message)
+        layout.addWidget(self.message_edit)
 
         self.consent = QCheckBox()
         consent_row = QHBoxLayout()
@@ -209,15 +243,27 @@ class ReportDialog(QDialog):
 
         layout.addLayout(buttons)
 
+    def _limit_message(self):
+        """Keep the description within MAX_USER_MESSAGE_CHARS."""
+        text = self.message_edit.toPlainText()
+        if len(text) > MAX_USER_MESSAGE_CHARS:
+            self.message_edit.blockSignals(True)
+            self.message_edit.setPlainText(text[:MAX_USER_MESSAGE_CHARS])
+            cursor = self.message_edit.textCursor()
+            cursor.movePosition(cursor.MoveOperation.End)
+            self.message_edit.setTextCursor(cursor)
+            self.message_edit.blockSignals(False)
+
     def _send(self):
         """Lock the form and start the worker thread."""
+        self.message_edit.setEnabled(False)
         self.send_btn.setEnabled(False)
         self.cancel_btn.setEnabled(False)
         self.consent.setEnabled(False)
         self.send_btn.setText(t("report.sending"))
 
         self._thread = QThread(self)
-        self._sender = ReportSender(self.config, self.password, self.thesis_path)
+        self._sender = ReportSender(self.url, self.thesis_path, self.message_edit.toPlainText())
         self._sender.moveToThread(self._thread)
         self._thread.started.connect(self._sender.run)
         self._sender.finished.connect(self._on_finished)
@@ -246,11 +292,7 @@ class ReportDialog(QDialog):
             self.accept()
             return
 
-        QMessageBox.warning(
-            self,
-            t("report.failed_title"),
-            t("report.failed_text", error=error),
-        )
+        QMessageBox.warning(self, t("report.failed_title"), t("report.failed_text", error=error))
         self._reset_buttons()
 
     def _reset_buttons(self):
@@ -258,6 +300,7 @@ class ReportDialog(QDialog):
         self.send_btn.setEnabled(self.consent.isChecked())
         self.cancel_btn.setEnabled(True)
         self.consent.setEnabled(True)
+        self.message_edit.setEnabled(True)
 
     def reject(self):
         """Ignore close requests while sending."""
@@ -270,12 +313,12 @@ def send_report(parent=None, thesis_path=None):
     """Show the report dialog for the currently opened PDF, if any."""
 
     try:
-        config, password = _load_mail_config()
-    except MailConfigError as e:
+        url = _load_report_url()
+    except ReportConfigError as e:
         QMessageBox.warning(parent, t("report.unavailable_title"), str(e))
         return
 
     if thesis_path and not Path(thesis_path).is_file():
         thesis_path = None
 
-    ReportDialog(config, password, thesis_path or None, parent).exec()
+    ReportDialog(url, thesis_path or None, parent).exec()
