@@ -9,7 +9,7 @@ from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
     QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
-    QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar, QPushButton,
+    QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -20,6 +20,7 @@ from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
 from .analysis_dialog import AnalysisDialog
 from .log_window import LogWindow
+from .message_box import MessageBox
 from .report_bug import send_report
 from .saving_files import SavingFiles
 from .select_text import CommentMarker, HighlightBox, SelectablePdfView
@@ -711,7 +712,7 @@ class PDFReader(QMainWindow):
     def export_pdf_with_annotations(self):
         """Writes automated remarks and user comments into a copy of the PDF as annotations."""
         if not self.current_pdf_path:
-            QMessageBox.warning(self, t("common.warning"), t("main.no_doc_to_export"))
+            MessageBox.warning(self, t("common.warning"), t("main.no_doc_to_export"))
             return
 
         save_path, _ = QFileDialog.getSaveFileName(
@@ -792,11 +793,11 @@ class PDFReader(QMainWindow):
 
             doc.save(save_path)
             doc.close()
-            QMessageBox.information(self, t("common.success"), t("main.export_saved", path=save_path))
+            MessageBox.information(self, t("common.success"), t("main.export_saved", path=save_path))
 
         except Exception as e:
             logger.exception("PDF export failed")
-            QMessageBox.critical(self, t("common.error"), t("main.export_error", error=str(e)))
+            MessageBox.critical(self, t("common.error"), t("main.export_error", error=str(e)))
 
     def save_custom_comment(self, comment_data):
         """Passes a newly created comment over to the persistence layer."""
@@ -897,7 +898,7 @@ class PDFReader(QMainWindow):
         t = LANG_DICT.get(lang, LANG_DICT["pl"])
 
         if not report_data:
-            QMessageBox.warning(self, t.get("warning", "Ostrzeżenie"), t["rep_no_data_warn"])
+            MessageBox.warning(self, t.get("warning", "Ostrzeżenie"), t["rep_no_data_warn"])
             return
 
         default_name = f"{t['rep_file_prefix']}{os.path.basename(self.current_pdf_path)}"
@@ -1205,21 +1206,21 @@ class PDFReader(QMainWindow):
             report_pdf.save(save_path)
             report_pdf.close()
 
-            QMessageBox.information(self, t["success"], t["rep_success_saved"].format(save_path))
+            MessageBox.information(self, t["success"], t["rep_success_saved"].format(save_path))
 
         except Exception as e:
             logger.exception("Report generation failed")
-            QMessageBox.critical(self, t["error"], t["rep_err_gen"].format(str(e)))
+            MessageBox.critical(self, t["error"], t["rep_err_gen"].format(str(e)))
 
     def delete_document(self, path):
         """Removes a document from the index and refreshes the start page."""
-        reply = QMessageBox.question(
+        reply = MessageBox.question(
             self, t("main.confirm_title"),
             t("main.confirm_delete"),
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            MessageBox.Yes | MessageBox.No, MessageBox.No,
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == MessageBox.Yes:
             self.manager.delete_document(path)
             self.refresh_file_list()
 
@@ -1247,7 +1248,7 @@ class PDFReader(QMainWindow):
     def load_pdf(self, path):
         """Loads a PDF into the QPdfDocument, sets tracking variables and refreshes the view."""
         if not path or not os.path.exists(path):
-            QMessageBox.critical(self, t("common.error"), t("main.file_not_found", path=path))
+            MessageBox.critical(self, t("common.error"), t("main.file_not_found", path=path))
             return
 
         self.current_pdf_path = path
@@ -1265,4 +1266,4 @@ class PDFReader(QMainWindow):
 
             logger.info("Loaded PDF: %s", os.path.basename(path))
         else:
-            QMessageBox.critical(self, t("common.error"), t("main.pdf_init_failed"))
+            MessageBox.critical(self, t("common.error"), t("main.pdf_init_failed"))
