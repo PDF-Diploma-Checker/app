@@ -1,9 +1,9 @@
 import os
 
-from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
+    QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
 )
 
@@ -38,6 +38,46 @@ def _file_size_text(path):
     if size >= 1024 * 1024:
         return f"{size / (1024 * 1024):.1f} MB".replace(".", ",")
     return f"{max(1, round(size / 1024))} KB"
+
+
+class TrashButton(QPushButton):
+    """Icon-only delete button: grey at rest, red on hover."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._rest = icons.icon("trash", styles.TEXT_2, 20)
+        self._hot = icons.icon("trash", styles.DANGER, 20)
+        self.setIcon(self._rest)
+        self.setIconSize(QSize(20, 20))
+        self.setCursor(Qt.PointingHandCursor)
+        self.setStyleSheet(styles.TRASH_BUTTON_STYLE)
+
+    def enterEvent(self, event):
+        self.setIcon(self._hot)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self._rest)
+        super().leaveEvent(event)
+
+
+def _pdf_icon_label(width, height):
+    """The original pdf_file.svg, fitted into width x height (fallback: generic file glyph)."""
+    lbl = QLabel()
+    lbl.setFixedSize(width, height)
+    lbl.setAlignment(Qt.AlignCenter)
+    lbl.setStyleSheet("background: transparent; border: none;")
+    path = resource_path(os.path.join("ui", "assets", "pdf_file.svg"))
+    pm = icons.svg_file_pixmap(path, height - 4) if os.path.exists(path) else None
+    if pm is None:
+        pm = icons.pixmap("file", styles.PRIMARY, height - 10, 1.8)
+    else:
+        dpr = pm.devicePixelRatio() or 1.0
+        if pm.width() / dpr > width:
+            pm = pm.scaledToWidth(int(width * dpr), Qt.SmoothTransformation)
+            pm.setDevicePixelRatio(dpr)
+    lbl.setPixmap(pm)
+    return lbl
 
 
 class PDFDropFrame(QFrame):
@@ -468,10 +508,7 @@ class StartPage(QWidget):
         name_l.setContentsMargins(0, 0, 0, 0)
         name_l.setSpacing(12)
 
-        tile = QLabel("PDF")
-        tile.setFixedSize(ICON_W, 46)
-        tile.setAlignment(Qt.AlignCenter)
-        tile.setStyleSheet(styles.FILE_TILE_STYLE)
+        tile = _pdf_icon_label(ICON_W, 46)
 
         text_vbox = QVBoxLayout()
         text_vbox.setContentsMargins(0, 0, 0, 0)
@@ -506,28 +543,15 @@ class StartPage(QWidget):
         date_lbl.setStyleSheet(styles.TABLE_ROW_DATE)
         date_lbl.setFixedWidth(DATE_W)
 
-        more_btn = QPushButton()
-        more_btn.setFixedSize(ACTION_W, ACTION_W)
-        more_btn.setCursor(Qt.PointingHandCursor)
-        more_btn.setToolTip("Akcje")
-        more_btn.setAccessibleName(f"Akcje dla {name}")
-        more_btn.setStyleSheet(styles.ICON_BUTTON_STYLE)
-        more_btn.setIcon(icons.icon("more", styles.TEXT_2, 20))
-        more_btn.setIconSize(QSize(20, 20))
-
-        menu = QMenu(more_btn)
-        act_open = menu.addAction("Otwórz")
-        act_open.triggered.connect(lambda _=False, p=path: self.openRequested.emit(p))
-        menu.addSeparator()
-        act_delete = menu.addAction("Usuń")
-        act_delete.triggered.connect(lambda _=False, p=path: self.deleteRequested.emit(p))
-        more_btn.clicked.connect(
-            lambda _=False, b=more_btn, m=menu: m.exec(b.mapToGlobal(QPoint(0, b.height() + 2)))
-        )
+        del_btn = TrashButton()
+        del_btn.setFixedSize(ACTION_W, ACTION_W)
+        del_btn.setToolTip("Usuń")
+        del_btn.setAccessibleName(f"Usuń {name}")
+        del_btn.clicked.connect(lambda _=False, p=path: self.deleteRequested.emit(p))
 
         row_l.addWidget(name_cell, 1)
         row_l.addWidget(status_container)
         row_l.addWidget(date_lbl)
-        row_l.addWidget(more_btn)
+        row_l.addWidget(del_btn)
 
         self.table_layout.addWidget(row)
