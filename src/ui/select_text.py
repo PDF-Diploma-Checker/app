@@ -8,6 +8,7 @@ import os
 import sys
 
 from . import styles
+from .i18n import t
 
 TOOLTIP_LANG = {
     "pl": {
@@ -376,13 +377,13 @@ class SelectablePdfView(QPdfView):
     def show_context_menu(self, global_pos):
         """Displays a pop-up context menu."""
         menu = QMenu(self)
-        copy_action = QAction("Skopiuj tekst", self)
+        copy_action = QAction(t("pdf_menu.copy_text"), self)
         copy_action.triggered.connect(self.copy_to_clipboard)
         
-        plagiat_action = QAction("Sprawdź plagiat", self)
+        plagiat_action = QAction(t("pdf_menu.check_plagiarism"), self)
         plagiat_action.triggered.connect(self.check_plagiarism) 
         
-        comment_action = QAction("Dodaj komentarz", self)
+        comment_action = QAction(t("pdf_menu.add_comment"), self)
         comment_action.triggered.connect(self.add_custom_comment)
         comment_action.setEnabled(bool(self.selected_text)) 
 
@@ -396,7 +397,7 @@ class SelectablePdfView(QPdfView):
         if not self.selection_pdf_rect or self.selection_page_idx == -1:
             return
             
-        text, ok = QInputDialog.getText(self, "Dodaj komentarz", "Wpisz treść komentarza:")
+        text, ok = QInputDialog.getText(self, t("pdf_menu.add_comment"), t("pdf_menu.comment_prompt"))
         if ok and text:
             comment_data = {
                 "strona": self.selection_page_idx + 1, 

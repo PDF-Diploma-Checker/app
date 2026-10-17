@@ -26,3 +26,12 @@ app_config.json
 **/images/
 src/common/report_mail_config.py
 .ruff_cache/
+DiplomaChecker-linux-base.tar.gz
+smoke_test.log
+DiplomaChecker
+.venv-build-base
+.venv-build-cpu
+DiplomaChecker-linux-cpu.tar.gz
+DiplomaChecker-linux-gpu.tar.gz
+DiplomaChecker-linux-base
+DiplomaChecker-linux-cpu
