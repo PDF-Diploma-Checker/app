@@ -236,6 +236,20 @@ ICON_BUTTON_STYLE = _q("""
     QPushButton:pressed { background-color: $border; }
     QPushButton:disabled { background: transparent; }
 """)
+TRASH_BUTTON_STYLE = _q("""
+    QPushButton { border: none; background: transparent; border-radius: 8px; padding: 0; }
+    QPushButton:hover { background-color: $danger_bg; }
+    QPushButton:pressed { background-color: #FEE2E2; }
+""")
+REPORT_BUTTON_STYLE = _q("""
+    QPushButton {
+        background-color: $warning_bg; color: $warning; border: 1px solid #FCD34D;
+        border-radius: 8px; padding: 10px 18px; font-weight: 600; font-size: 14px;
+    }
+    QPushButton:hover { background-color: #FEF3C7; border-color: $warning_dot; }
+    QPushButton:pressed { background-color: #FDE68A; }
+    QPushButton:disabled { color: #9CA3AF; background-color: #F9FAFB; border-color: $border; }
+""")
 BACK_BTN_STYLE = ICON_BUTTON_STYLE
 
 LINK_BUTTON_STYLE = _q("""

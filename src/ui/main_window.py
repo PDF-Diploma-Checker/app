@@ -275,9 +275,11 @@ class PDFReader(QMainWindow):
         self.export_btn.clicked.connect(self.export_pdf_with_annotations)
         l.addWidget(self.export_btn)
 
-        self.report_btn = QPushButton("Zgłoś problem")
+        self.report_btn = QPushButton("  Zgłoś problem")
+        self.report_btn.setIcon(icons.icon("alert", styles.WARNING, 18, 2.25))
+        self.report_btn.setIconSize(QSize(18, 18))
         self.report_btn.setFixedHeight(42)
-        self.report_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.report_btn.setStyleSheet(styles.REPORT_BUTTON_STYLE)
         self.report_btn.setCursor(Qt.PointingHandCursor)
         self.report_btn.clicked.connect(
             lambda: send_report(self, getattr(self, "current_pdf_path", None))
