@@ -24,14 +24,6 @@ COLUMN_GAP = 16
 MAX_CONTENT_WIDTH = 1240
 
 
-def _t(key, default):
-    """Translate `key`; use the Polish default while the key is missing from i18n."""
-    try:
-        text = t(key)
-    except Exception:
-        return default
-    return default if not text or text == key else text
-
 
 def _plain(text):
     """Drop leading symbols ("+ ", "⇅ ") that a translation may carry: our buttons already have an icon."""
@@ -41,12 +33,12 @@ def _plain(text):
 def _docs_count_text(n):
     """"1 dokument" / "2 dokumenty" / "5 dokumentów" (the languages define the three forms)."""
     if n == 1:
-        text = _t("start.docs_one", "{n} dokument")
+        text = t("start.docs_one", n=n)
     elif 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
-        text = _t("start.docs_few", "{n} dokumenty")
+        text = t("start.docs_few", n=n)
     else:
-        text = _t("start.docs_many", "{n} dokumentów")
-    return text.replace("{n}", str(n))
+        text = t("start.docs_many", n=n)
+    return text
 
 
 def _file_size_text(path):
@@ -395,7 +387,7 @@ class StartPage(QWidget):
     def retranslate_ui(self, *_):
         """Re-apply all texts after the UI language changes."""
         self.title_label.setText(t("start.title"))
-        self.subtitle_label.setText(_t("start.subtitle", "Twoje prace w formacie PDF i ich konfiguracja weryfikacji."))
+        self.subtitle_label.setText(t("start.subtitle"))
         self.settings_btn.setToolTip(t("start.settings_tooltip"))
         self.settings_btn.setAccessibleName(t("start.settings_tooltip"))
         self.txt_drag.setText(t("start.drag_here"))
@@ -484,15 +476,15 @@ class StartPage(QWidget):
         )
 
         if has_documents:
-            title_text = _t("start.no_results_title", "Brak wyników")
+            title_text = t("start.no_results_title")
             shown = self.search_text.strip()
             if shown:
-                body_text = _t("start.no_results_body_query", "Żaden dokument nie pasuje do „{query}”.").replace("{query}", shown)
+                body_text = t("start.no_results_body_query", query=shown)
             else:
-                body_text = _t("start.no_results_body", "Żaden dokument nie pasuje do wyszukiwania.")
+                body_text = t("start.no_results_body")
         else:
-            title_text = _t("start.empty_title", "Nie masz jeszcze dokumentów")
-            body_text = _t("start.empty_body", "Dodaj pierwszy plik PDF, aby rozpocząć weryfikację.")
+            title_text = t("start.empty_title")
+            body_text = t("start.empty_body")
         title = QLabel(title_text)
         title.setStyleSheet(styles.EMPTY_TITLE_STYLE)
         body = QLabel(body_text)

@@ -28,14 +28,6 @@ from .start_page import StartPage
 logger = logging.getLogger(__name__)
 
 
-def _t(key, default):
-    """Translate `key`; use the Polish default while the key is missing from i18n."""
-    try:
-        text = t(key)
-    except Exception:
-        return default
-    return default if not text or text == key else text
-
 
 class PDFReader(QMainWindow):
     """The main window component of the Diploma Checker application.
@@ -80,13 +72,13 @@ class PDFReader(QMainWindow):
         """Re-apply all window texts after the UI language changes."""
         self.setWindowTitle(t("main.window_title"))
         self.v_label.setText(t("main.verification"))
-        self.back_btn.setText("  " + _t("main.back", "Wróć"))
-        self.back_btn.setToolTip(_t("main.back_tooltip", "Wróć do listy dokumentów"))
-        self.page_input.setAccessibleName(_t("main.page_number", "Numer strony"))
-        self.btn_zoom_in.setToolTip(_t("main.zoom_in", "Powiększ"))
-        self.btn_zoom_in.setAccessibleName(_t("main.zoom_in", "Powiększ"))
-        self.btn_zoom_out.setToolTip(_t("main.zoom_out", "Pomniejsz"))
-        self.btn_zoom_out.setAccessibleName(_t("main.zoom_out", "Pomniejsz"))
+        self.back_btn.setText("  " + t("main.back"))
+        self.back_btn.setToolTip(t("main.back_tooltip"))
+        self.page_input.setAccessibleName(t("main.page_number"))
+        self.btn_zoom_in.setToolTip(t("main.zoom_in"))
+        self.btn_zoom_in.setAccessibleName(t("main.zoom_in"))
+        self.btn_zoom_out.setToolTip(t("main.zoom_out"))
+        self.btn_zoom_out.setAccessibleName(t("main.zoom_out"))
         self.export_btn.setText("  " + t("main.export_pdf"))
         self.report_btn.setText("  " + t("main.report_problem"))
         self.logs_btn.setText(t("main.logs"))
@@ -208,7 +200,7 @@ class PDFReader(QMainWindow):
         box.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(box)
         lay.setContentsMargins(0, 8, 0, 0)
-        lbl = QLabel(_t("main.report_placeholder", "Wyniki weryfikacji pojawią się tutaj po otwarciu przeanalizowanego dokumentu."))
+        lbl = QLabel(t("main.report_placeholder"))
         lbl.setWordWrap(True)
         lbl.setStyleSheet(styles.MUTED_LABEL_STYLE)
         lay.addWidget(lbl)
@@ -419,7 +411,7 @@ class PDFReader(QMainWindow):
             painter.end()
             btn.setIcon(page_pixmap)
             btn.setIconSize(QSize(thumb_w, thumb_h))
-            btn.setAccessibleName(_t("main.page_n", "Strona {n}").replace("{n}", str(i + 1)))
+            btn.setAccessibleName(t("main.page_n", n=i + 1))
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(styles.THUMB_BUTTON_STYLE)
             btn.clicked.connect(
@@ -574,11 +566,11 @@ class PDFReader(QMainWindow):
             if is_met:
                 fg, bg = styles.SUCCESS, styles.SUCCESS_BG
                 icon_circle.setPixmap(icons.pixmap("check", fg, 16, 2.5))
-                status_text = _t("main.criterion_met", "Spełnione")
+                status_text = t("main.criterion_met")
             else:
                 fg, bg = styles.DANGER, styles.DANGER_BG
                 icon_circle.setPixmap(icons.pixmap("close", fg, 16, 2.5))
-                status_text = _t("main.criterion_not_met", "Niespełnione")
+                status_text = t("main.criterion_not_met")
             icon_circle.setStyleSheet(f"background-color: {bg}; border: none; border-radius: 8px;")
 
             text_col = QVBoxLayout()
@@ -630,7 +622,7 @@ class PDFReader(QMainWindow):
             else:
                 graphics_layout.addWidget(create_badge_row(t("main.font_consistency_errors", count=len(font_errors)), False))
         else:
-            no_checks = QLabel(_t("main.no_figures_checked", "Brak sprawdzonych rysunków"))
+            no_checks = QLabel(t("main.no_figures_checked"))
             no_checks.setStyleSheet(styles.MUTED_LABEL_STYLE)
             graphics_layout.addWidget(no_checks)
 

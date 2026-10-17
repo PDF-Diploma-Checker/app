@@ -20,14 +20,6 @@ from .i18n import t
 logger = logging.getLogger(__name__)
 
 
-def _t(key, default):
-    """Translate `key`; use the Polish default while the key is missing from i18n."""
-    try:
-        text = t(key)
-    except Exception:
-        return default
-    return default if not text or text == key else text
-
 
 class FileBadge(QFrame):
     removed = Signal()
@@ -334,8 +326,8 @@ class AnalysisDialog(QDialog):
 
         self.close_btn = QPushButton()
         self.close_btn.setFixedSize(36, 36)
-        self.close_btn.setToolTip(_t("common.close", "Zamknij"))
-        self.close_btn.setAccessibleName(_t("common.close", "Zamknij"))
+        self.close_btn.setToolTip(t("common.close"))
+        self.close_btn.setAccessibleName(t("common.close"))
         self.close_btn.setCursor(Qt.PointingHandCursor)
         self.close_btn.setIcon(icons.icon("close", styles.TEXT_2, 20, 2.25))
         self.close_btn.setIconSize(QSize(20, 20))
@@ -354,7 +346,7 @@ class AnalysisDialog(QDialog):
         # --- configuration file -------------------------------------------------
         file_section = QVBoxLayout()
         file_section.setSpacing(8)
-        file_section.addWidget(self._field_label(_t("analysis.config_file", "Plik konfiguracyjny")))
+        file_section.addWidget(self._field_label(t("analysis.config_file")))
 
         self.json_frame = ConfigDropFrame()
         self.json_frame.setStyleSheet(styles.JSON_FRAME_STYLE)
@@ -421,19 +413,17 @@ class AnalysisDialog(QDialog):
         mode_segment = self._segment([self.btn_szybki, self.btn_dokladny])
         self.btn_szybki.setChecked(True)
 
-        self.mode_hint_label = QLabel(_t("analysis.mode_fast_hint", "Szybka analiza reguł, bez użycia modeli AI."))
+        self.mode_hint_label = QLabel(t("analysis.mode_fast_hint"))
         self.mode_hint_label.setWordWrap(True)
         self.mode_hint_label.setStyleSheet(styles.HINT_STYLE)
 
         if not self.ai_available:
             self.btn_dokladny.setEnabled(False)
             self.btn_dokladny.setToolTip(
-                _t("analysis.ai_unavailable_tooltip",
-                   "Ta wersja aplikacji nie zawiera modułu AI. Użyj wersji z AI (cpu/gpu).")
+                t("analysis.ai_unavailable_tooltip")
             )
             self.mode_hint_label.setText(
-                _t("analysis.ai_unavailable_hint",
-                   "Tryb dokładny jest niedostępny: ta wersja aplikacji nie zawiera modułu AI.")
+                t("analysis.ai_unavailable_hint")
             )
 
         self.cb_images = QCheckBox(t("analysis.images_checkbox"))
@@ -616,8 +606,8 @@ class AnalysisDialog(QDialog):
         """Tell the user what went wrong and return to the settings screen."""
         QMessageBox.critical(
             self,
-            _t("analysis.error_title", "Błąd analizy"),
-            message or _t("analysis.unknown_error", "Nieznany błąd. Szczegóły są w logach aplikacji."),
+            t("analysis.error_title"),
+            message or t("analysis.unknown_error"),
         )
         self.reset_ui_state()
 
