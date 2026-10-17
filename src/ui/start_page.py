@@ -1,4 +1,5 @@
 import os
+import re
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics
@@ -30,6 +31,11 @@ def _t(key, default):
     except Exception:
         return default
     return default if not text or text == key else text
+
+
+def _plain(text):
+    """Drop leading symbols ("+ ", "⇅ ") that a translation may carry: our buttons already have an icon."""
+    return re.sub(r"^[^\w]+", "", text or "")
 
 
 def _docs_count_text(n):
@@ -384,7 +390,7 @@ class StartPage(QWidget):
         self._apply_sort_and_render()
 
     def _update_sort_text(self):
-        self.sort_btn.setText("  " + (t("start.sort_newest") if self.sort_newest else t("start.sort_oldest")))
+        self.sort_btn.setText("  " + _plain(t("start.sort_newest") if self.sort_newest else t("start.sort_oldest")))
 
     def retranslate_ui(self, *_):
         """Re-apply all texts after the UI language changes."""
@@ -394,7 +400,7 @@ class StartPage(QWidget):
         self.settings_btn.setAccessibleName(t("start.settings_tooltip"))
         self.txt_drag.setText(t("start.drag_here"))
         self.or_label.setText(t("common.or"))
-        self.add_btn.setText("  " + t("start.add_file"))
+        self.add_btn.setText("  " + _plain(t("start.add_file")))
         self.section_title.setText(t("start.my_documents"))
         self.search_input.setPlaceholderText(t("start.search_placeholder"))
         self.search_input.setAccessibleName(t("start.search_placeholder"))
@@ -464,15 +470,18 @@ class StartPage(QWidget):
         box = QWidget()
         box.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(box)
-        lay.setContentsMargins(24, 64, 24, 64)
-        lay.setSpacing(8)
+        lay.setContentsMargins(24, 44, 24, 52)
+        lay.setSpacing(0)
         lay.setAlignment(Qt.AlignCenter)
 
+        # Same soft blue circle as the drop zone above, so the empty state belongs to the page.
         circle = QLabel()
-        circle.setFixedSize(56, 56)
+        circle.setFixedSize(68, 68)
         circle.setAlignment(Qt.AlignCenter)
-        circle.setPixmap(icons.pixmap("search" if has_documents else "file", styles.TEXT_2, 22))
-        circle.setStyleSheet(f"background-color: {styles.NEUTRAL_BG}; border-radius: 12px;")
+        circle.setPixmap(icons.pixmap("search" if has_documents else "folder", styles.PRIMARY, 30, 1.8))
+        circle.setStyleSheet(
+            f"background-color: {styles.PRIMARY_50}; border: 1px solid {styles.PRIMARY_100}; border-radius: 34px;"
+        )
 
         if has_documents:
             title_text = _t("start.no_results_title", "Brak wyników")
@@ -490,10 +499,12 @@ class StartPage(QWidget):
         body.setStyleSheet(styles.EMPTY_TEXT_STYLE)
         body.setWordWrap(True)
         body.setAlignment(Qt.AlignCenter)
+        body.setFixedWidth(440)   # keeps the sentence on one or two even lines
 
         lay.addWidget(circle, alignment=Qt.AlignCenter)
-        lay.addSpacing(4)
+        lay.addSpacing(18)
         lay.addWidget(title, alignment=Qt.AlignCenter)
+        lay.addSpacing(6)
         lay.addWidget(body, alignment=Qt.AlignCenter)
         self.table_layout.addWidget(box)
 
