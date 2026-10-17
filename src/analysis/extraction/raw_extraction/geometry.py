@@ -2,6 +2,7 @@ import logging
 import statistics
 from typing import Dict
 import re
+import fitz
 
 from analysis.extraction.raw_extraction.bare_struct import (
     TextLine,
@@ -183,4 +184,62 @@ class GeometryClassifier:
             return False
         except Exception as e:
             logging.error(f"Error checking if block is footer: {e}")
+            return False
+        
+    def is_footnote(self, raw_block: dict, page_height: float, dominant_font_size: float | None = None, prev_block_was_footnote: bool = False,) -> bool:
+        """
+        Check whether block is a footnote
+        """
+        try:
+            bbox = raw_block["bbox"]
+
+            if bbox[1] < page_height * 0.65:
+                return False
+
+            lines = raw_block.get("lines", [])
+            if not lines or not lines[0].get("spans"):
+                return False
+
+            spans = lines[0]["spans"]
+            full_first_line = " ".join(s.get("text", "") for s in spans).strip()
+            if re.match(r"^\d+(\.\d+)+", full_first_line):
+                return False
+
+            first_span = spans[0]
+            first_span_text = first_span.get("text", "").strip()
+            first_span_font = first_span.get("font", "").lower()
+            first_span_size = first_span.get("size", 0)
+            flags = first_span.get("flags", 0)
+
+            is_bold = bool(flags & 16) or "bold" in first_span_font
+            if is_bold:
+                return False
+
+            if dominant_font_size and first_span_size >= (dominant_font_size - 0.2):
+                return False
+
+            is_smaller_font = False
+            if dominant_font_size and first_span_size:
+                is_smaller_font = first_span_size <= (dominant_font_size - 0.8)
+
+            is_superscript_num = (
+                first_span_text.isdigit() and len(first_span_text) <= 2
+            ) and ("sup" in first_span_font or is_smaller_font)
+
+            has_footnote_number = (
+                bool(re.match(r"^(\d{1,2}(?!\.\d)|[\*\†\‡])[\.\)\s]", full_first_line))
+                or is_superscript_num
+            )
+
+            if has_footnote_number and (is_smaller_font or bbox[1] >= page_height * 0.72):
+                return True
+            if prev_block_was_footnote and is_smaller_font:
+                if full_first_line and (
+                    full_first_line[0].islower() or not full_first_line[0].isalnum()
+                ):
+                    return True
+
+            return False
+        except Exception as e:
+            logging.error(f"Error checking if block is footnote: {e}")
             return False

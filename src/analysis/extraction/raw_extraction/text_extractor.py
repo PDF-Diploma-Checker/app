@@ -83,6 +83,7 @@ def parse_text_block(
     current_span_id: int,
     all_spacings: list,
     is_ftr: bool,
+    is_fn: bool = False,
 ) -> tuple[TextBlock, float, int]:
     lines = []
     block_words = []
@@ -285,12 +286,17 @@ def parse_text_block(
                 logging.error(
                     f"Failed to process line in block {raw_block.get('number', 'unknown')}: {e}"
                 )
+        block_type = "text"
+        if is_ftr:
+            block_type = "footer"
+        elif is_fn:
+            block_type = "footnote"
 
         output_block = TextBlock(
             lines=lines,
             bbox=raw_block["bbox"],
             block_id=raw_block["number"],
-            block_type="footer" if is_ftr else "text",
+            block_type=block_type,
         )
         clean_block = post_process_block(output_block)
         # clean_block = output_block
