@@ -243,8 +243,9 @@ def classify_block_content(
         for marker_type in SWITCHABLE_MARKERS:
             if marker_type == active_marker:
                 continue
-            if marker_type == "dash" and not re.match(r"^[-−–—]\s", text):
-                continue
+            if marker_type == "dash":
+                if re.match(r"^[-−–—]\s*(ang\.|pol\.|niem\.|fr\.|ros\.|tj\.|czyli)\b", text, re.IGNORECASE):
+                    return "paragraph", None
             if DocumentPatterns.LIST_PATTERNS[marker_type].match(text):
                 return "list", marker_type
         return "paragraph", None
@@ -476,13 +477,18 @@ def is_widow_func(combined_words):
         last_word = combined_words[-1]
         second_to_last_word = combined_words[-2]
         word_text = getattr(last_word, "text", str(last_word))
+
         if word_text.count(" ") <= 1:
-            if last_word.line != second_to_last_word.line:
+            last_y0 = last_word.bbox[1] if hasattr(last_word, "bbox") and last_word.bbox else 0
+            prev_y0 = second_to_last_word.bbox[1] if hasattr(second_to_last_word, "bbox") and second_to_last_word.bbox else 0
+            if abs(last_y0 - prev_y0) > 3.0:
                 is_widow = 1
             elif len(combined_words) >= 3:
                 third_to_last_word = combined_words[-3]
-                if second_to_last_word.line != third_to_last_word.line:
+                third_y0 = third_to_last_word.bbox[1] if hasattr(third_to_last_word, "bbox") and third_to_last_word.bbox else 0
+                if abs(prev_y0 - third_y0) > 3.0:
                     is_widow = 2
+
     return is_widow
 
 

@@ -43,15 +43,18 @@ def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
 
 
 def find_image_description(image_bbox, text_blocks, priority_side=None):
-    # ... (bez zmian)
     x0, y0, x1, y1 = image_bbox
-    kw_matches = {"above": [], "below": []}
-    other_matches = {"above": [], "below": []}
+    img_keywords = (
+        "rysunek", "rys.", "fot.", "ilustracja", "wykres", "rycina",
+        "schemat", "diagram", "grafika", "figure", "fig.", "photo",
+        "img", "image", "schema", "chart", "plot"
+    )
+
+    candidates = {"above": [], "below": []}
 
     for block in text_blocks:
         bx0, by0, bx1, by1 = block.bbox
 
-        # Tolerancja odległości (obrazy często mają podpisy ciut dalej niż tabele)
         is_close_above = abs(by1 - y0) < 40
         is_close_below = abs(by0 - y1) < 40
 
@@ -63,47 +66,50 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
                 continue
 
             side = "above" if is_close_above else "below"
+            candidates[side].append((by0, by1, full_text))
 
-            img_keywords = (
-                "rysunek",
-                "rys.",
-                "fot.",
-                "ilustracja",
-                "wykres",
-                "rycina",
-                "schemat",
-                "diagram",
-                "grafika",
-                "figure",
-                "fig.",
-                "photo",
-                "img",
-                "image",
-                "schema",
-                "chart",
-                "plot",
-            )
+    candidates["above"].sort(key=lambda item: item[0])
+    candidates["below"].sort(key=lambda item: item[0])
 
-            if full_text.lower().startswith(img_keywords):
-                kw_matches[side].append(full_text)
-            else:
-                other_matches[side].append(full_text)
-
-    # Obrazy zwykle mają podpisy na dole
     primary = priority_side if priority_side else "below"
     secondary = "above" if primary == "below" else "below"
 
-    # Logika priorytetów (identyczna jak w tabelach):
-    if kw_matches[primary]:
-        return kw_matches[primary][0], primary
-    if kw_matches[secondary]:
-        return kw_matches[secondary][0], secondary
-    if other_matches[primary]:
-        return other_matches[primary][0], primary
-    if other_matches[secondary]:
-        return other_matches[secondary][0], secondary
+    def build_full_caption(block_list):
+        if not block_list:
+            return ""
+        start_idx = -1
+        for idx, (_, _, text) in enumerate(block_list):
+            if text.lower().startswith(img_keywords):
+                start_idx = idx
+                break
 
-    return "", None
+        if start_idx == -1:
+            return ""
+
+        caption_parts = [block_list[start_idx][2]]
+        last_by1 = block_list[start_idx][1]
+
+        for idx in range(start_idx + 1, len(block_list)):
+            curr_by0, curr_by1, text = block_list[idx]
+            if (curr_by0 - last_by1) < 18:
+                if text.lower().startswith(img_keywords):
+                    break 
+                caption_parts.append(text)
+                last_by1 = curr_by1
+            else:
+                break
+
+        return " ".join(caption_parts)
+
+    caption_primary = build_full_caption(candidates[primary])
+    if caption_primary:
+        return caption_primary, primary
+
+    caption_secondary = build_full_caption(candidates[secondary])
+    if caption_secondary:
+        return caption_secondary, secondary
+
+    return "", priority_side
 
 def extract_vector_graphics(
     page: fitz.Page,
