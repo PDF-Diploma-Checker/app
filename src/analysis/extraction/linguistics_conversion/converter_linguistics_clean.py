@@ -111,6 +111,7 @@ class PDFMapper:
         r"^(DODATEK\b|ZAŁĄCZNIK\b|ZALACZNIK\b|APPENDIX\b|ANEKS\b|SPIS\s|WYKAZ\s|LIST\b|OŚWIADCZENIE\b|OSWIADCZENIE\b|ABSTRACT\b|STRESZCZENIE\b)", re.IGNORECASE
     )
     HEADING_NUM_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?|[A-Z]\.|[IVXLC]+\.)\s+")
+    SPLIT_POLISH_SIGNS_RE = re.compile(r"(?:(?<=[a-ząćęłńóśźż])|(?<=(?<!\S)[A-ZĄĆĘŁŃÓŚŹŻ])) (?=[ąę])")
 
     @staticmethod
     def _strip_heading_number(text: str) -> str:
@@ -1165,6 +1166,7 @@ class PDFMapper:
         self._pair_descriptions_with_visuals(new_doc)
         self._verify_bibliography_references()
         self._verify_caption_sources(new_doc)
+        self._fix_offsets()
 
         new_doc.metadata["main_font"] = old_doc.get_most_common_font()
 
@@ -2727,6 +2729,101 @@ class PDFMapper:
                         visual.incorrect_caption = 1
                     else:
                         visual.incorrect_caption = 0
+
+    def _fix_offsets(self):
+        """
+        Post-processing for wrongly seperated words. Function takes full blocks content, searches for 
+        issues in parsing, fixes them and writes arrys in place (so that references in both list and paragraph blocks stay the same).
+        """
+        for block in self.logical_blocks:
+            original_words = list(getattr(block, "words", []))
+            removed = []
+
+            if isinstance(block, ListBlock):
+                for item in block.items:
+                    item.text, item_removed = self._merge_split_words(item.text, item.words)
+                    removed.extend(item_removed)
+            elif isinstance(block, ParagraphBlock):
+                block.content, removed = self._merge_split_words(block.content, block.words)
+
+            if not removed:
+                continue
+
+            removed_ids = {id(w) for w in removed}
+            if isinstance(block, ListBlock):
+                for item in block.items:
+                    item.words[:] = [w for w in item.words if id(w) not in removed_ids]
+                block.content = "\n".join(item.text for item in block.items)
+            block.words[:] = [w for w in block.words if id(w) not in removed_ids]
+            self._shift_word_indices(original_words, removed_ids)
+
+
+    def _merge_split_words(self, text, words):
+        """
+        Glues every word starting with ą/ę to the preceding word when there is space befere them on the same line.
+        """
+        split_spaces = {m.start() for m in self.SPLIT_POLISH_SIGNS_RE.finditer(text)}
+        if not split_spaces:
+            return text, []
+
+        removed = []
+        deleted_spaces = []
+        target = None
+        for word in words:
+            space = word.start_char - 1
+            if (
+                target is not None
+                and space in split_spaces
+                and target.end_char == space
+                and text[word.start_char:word.start_char + 1] == word.text[:1]
+                and (target.page_number, target.line) == (word.page_number, word.line)
+            ):
+                target.text += word.text
+                target.end_char = word.end_char
+                target.bbox = [
+                    min(target.bbox[0], word.bbox[0]),
+                    min(target.bbox[1], word.bbox[1]),
+                    max(target.bbox[2], word.bbox[2]),
+                    max(target.bbox[3], word.bbox[3]),
+                ]
+                target.incorrect_bibliography = max(
+                    target.incorrect_bibliography, word.incorrect_bibliography
+                )
+                deleted_spaces.append(space)
+                removed.append(word)
+            else:
+                target = word
+
+        if not removed:
+            return text, []
+
+        removed_ids = {id(w) for w in removed}
+        for word in words:
+            if id(word) in removed_ids:
+                continue
+            word.start_char -= sum(space_place < word.start_char for space_place in deleted_spaces)
+            word.end_char -= sum(space_place < word.end_char for space_place in deleted_spaces)
+
+        deleted = set(deleted_spaces)
+        new_text = "".join(char for i, char in enumerate(text) if i not in deleted)
+        return new_text, removed
+
+
+    def _shift_word_indices(self, words, removed_ids):
+        """
+        Decrements word_index of the words following removed ones. In lists the
+        numbering restarts with every raw text block, so the shift is reset when the index stops growing.
+        """
+        shift = 0
+        prev_index = None
+        for word in words:
+            if prev_index is not None and word.word_index <= prev_index:
+                shift = 0
+            prev_index = word.word_index
+            if id(word) in removed_ids:
+                shift += 1
+            else:
+                word.word_index -= shift
 
 
 # Funkcje zewnętrzne
