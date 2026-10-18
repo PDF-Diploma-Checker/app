@@ -111,7 +111,9 @@ class PDFMapper:
         r"^(DODATEK\b|ZAŁĄCZNIK\b|ZALACZNIK\b|APPENDIX\b|ANEKS\b|SPIS\s|WYKAZ\s|LIST\b|OŚWIADCZENIE\b|OSWIADCZENIE\b|ABSTRACT\b|STRESZCZENIE\b)", re.IGNORECASE
     )
     HEADING_NUM_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?|[A-Z]\.|[IVXLC]+\.)\s+")
-    SPLIT_POLISH_SIGNS_RE = re.compile(r"(?:(?<=[a-ząćęłńóśźż])|(?<=(?<!\S)[A-ZĄĆĘŁŃÓŚŹŻ])) (?=[ąę])")
+    SPLIT_POLISH_SIGNS_RE = re.compile(
+        r"(?:(?<=[a-ząćęłńóśźż])|(?<=(?<!\S)[A-ZĄĆĘŁŃÓŚŹŻ])) (?=[ąęĄĘ])"
+        r"|(?<=[A-ZĄĆĘŁŃÓŚŹŻ]) (?=[ĄĘ])")
 
     @staticmethod
     def _strip_heading_number(text: str) -> str:
@@ -994,7 +996,7 @@ class PDFMapper:
             ):
                 is_new_paragraph = True
                 debug_reason = "wcięcie względem bloku oraz przedwczesny koniec linii"
-
+            #TU DODAC SPRAWDZENIE CZY JEST NA TEJ SAMEJ LINII
         if is_valid_list_cont:
             is_new_paragraph = False
 
@@ -1510,6 +1512,7 @@ class PDFMapper:
                                 word.end_char += cont_base
 
                             last_item_data["item"].text += connector + full_text.strip()
+                            last_item_data["original_text"] += connector + full_text.strip()
                             last_item_data["item"].words.extend(words_info)
 
                             b = list(block.bbox)
@@ -1822,6 +1825,7 @@ class PDFMapper:
                     word.start_char += cont_base
                     word.end_char += cont_base
                 last_item_data["item"].text += connector + full_text
+                last_item_data["original_text"] += connector + full_text.strip()
                 last_item_data["item"].words.extend(words_info)
                 b = list(block.bbox)
                 last_item_data["item"].bbox = [
