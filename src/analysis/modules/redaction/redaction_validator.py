@@ -193,6 +193,7 @@ class RedactionValidator:
         self.remove_errors_from_acronyms_symbols()
         self.remove_errors_from_title_page()
         self.replace_global_errors()
+        self.log_all_errors()
 
         return self.errors
 
@@ -1712,3 +1713,30 @@ class RedactionValidator:
             return True
 
         return False
+
+
+    def log_all_errors(self):
+        """
+        Iterates through every error to get logging info
+        """
+        if not self.errors:
+            logging.info("No errors to log")
+            return
+
+        logging.info(f" Redaction Error Summary ({len(self.errors)}) errors")
+        for error in self.errors:
+            error_id = getattr(error, "id", "No ID")
+            category = getattr(error, "category", "No Category")
+            page = getattr(error, "page_number", "Unknown")
+            text = getattr(error, "text", "")
+            
+            if text:
+                text_preview = text.strip().replace("\n", " ")
+                if len(text_preview) > 60:
+                    text_preview = text_preview[:57] + "..."
+            else:
+                text_preview = ""
+
+            logging.info(
+                f"ID: {error_id} | type: {category} | page: {page} | text: {text_preview!r}"
+            )      

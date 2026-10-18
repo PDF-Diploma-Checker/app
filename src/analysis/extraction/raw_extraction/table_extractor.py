@@ -27,51 +27,72 @@ def find_table_description(table_bbox, text_blocks, priority_side=None):
         side it was found on ('above' or 'below').
     """
     x0, y0, x1, y1 = table_bbox
-    # Rozdzielamy potencjalne opisy na górę i dół oraz sprawdzamy słowa kluczowe
-    kw_matches = {"above": [], "below": []}
-    other_matches = {"above": [], "below": []}
+    tbl_keywords = ("tabele", "tabela", "tab.", "table", "tab", "tablica")
+
+    candidates = {"above": [], "below": []}
 
     for block in text_blocks:
         bx0, by0, bx1, by1 = block.bbox
 
-        # 1. Szukanie odległości pionowej
-        is_close_above = abs(by1 - y0) < 40  # Nad tabelą
-        is_close_below = abs(by0 - y1) < 60  # Pod tabelą
+        if bx0 >= x0 - 5 and bx1 <= x1 + 5 and by0 >= y0 - 5 and by1 <= y1 + 5:
+            continue
+
+        is_close_above = abs(by1 - y0) < 40
+        is_close_below = abs(by0 - y1) < 60
 
         if is_close_above or is_close_below:
             full_text = " ".join(
                 span.text for line in block.lines for span in line.spans
             ).strip()
+            if not full_text:
+                continue
+
             side = "above" if is_close_above else "below"
+            candidates[side].append((by0, by1, full_text))
 
-            # 2. Szukanie czy tekst zaczyna się od "Tabela" lub "Tab."
-            if full_text.lower().startswith(
-                ("tabele", "tabela", "tab.", "table", "tab")
-            ):
-                kw_matches[side].append(full_text)
-            else:
-                other_matches[side].append(full_text)
+    candidates["above"].sort(key=lambda item: item[0])
+    candidates["below"].sort(key=lambda item: item[0])
 
-    # Ustalenie kolejności sprawdzania
     primary = priority_side if priority_side else "above"
     secondary = "below" if primary == "above" else "above"
 
-    # Priorytetyzacja:
-    # 1. Słowo kluczowe na preferowanej stronie
-    if kw_matches[primary]:
-        return kw_matches[primary][0], primary
-    # 2. Słowo kluczowe na jakiejkolwiek stronie
-    if kw_matches[secondary]:
-        return kw_matches[secondary][0], secondary
-    # 3. Zwykły tekst na preferowanej stronie
-    if other_matches[primary]:
-        return other_matches[primary][0], primary
-    # 4. Zwykły tekst na jakiejkolwiek stronie
-    if other_matches[secondary]:
-        return other_matches[secondary][0], secondary
+    def build_full_caption(block_list):
+        if not block_list:
+            return ""
+
+        start_idx = -1
+        for idx, (_, _, text) in enumerate(block_list):
+            if text.lower().startswith(tbl_keywords):
+                start_idx = idx
+                break
+
+        if start_idx == -1:
+            return ""
+
+        caption_parts = [block_list[start_idx][2]]
+        last_by1 = block_list[start_idx][1]
+
+        for idx in range(start_idx + 1, len(block_list)):
+            curr_by0, curr_by1, text = block_list[idx]
+            if (curr_by0 - last_by1) < 18:
+                if text.lower().startswith(tbl_keywords):
+                    break
+                caption_parts.append(text)
+                last_by1 = curr_by1
+            else:
+                break
+
+        return " ".join(caption_parts)
+
+    caption_primary = build_full_caption(candidates[primary])
+    if caption_primary:
+        return caption_primary, primary
+
+    caption_secondary = build_full_caption(candidates[secondary])
+    if caption_secondary:
+        return caption_secondary, secondary
 
     return "", priority_side
-
 
 def extract_tables(
     page: fitz.Page, drawings: list, cur_page: PageData, priority_side=None
