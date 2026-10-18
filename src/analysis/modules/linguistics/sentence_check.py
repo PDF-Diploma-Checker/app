@@ -69,7 +69,7 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                             if to_add:
                                 offset = idx_map[token.idx]
                                 error_length = idx_map[token.idx + len(token)] - offset
-                                start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, offset, error_length)
+                                start_page, end_page, word_idxs, error_coordinate, _ = get_match_info(block.block, offset, error_length)
                                 if block.block.language == 'en':
                                     message = f"Use of {token.morph.get("Person")[0]} personal form."
                                 else:
@@ -141,7 +141,7 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                 og_start = idx_map[sentence.start_char]
                 og_end = idx_map[sentence.end_char]
                 for category, message in match_list:
-                    start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, og_start, og_end - og_start)
+                    start_page, end_page, word_idxs, error_coordinate, _ = get_match_info(block.block, og_start, og_end - og_start)
                     match = Error_type(
                     content= text[og_start:og_end],
                     category=  category,
