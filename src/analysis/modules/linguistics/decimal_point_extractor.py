@@ -33,7 +33,7 @@ def decimal_check(blocks, chapter_nums):
         else:
             en_candidates += len(regexes)
         for reg in regexes:
-            start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, reg.start(), reg.end()- reg.start())
+            start_page, end_page, word_idxs, error_coordinate, _ = get_match_info(block.block, reg.start(), reg.end()- reg.start())
             potential_matches.append(Error_type(
                 content=text[reg.start():reg.end()],
                 category= "DECIMAL",
