@@ -2,7 +2,7 @@ from app.pipeline import AnalysisPipeline
 from common.models import InputDocument
 
 
-def run_analysis_for_pdf(pdf_path, config_path=None, progress_callback=None, use_llm=True, language="pl"):
+def run_analysis_for_pdf(pdf_path, config_path=None, progress_callback=None, use_llm=True, language="pl", cancel_token=None):
     if not pdf_path:
         raise ValueError("Nie podano ścieżki do pliku PDF.")
 
@@ -20,4 +20,5 @@ def run_analysis_for_pdf(pdf_path, config_path=None, progress_callback=None, use
         use_llm=use_llm,
         config_path=config_path,
         language=language,
+        cancel_token=cancel_token,
     )

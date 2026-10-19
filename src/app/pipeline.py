@@ -6,6 +6,7 @@ import threading
 
 from analysis.extraction.service import ExtractionService
 from analysis.modules.linguistics.linguistics_service import LinguisticsService
+from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
 
 logger = logging.getLogger(__name__)
@@ -17,8 +18,9 @@ class AnalysisPipeline:
         self.linguistics_service = LinguisticsService()
         self.llm_service = None
 
-    def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True):
+    def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True, cancel_token=None):
         def report_progress(value, text):
+            check_cancelled(cancel_token)
             if progress_callback:
                 progress_callback(value, text)
 
@@ -36,6 +38,7 @@ class AnalysisPipeline:
         from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers
 
         doc_obj = extractPDF(pdf_path)
+        check_cancelled(cancel_token)
         doc_dict = doc_obj._to_dict()
 
         try:
@@ -63,6 +66,7 @@ class AnalysisPipeline:
                     language=language,
                     use_llm=use_llm,
                     check_images=check_images,
+                    cancel_token=cancel_token,
                 )
 
             except Exception as e:
@@ -90,7 +94,9 @@ class AnalysisPipeline:
                 for block in raw_blocks.logical_blocks:
                     block.language = language
 
-                ling_matches, sentence_analysis = ling_module.run_linguistics(raw_blocks)
+                ling_matches, sentence_analysis = ling_module.run_linguistics(
+                    raw_blocks, cancel_token=cancel_token
+                )
 
                 logger.info(f"[PIPELINE] Found {len(ling_matches)} linguistic issues.")
 
