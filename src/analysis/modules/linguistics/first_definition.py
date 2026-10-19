@@ -1,6 +1,6 @@
 import re
 import string
-from .helpers import language, lemmatization
+from .helpers import language, lemmatization, add_match, get_match_info
 from .check_acronym import potential_acronym
 import logging
 
@@ -95,7 +95,7 @@ def check_position_if_new(new_acronym, definition, words, block_id, acronyms_wit
     tittle_pages_phrases = {
     "PRACA", "MAGISTERSKA", "INŻYNIERSKA", "DYPLOMOWA",
     "STRESZCZENIE", "ABSTRACT", "SŁOWA", "KLUCZOWE",
-    "KEYWORDS", "WYKAZ", "SKRÓTÓW", "ABBREVIATIONS", "OECD"
+    "KEYWORDS", "WYKAZ", "SKRÓTÓW", "ABBREVIATIONS", "OECD",
     "ENGINEERING", "THESIS", "UNIVERSITY", "POLITECHNIKA",
     "WSTĘP", "CEL", "PRACY", "TEORIA", "PRZEGLĄD", "ROZWIĄZAŃ", "OPIS", 
     "WYNIKI", "ZAKOŃCZENIE", "DODATEK", "INSTRUKCJA", "PROGRAMISTY", 
@@ -134,12 +134,29 @@ def check_position_if_new(new_acronym, definition, words, block_id, acronyms_wit
             
     return acronyms_with_definitions
 
+
+def check_italic_def(content, block, offset, length, block_language):
+    """
+    Returns a match if the foreign language definition is not written in italic.
+    """
+    start_page, end_page, word_idxs, error_coordinate, _ = get_match_info(block, offset, length)
+    message = "Obcojęzyczne definicje powinny być zapisane kursywą."
+    if block_language == "en":
+        message = "Definition in a foreign language should be written in italic."
+    matched_words = [w for w in block.words if w.word_index in word_idxs]
+    logger.info("check_italic_def: word_idxs=%s, matched words: %s", word_idxs,
+                [(w.word_index, w.text, w.italic) for w in matched_words])
+    if matched_words and not all(w.italic for w in matched_words):
+        return add_match(content, block.block_id, start_page, end_page, word_idxs, error_coordinate, category = "STYLE", message = message)
+    return None
+
 def check_first_definition(blocks, proper_names, extracted_acronyms):
     """
     Scans document blocks to find and extract the first definitions of acronyms.
     """
     logger.info("Starting first definition check")
     acronyms_with_definitions = {}
+    italic_matches = []
     bibliography_re = re.compile(r"^\[\d+\]")
     list_acronyms = re.compile(r'^[A-Z]{2,}\s+[\u2013\u2014\-\u2212:]\s|^((\S+\s){1,4})[\u2013\u2014\-\u2212:]\s')
     paragraph_def_first = re.compile(r'(?<![A-Za-z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c])([A-Z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b][a-zA-Z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*\(([A-Z]{2,})\)(?=[,\s\.\)\;]|$)',re.UNICODE)
@@ -159,6 +176,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     simple_paren_acronym = re.compile(r'([\w][\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]{3,}?)\s\(([A-Z]{2,6})\)',re.UNICODE)
     paragraph_acr_expansion_suffix = re.compile(r'\b([A-Z]{2,})\s*\((?:ang\.|pol\.|fr\.|niem\.|łac\.)?\s*([A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*[\-\u2013\u2014,;]\s*(?:ang\.|pol\.|fr\.|niem\.|łac\.)[^)]*\)', re.UNICODE)
     paragraph_def_then_ang = re.compile(r'\b([A-Z]{2,})\s*\([^()]*?[\s,;\-\u2013\u2014]\s*(?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+([^()]{3,}?)\s*\)', re.UNICODE)
+    foreign_def_in_parenthesis = re.compile(r'\(\s*(?:ang\.|pol\.|niem\.|fr\.|\u0142ac\.)\s*["\u201e\u201c\u00ab]?([A-Za-z\u00d3\u00f3\u0104-\u017e][^,;:!?()\[\]"\u201d\u00bb\u2013\u2014]*?)\s*(?=[,;:!?()\[\]"\u201d\u00bb\u2013\u2014]|\s[\-\u2010\u2011]\s|$)', re.UNICODE)
     split = re.compile(r"\s[-\u2013\u2014]\s")
 
     if extracted_acronyms:
@@ -264,11 +282,17 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions)
                 
-                for acronym, definition in paragraph_ang_pattern.findall(text):
+                for m in paragraph_ang_pattern.finditer(text):
+                    acronym, definition = m.group(1), m.group(2)
                     if potential_acronym(acronym):
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions)
+
+                for m in foreign_def_in_parenthesis.finditer(text):
+                    italic_match = check_italic_def(m.group(1), block, m.start(1), m.end(1) - m.start(1), block.language)
+                    if italic_match:
+                        italic_matches.append(italic_match)
     logger.info("First definition check complete: %d acronyms with definitions found, %d proper names",
                 len(acronyms_with_definitions), len(proper_names))
 
-    return acronyms_with_definitions, proper_names
+    return acronyms_with_definitions, proper_names, italic_matches

@@ -60,11 +60,12 @@ def check_exeptions(matches, blocks, proper_names, main_font):
     after_typo_refine = len(valid_errors)
     repeated_words_dropped = 0
     for lemma, match_list in potential_exeptions.items():
-        if len(match_list) > 2:
-            exeptions.extend(match_list)
-            repeated_words_dropped += len(match_list)
-        else:
-            valid_errors.extend(match_list)
+        # if len(match_list) > 2:
+        #     exeptions.extend(match_list)
+        #     repeated_words_dropped += len(match_list)
+        # else:
+        #     valid_errors.extend(match_list)
+        valid_errors.extend(match_list)
 
     logger.info("Exception filtering complete:")
     logger.info("  Input: %d, output: %d", len(matches), len(valid_errors))
