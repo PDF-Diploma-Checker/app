@@ -95,6 +95,9 @@ PL = {
         "criterion_met": "Spełnione",
         "criterion_not_met": "Niespełnione",
         "no_figures_checked": "Brak sprawdzonych rysunków",
+        "score_label": "Wynik punktowy",
+        "off_topic_list": "Sekcje niezgodne z celem pracy:",
+        "figure_chip": "Rys. {num}",
     },
     "pdf_menu": {
         "copy_text": "Skopiuj tekst",
@@ -395,6 +398,9 @@ EN = {
         "criterion_met": "Met",
         "criterion_not_met": "Not met",
         "no_figures_checked": "No figures checked",
+        "score_label": "Score",
+        "off_topic_list": "Sections irrelevant to the thesis objective:",
+        "figure_chip": "Fig. {num}",
     },
     "pdf_menu": {
         "copy_text": "Copy text",
