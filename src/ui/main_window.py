@@ -1,4 +1,3 @@
-import datetime
 import logging
 import os
 
@@ -15,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from common.path import resource_path
 
-from . import icons, styles
+from . import icons, report_panel, report_pdf, styles
 from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
 from .analysis_dialog import AnalysisDialog
@@ -477,219 +476,8 @@ class PDFReader(QMainWindow):
             self.save_custom_comment(comment_data)
 
     def update_report_panel(self, report_data):
-        """Rebuilds the verification panel with the evaluated AI quality metrics,
-        image checks, off-topic lists and sentence statistics."""
-        if not report_data:
-            report_data = {}
-
-        def make_card():
-            card = QFrame()
-            card.setObjectName("Card")
-            card.setStyleSheet(styles.CARD_STYLE)
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(18, 16, 18, 16)
-            card_layout.setSpacing(6)
-            return card, card_layout
-
-        content = QWidget()
-        content.setStyleSheet("background: transparent; border: none;")
-        l = QVBoxLayout(content)
-        l.setContentsMargins(0, 4, 10, 20)
-        l.setSpacing(16)
-
-        content_grade = report_data.get("content_grade")
-        if content_grade is not None:
-            if isinstance(content_grade, dict):
-                grade = content_grade.get("grade", 0.0)
-                max_grade = content_grade.get("max_grade", 100.0)
-                p_off = content_grade.get("p_off", 0.0)
-                off_topic = content_grade.get("off_topic_sections", 0)
-            elif isinstance(content_grade, (float, int)):
-                grade = float(content_grade)
-                max_grade = 100.0
-                p_off = 0.0
-                off_topic = 0
-            else:
-                grade = 0.0
-                max_grade = 100.0
-                p_off = 0.0
-                off_topic = 0
-
-            cg_frame, cg_layout = make_card()
-
-            cg_title = QLabel(t("main.overall_grade"))
-            cg_title.setStyleSheet(styles.CONTENT_GRADE_TITLE)
-
-            cg_val = QLabel(
-                f"{grade} <span style='font-size: 15px; font-weight: 400; color: {styles.TEXT_2};'>"
-                f"/ {max_grade} {t('main.points')}</span>"
-            )
-            cg_val.setStyleSheet(styles.CONTENT_GRADE_VALUE)
-
-            cg_bar = QProgressBar()
-            cg_bar.setRange(0, 100)
-            try:
-                cg_bar.setValue(int(max(0, min(100, float(grade) / float(max_grade) * 100))))
-            except (TypeError, ValueError, ZeroDivisionError):
-                cg_bar.setValue(0)
-            cg_bar.setTextVisible(False)
-            cg_bar.setStyleSheet(styles.PROGRESS_THIN_STYLE)
-
-            detale_lbl = QLabel(t("main.off_topic", count=off_topic, percent=p_off))
-            detale_lbl.setWordWrap(True)
-            detale_lbl.setStyleSheet(styles.CONTENT_GRADE_DETAILS)
-
-            cg_layout.addWidget(cg_title)
-            cg_layout.addWidget(cg_val)
-            cg_layout.addWidget(cg_bar)
-            cg_layout.addSpacing(2)
-            cg_layout.addWidget(detale_lbl)
-
-            l.addWidget(cg_frame)
-        else:
-            none_label = QLabel(t("main.no_content_analysis"))
-            none_label.setStyleSheet(styles.AI_NONE_LABEL_STYLE)
-            l.addWidget(none_label)
-
-        def create_badge_row(label_text, is_met):
-            """One verification criterion: status icon, name and a status pill."""
-            row = QFrame()
-            row.setObjectName("Criterion")
-            row.setStyleSheet(styles.CRITERION_STYLE)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(14, 12, 14, 12)
-            row_layout.setSpacing(10)
-
-            icon_circle = QLabel()
-            icon_circle.setFixedSize(30, 30)
-            icon_circle.setAlignment(Qt.AlignCenter)
-
-            if is_met:
-                fg, bg = styles.SUCCESS, styles.SUCCESS_BG
-                icon_circle.setPixmap(icons.pixmap("check", fg, 16, 2.5))
-                status_text = t("main.criterion_met")
-            else:
-                fg, bg = styles.DANGER, styles.DANGER_BG
-                icon_circle.setPixmap(icons.pixmap("close", fg, 16, 2.5))
-                status_text = t("main.criterion_not_met")
-            icon_circle.setStyleSheet(f"background-color: {bg}; border: none; border-radius: 8px;")
-
-            text_col = QVBoxLayout()
-            text_col.setContentsMargins(0, 0, 0, 0)
-            text_col.setSpacing(4)
-
-            lbl = QLabel(label_text)
-            lbl.setWordWrap(True)
-            lbl.setStyleSheet(styles.CRITERION_NAME_STYLE)
-
-            pill = QLabel(status_text)
-            pill.setStyleSheet(
-                f"background-color: {bg}; color: {fg}; border: none; border-radius: 9px; "
-                "padding: 2px 10px; font-size: 13px; font-weight: 500;"
-            )
-
-            text_col.addWidget(lbl)
-            text_col.addWidget(pill, alignment=Qt.AlignLeft)
-
-            row_layout.addWidget(icon_circle, alignment=Qt.AlignTop)
-            row_layout.addLayout(text_col, 1)
-            return row
-
-        graphics_container = QWidget()
-        graphics_layout = QVBoxLayout(graphics_container)
-        graphics_layout.setContentsMargins(0, 0, 0, 0)
-        graphics_layout.setSpacing(8)
-
-        graphics_header = QLabel(t("main.graphics_header"))
-        graphics_header.setStyleSheet(styles.GRAPHICS_HEADER_STYLE)
-        graphics_layout.addWidget(graphics_header)
-
-        img_data = report_data.get("image_analysis", {})
-        if not isinstance(img_data, dict):
-            img_data = {}
-        has_images_checked = img_data.get("total", 0) > 0
-
-        if content_grade is not None and has_images_checked:
-            quality_errors = report_data.get("jakosc_obrazkow", [])
-            font_errors = report_data.get("czcionki_obrazkow", [])
-
-            if not quality_errors:
-                graphics_layout.addWidget(create_badge_row(t("main.image_quality_ok"), True))
-            else:
-                graphics_layout.addWidget(create_badge_row(t("main.image_quality_errors", count=len(quality_errors)), False))
-
-            if not font_errors:
-                graphics_layout.addWidget(create_badge_row(t("main.font_consistency_ok"), True))
-            else:
-                graphics_layout.addWidget(create_badge_row(t("main.font_consistency_errors", count=len(font_errors)), False))
-        else:
-            no_checks = QLabel(t("main.no_figures_checked"))
-            no_checks.setStyleSheet(styles.MUTED_LABEL_STYLE)
-            graphics_layout.addWidget(no_checks)
-
-        raster_nums = img_data.get("image_raster", [])
-
-        if raster_nums:
-            raster_card, raster_box_layout = make_card()
-            raster_box_layout.setSpacing(4)
-
-            raster_title = QLabel(t("main.raster_detected"))
-            raster_title.setWordWrap(True)
-            raster_title.setStyleSheet(styles.RASTER_TITLE_STYLE)
-            raster_box_layout.addWidget(raster_title)
-
-            raster_list = QLabel("  ·  ".join(t("main.figure_item", num=num) for num in raster_nums))
-            raster_list.setWordWrap(True)
-            raster_list.setStyleSheet(
-                f"color: {styles.TEXT}; font-size: 14px; font-weight: 500; background: transparent; border: none;"
-            )
-            raster_box_layout.addWidget(raster_list)
-
-            graphics_layout.addWidget(raster_card)
-        l.addWidget(graphics_container)
-
-        stats_data = report_data.get("statystyki_zdan")
-        if stats_data:
-            stats_container = QWidget()
-            stats_vbox = QVBoxLayout(stats_container)
-            stats_vbox.setContentsMargins(0, 0, 0, 0)
-            stats_vbox.setSpacing(8)
-
-            stats_header = QLabel(t("main.stats_header"))
-            stats_header.setStyleSheet(styles.STATS_HEADER_STYLE)
-            stats_vbox.addWidget(stats_header)
-
-            stats_frame, stats_layout = make_card()
-            stats_layout.setSpacing(10)
-
-            def create_stat_row(name, val):
-                row = QWidget()
-                row.setStyleSheet("background: transparent;")
-                row_l = QHBoxLayout(row)
-                row_l.setContentsMargins(0, 0, 0, 0)
-                lbl_name = QLabel(name)
-                lbl_name.setStyleSheet(styles.STATS_ROW_NAME)
-                lbl_val = QLabel(f"{val}")
-                lbl_val.setStyleSheet(styles.STATS_ROW_VALUE)
-                row_l.addWidget(lbl_name, 1)
-                row_l.addWidget(lbl_val, alignment=Qt.AlignRight)
-                return row
-
-            stats_layout.addWidget(create_stat_row(t("main.stats_active"), stats_data.get("active_ratio", "0%")))
-            stats_layout.addWidget(create_stat_row(t("main.stats_passive"), stats_data.get("passive_ratio", "0%")))
-            stats_layout.addWidget(create_stat_row(t("main.stats_verbless"), stats_data.get("verbless_ratio", "0%")))
-
-            stats_vbox.addWidget(stats_frame)
-            l.addWidget(stats_container)
-
-        l.addStretch()
-
-        self.raport_btn = QPushButton(t("main.download_report"))
-        self.raport_btn.setCursor(Qt.PointingHandCursor)
-        self.raport_btn.setStyleSheet(styles.RAPORT_BTN_STYLE)
-        self.raport_btn.clicked.connect(self.generate_detailed_report)
-        l.addWidget(self.raport_btn)
-
+        """Rebuilds the verification panel (look shared with the detailed PDF report, see ui/report_panel.py)."""
+        content, self.raport_btn = report_panel.build_report_panel(report_data, self.generate_detailed_report)
         self.report_scroll.setWidget(content)
 
     def zoom_in(self):
@@ -749,14 +537,14 @@ class PDFReader(QMainWindow):
                         if w > 0 and h > 0:
                             rect = fitz.Rect(x, y, x + w, y + h)
                             hl = page.add_highlight_annot(rect)
-                            hl.set_colors(stroke=(1.0, 0.85, 0.85))
-                            hl.set_opacity(0.6)
+                            hl.set_colors(stroke=(0.95, 0.35, 0.35))
+                            hl.set_opacity(0.55)
                             hl.set_info({"title": t("main.annot_verification"), "content": opis})
                             hl.update()
                         else:
                             point = fitz.Point(x, y - 15)
                             annot = page.add_text_annot(point, opis, icon="Comment")
-                            annot.set_colors(stroke=(1.0, 0.7, 0.7))
+                            annot.set_colors(stroke=(0.85, 0.15, 0.15))
                             annot.set_info({"title": t("main.annot_verification")})
                             annot.update()
                 except Exception:
@@ -825,68 +613,8 @@ class PDFReader(QMainWindow):
         self.pdf_view.update_markers_pos()
 
     def generate_detailed_report(self):
-        """Builds a standalone multi-page PDF report with the content grade, image checks
-        and sentence statistics."""
-
-        LANG_DICT = {
-            "pl": {
-                "yes_upper": "TAK", "no_upper": "NIE", "error": "Błąd", "success": "Sukces",
-                "warning": "Ostrzeżenie", "unknown_fig": "Nieznany rysunek", "no_format": "Brak formatu",
-                "no_title": "Brak tytułu", "panel_pts": "pkt", "panel_fig_prefix": "Rys.",
-                "rep_no_data_warn": "Brak danych szczegółowej analizy merytorycznej dla tego dokumentu.",
-                "rep_file_prefix": "Raport_Merytoryczny_", "rep_dialog_title": "Zapisz Raport Szczegółowy",
-                "rep_main_title": "Szczegółowy Raport Analizy Merytorycznej", "rep_doc_label": "Dokument:",
-                "rep_eval_title": "Ogólna ocena merytoryczna", "rep_score_lbl": "Wynik punktowy:",
-                "rep_off_topic_lbl": "Podrozdziały poza tematem:", "rep_off_topic_ident": "Zidentyfikowane sekcje niezgodne z celem pracy:",
-                "rep_theory_title": "Weryfikacja merytoryczna rozdziału teoretycznego", "rep_chapter_analyzed": "Analizowany rozdział:",
-                "rep_completion_lvl": "Poziom realizacji wytycznych:", "rep_crit_1": "Analiza i ocena istniejących rozwiązań:",
-                "rep_crit_2": "Wskazanie luki badawczej lub problemu naukowego:", "rep_crit_3": "Synteza i krytyczne porównanie metod:",
-                "rep_ai_eval_title": "Ogólna ocena merytoryczna (AI)", "rep_skipped_fast": "Analiza została pominięta (wybrano Tryb Szybki).",
-                "rep_img_title": "Analiza spójności grafik i wykresów (AI)", "rep_img_total": "Wszystkich zweryfikowanych rysunków:",
-                "rep_img_bad": "Rysunki z błędnym opisem w tekście:", "rep_img_good": "Rysunki poprawne:",
-                "rep_raster_ident": "Zidentyfikowane grafiki rastrowe podlegające badaniu:", "rep_img_details": "Lista szczegółowa rozbieżności:",
-                "rep_qual_title": "Ocena jakości obrazów (DPI i czytelność)", "rep_qual_all_ok": "Wszystkie obrazy mają odpowiednią jakość i czytelność.",
-                "rep_qual_err_1": "Wykryto problemy z jakością w", "rep_qual_err_2": "obrazach:", "rep_format_lbl": "Format:",
-                "rep_fonts_title": "Spójność czcionek na obrazach", "rep_fonts_all_ok": "Brak wykrytych problemów ze spójnością czcionek na rysunkach.",
-                "rep_fonts_err_1": "Wykryto problemy z czcionkami w", "rep_fonts_err_2": "elementach:",
-                "rep_img_skip_title": "Ocena jakości obrazów i czcionek", "rep_img_skip_desc": "Analiza została pominięta na życzenie użytkownika lub dokument nie zawiera grafik.",
-                "rep_stats_title": "Analiza statystyczna struktury zdań", "rep_stats_desc": "Struktura gramatyczna i stylistyczna badanej pracy dyplomowej:",
-                "rep_active_lbl": "Zdania w stronie czynnej:", "rep_active_desc": "Zalecana forma wypowiedzi w tekstach naukowych podnosząca dynamikę wywodu.",
-                "rep_passive_lbl": "Zdania w stronie biernej:", "rep_passive_desc": "Stosowana przy opisie procedur badawczych oraz stanu wiedzy.",
-                "rep_verbless_lbl": "Równoważniki zdań:", "rep_verbless_desc": "Konstrukcje bezorzecznikowe, dopuszczalne głównie w nagłówkach i spisach.",
-                "rep_stats_no_data": "Brak dostępnych danych statystycznych (uruchom analizę w Trybie Dokładnym).",
-                "rep_footer_date": "Data:", "rep_success_saved": "Raport został zapisany pomyślnie:\n{}", "rep_err_gen": "Błąd podczas generowania raportu:\n{}"
-            },
-            "en": {
-                "yes_upper": "YES", "no_upper": "NO", "error": "Error", "success": "Success",
-                "warning": "Warning", "unknown_fig": "Unknown figure", "no_format": "No format",
-                "no_title": "No title", "panel_pts": "pts", "panel_fig_prefix": "Fig.",
-                "rep_no_data_warn": "No detailed substantive analysis data for this document.",
-                "rep_file_prefix": "Content_Report_", "rep_dialog_title": "Save Detailed Report",
-                "rep_main_title": "Detailed Content Analysis Report", "rep_doc_label": "Document:",
-                "rep_eval_title": "Overall Content Evaluation", "rep_score_lbl": "Score:",
-                "rep_off_topic_lbl": "Off-topic subsections:", "rep_off_topic_ident": "Identified sections irrelevant to the thesis objective:",
-                "rep_theory_title": "Theoretical Chapter Verification", "rep_chapter_analyzed": "Analyzed chapter:",
-                "rep_completion_lvl": "Guideline completion level:", "rep_crit_1": "Analysis and evaluation of existing solutions:",
-                "rep_crit_2": "Identification of research gap or problem:", "rep_crit_3": "Synthesis and critical comparison of methods:",
-                "rep_ai_eval_title": "Overall Content Evaluation (AI)", "rep_skipped_fast": "Analysis skipped (Fast Mode selected).",
-                "rep_img_title": "Graphics and Charts Consistency Analysis (AI)", "rep_img_total": "Total verified figures:",
-                "rep_img_bad": "Figures with incorrect textual description:", "rep_img_good": "Correct figures:",
-                "rep_raster_ident": "Identified raster graphics subject to analysis:", "rep_img_details": "Detailed list of discrepancies:",
-                "rep_qual_title": "Image Quality Assessment (DPI & Legibility)", "rep_qual_all_ok": "All images have adequate quality and legibility.",
-                "rep_qual_err_1": "Quality issues detected in", "rep_qual_err_2": "images:", "rep_format_lbl": "Format:",
-                "rep_fonts_title": "Font Consistency in Images", "rep_fonts_all_ok": "No font consistency issues detected in figures.",
-                "rep_fonts_err_1": "Font issues detected in", "rep_fonts_err_2": "elements:",
-                "rep_img_skip_title": "Image Quality and Fonts Assessment", "rep_img_skip_desc": "Analysis skipped by user request or document contains no graphics.",
-                "rep_stats_title": "Sentence Structure Statistical Analysis", "rep_stats_desc": "Grammatical and stylistic structure of the analyzed thesis:",
-                "rep_active_lbl": "Active voice sentences:", "rep_active_desc": "Recommended form of expression in academic texts, enhancing narrative dynamics.",
-                "rep_passive_lbl": "Passive voice sentences:", "rep_passive_desc": "Used when describing research procedures and state of knowledge.",
-                "rep_verbless_lbl": "Sentence equivalents:", "rep_verbless_desc": "Verbless constructions, acceptable mainly in headers and lists.",
-                "rep_stats_no_data": "No statistical data available (run analysis in Detailed Mode).",
-                "rep_footer_date": "Date:", "rep_success_saved": "Report saved successfully:\n{}", "rep_err_gen": "Error during report generation:\n{}"
-            }
-        }
-
+        """Saves the detailed content analysis report (content grade, image checks, sentence statistics) as a
+        designed PDF. The layout lives in ui/report_pdf.py."""
         report_data = None
         if self.current_pdf_path:
             for p in self.manager.data.get("documents", []):
@@ -895,322 +623,33 @@ class PDFReader(QMainWindow):
                     break
 
         lang = report_data.get("language", "pl") if report_data else "pl"
-        t = LANG_DICT.get(lang, LANG_DICT["pl"])
+        texts = report_pdf.STRINGS.get(lang, report_pdf.STRINGS["pl"])
 
         if not report_data:
-            MessageBox.warning(self, t.get("warning", "Ostrzeżenie"), t["rep_no_data_warn"])
+            MessageBox.warning(self, texts["warning"], texts["rep_no_data_warn"])
             return
 
-        default_name = f"{t['rep_file_prefix']}{os.path.basename(self.current_pdf_path)}"
-        save_path, _ = QFileDialog.getSaveFileName(self, t["rep_dialog_title"], default_name, "Pliki PDF (*.pdf)")
+        default_name = f"{texts['rep_file_prefix']}{os.path.basename(self.current_pdf_path)}"
+        save_path, _ = QFileDialog.getSaveFileName(self, texts["rep_dialog_title"], default_name, "Pliki PDF (*.pdf)")
 
         if not save_path:
             return
 
         try:
-            report_pdf = fitz.open()
-            page = report_pdf.new_page()
-
-            font_path = resource_path(os.path.join("ui", "assets", "Roboto-Regular.ttf"))
-            font_bold_path = resource_path(os.path.join("ui", "assets", "Roboto-Bold.ttf"))
-
-            use_roboto = os.path.exists(font_path) and os.path.exists(font_bold_path)
-            if use_roboto:
-                f_main, f_bold = "roboto", "roboto-bold"
-            else:
-                f_main, f_bold = "helv", "hebo"
-
-            def setup_page_fonts(p):
-                if use_roboto:
-                    p.insert_font(fontname="roboto", fontfile=font_path, encoding=0)
-                    p.insert_font(fontname="roboto-bold", fontfile=font_bold_path, encoding=0)
-
-            setup_page_fonts(page)
-
-            pos_y = 50
-            margin = 50
-
-            def check_new_page(y_coord, pdf_doc, current_page):
-                if y_coord > 750:
-                    new_p = pdf_doc.new_page()
-                    setup_page_fonts(new_p)
-                    return 50, new_p
-                return y_coord, current_page
-
-            def wrap_text(text, max_len=90):
-                words = text.split()
-                lines = []
-                current_line = ""
-                for word in words:
-                    if len(current_line) + len(word) + 1 <= max_len:
-                        current_line += (word + " ")
-                    else:
-                        lines.append(current_line.strip())
-                        current_line = word + " "
-                if current_line:
-                    lines.append(current_line.strip())
-                return lines
-
-            page.insert_text((margin, pos_y), t["rep_main_title"],
-                             fontsize=22, fontname=f_bold, color=(0.13, 0.58, 0.95))
-            pos_y += 45
-            page.insert_text((margin, pos_y), f"{t['rep_doc_label']} {os.path.basename(self.current_pdf_path)}",
-                             fontsize=12, fontname=f_main, color=(0.2, 0.2, 0.2))
-            pos_y += 40
-
-            content_grade = report_data.get("content_grade")
-            has_llm_data = content_grade is not None
-
-            if has_llm_data:
-                if isinstance(content_grade, dict):
-                    grade = content_grade.get("grade", 0)
-                    max_g = content_grade.get("max_grade", 100)
-                    off_topic = content_grade.get("off_topic_sections", 0)
-                    p_off = content_grade.get("p_off", 0)
-                    off_topic_headings = content_grade.get("off_topic_headings", [])
-                else:
-                    grade = content_grade
-                    max_g = 100
-                    off_topic = 0
-                    p_off = 0
-                    off_topic_headings = []
-
-                page.insert_text((margin, pos_y), t["rep_eval_title"],
-                                 fontsize=14, fontname=f_bold)
-                pos_y += 25
-                page.insert_text((margin, pos_y), f"{t['rep_score_lbl']} {grade} / {max_g} {t['panel_pts']}",
-                                 fontsize=12, fontname=f_main)
-                pos_y += 20
-                page.insert_text((margin, pos_y),
-                                 f"{t['rep_off_topic_lbl']} {off_topic} ({p_off}%)",
-                                 fontsize=11, fontname=f_main)
-                pos_y += 25
-
-                if off_topic > 0 and off_topic_headings:
-                    page.insert_text((margin, pos_y), t["rep_off_topic_ident"],
-                                     fontsize=11, fontname=f_bold, color=(0.86, 0.2, 0.27))
-                    pos_y += 18
-                    for heading in off_topic_headings:
-                        pos_y, page = check_new_page(pos_y, report_pdf, page)
-                        wrapped_heading = wrap_text(str(heading), 85)
-                        for idx, line in enumerate(wrapped_heading):
-                            pos_y, page = check_new_page(pos_y, report_pdf, page)
-                            prefix = "- " if idx == 0 else "  "
-                            page.insert_text((margin + 15, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
-                            pos_y += 14
-                    pos_y += 15
-                else:
-                    pos_y += 15
-
-                pos_y, page = check_new_page(pos_y, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_theory_title"],
-                                 fontsize=14, fontname=f_bold)
-                pos_y += 25
-
-                chapter_title = report_data.get("tytul", t["no_title"])
-                page.insert_text((margin, pos_y), f"{t['rep_chapter_analyzed']} {chapter_title}",
-                                 fontsize=12, fontname=f_main)
-                pos_y += 20
-
-                score = report_data.get("ocena", 0)
-                page.insert_text((margin, pos_y), f"{t['rep_completion_lvl']} {score}%",
-                                 fontsize=12, fontname=f_main)
-                pos_y += 30
-
-                criteria = [
-                    (t["rep_crit_1"], report_data.get("r1")),
-                    (t["rep_crit_2"], report_data.get("r2")),
-                    (t["rep_crit_3"], report_data.get("r3")),
-                ]
-
-                for label, met in criteria:
-                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                    status = t["yes_upper"] if met else t["no_upper"]
-                    color = (0.17, 0.62, 0.35) if met else (0.86, 0.2, 0.27)
-                    page.insert_text((margin + 20, pos_y), f"{label} {status}",
-                                     fontsize=11, fontname=f_bold if met else f_main, color=color)
-                    pos_y += 20
-            else:
-                page.insert_text((margin, pos_y), t["rep_ai_eval_title"],
-                                 fontsize=14, fontname=f_bold)
-                pos_y += 25
-                page.insert_text((margin, pos_y), t["rep_skipped_fast"],
-                                 fontsize=11, fontname=f_main, color=(0.5, 0.5, 0.5))
-                pos_y += 25
-
-            pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-            img_data = report_data.get("image_analysis", {})
-            has_images_checked = img_data.get("total", 0) > 0 if isinstance(img_data, dict) else False
-
-            if has_images_checked:
-                page.insert_text((margin, pos_y), t["rep_img_title"],
-                                 fontsize=14, fontname=f_bold)
-                pos_y += 25
-
-                page.insert_text((margin, pos_y), f"{t['rep_img_total']} {img_data.get('total', 0)}",
-                                 fontsize=11, fontname=f_main)
-                pos_y += 18
-
-                color_bad = (0.86, 0.2, 0.27) if img_data.get("bad_count", 0) > 0 else (0.2, 0.2, 0.2)
-                page.insert_text((margin, pos_y), f"{t['rep_img_bad']} {img_data.get('bad_count', 0)}",
-                                 fontsize=11, fontname=f_main, color=color_bad)
-                pos_y += 18
-
-                page.insert_text((margin, pos_y), f"{t['rep_img_good']} {img_data.get('good_count', 0)}",
-                                 fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
-                pos_y += 25
-
-                raster_nums = img_data.get("raster_numbers", img_data.get("image_raster", []))
-                if raster_nums:
-                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                    wrapped_header = wrap_text(t["rep_raster_ident"], 85)
-                    for line in wrapped_header:
-                        pos_y, page = check_new_page(pos_y, report_pdf, page)
-                        page.insert_text((margin, pos_y), line, fontsize=10, fontname=f_bold, color=(0.05, 0.27, 0.63))
-                        pos_y += 14
-
-                    for n in raster_nums:
-                        wrapped_item = wrap_text(f"- {t['panel_fig_prefix']} {n}", 85)
-                        for line in wrapped_item:
-                            pos_y, page = check_new_page(pos_y, report_pdf, page)
-                            page.insert_text((margin + 10, pos_y), line, fontsize=10, fontname=f_main, color=(0.1, 0.1, 0.1))
-                            pos_y += 14
-
-                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                    pos_y += 10
-
-                if img_data.get("details", []):
-                    page.insert_text((margin, pos_y), t["rep_img_details"], fontsize=12, fontname=f_bold)
-                    pos_y += 20
-                    for line_text in img_data.get("details", []):
-                        wrapped_lines = wrap_text(line_text, 90)
-                        for idx, chunk in enumerate(wrapped_lines):
-                            pos_y, page = check_new_page(pos_y, report_pdf, page)
-                            indent = margin + 15 if idx == 0 else margin + 25
-                            txt_col = (0, 0, 0) if idx == 0 else (0.4, 0.4, 0.4)
-                            page.insert_text((indent, pos_y), chunk, fontsize=10, fontname=f_main, color=txt_col)
-                            pos_y += 15
-                        pos_y += 4
-
-                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_qual_title"], fontsize=14, fontname=f_bold)
-                pos_y += 25
-
-                quality_errors = report_data.get("jakosc_obrazkow", [])
-                if not quality_errors:
-                    page.insert_text((margin, pos_y), t["rep_qual_all_ok"],
-                                     fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
-                    pos_y += 25
-                else:
-                    page.insert_text((margin, pos_y), f"{t['rep_qual_err_1']} {len(quality_errors)} {t['rep_qual_err_2']}",
-                                     fontsize=11, fontname=f_main, color=(0.86, 0.2, 0.27))
-                    pos_y += 20
-                    for err in quality_errors:
-                        pos_y, page = check_new_page(pos_y, report_pdf, page)
-                        rys = err.get("rysunek", t["unknown_fig"])
-                        fmt = err.get("format", t["no_format"])
-                        powody = err.get("powody_odrzucenia", [])
-
-                        page.insert_text((margin + 15, pos_y), f"{rys} ({t['rep_format_lbl']} {fmt}):", fontsize=11, fontname=f_bold)
-                        pos_y += 16
-                        for powod in powody:
-                            wrapped_powod = wrap_text(powod, 85)
-                            for idx, line in enumerate(wrapped_powod):
-                                pos_y, page = check_new_page(pos_y, report_pdf, page)
-                                prefix = "- " if idx == 0 else "  "
-                                page.insert_text((margin + 25, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
-                                pos_y += 14
-                        pos_y += 5
-
-                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_fonts_title"], fontsize=14, fontname=f_bold)
-                pos_y += 25
-
-                font_errors = report_data.get("czcionki_obrazkow", [])
-                if not font_errors:
-                    page.insert_text((margin, pos_y), t["rep_fonts_all_ok"],
-                                     fontsize=11, fontname=f_main, color=(0.17, 0.62, 0.35))
-                    pos_y += 25
-                else:
-                    page.insert_text((margin, pos_y), f"{t['rep_fonts_err_1']} {len(font_errors)} {t['rep_fonts_err_2']}",
-                                     fontsize=11, fontname=f_main, color=(0.86, 0.2, 0.27))
-                    pos_y += 20
-                    for err in font_errors:
-                        if isinstance(err, dict):
-                            pos_y, page = check_new_page(pos_y, report_pdf, page)
-                            rys = err.get("rysunek", t["unknown_fig"])
-                            errors = err.get("errors", err.get("powody_odrzucenia", [str(err)]))
-
-                            page.insert_text((margin + 15, pos_y), f"{rys}:", fontsize=11, fontname=f_bold)
-                            pos_y += 16
-                            for b in errors:
-                                wrapped_blad = wrap_text(str(b), 85)
-                                for idx, line in enumerate(wrapped_blad):
-                                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                                    prefix = "- " if idx == 0 else "  "
-                                    page.insert_text((margin + 25, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
-                                    pos_y += 14
-                            pos_y += 5
-                        else:
-                            wrapped_err = wrap_text(str(err), 85)
-                            for idx, line in enumerate(wrapped_err):
-                                pos_y, page = check_new_page(pos_y, report_pdf, page)
-                                prefix = "- " if idx == 0 else "  "
-                                page.insert_text((margin + 15, pos_y), f"{prefix}{line}", fontsize=10, fontname=f_main)
-                                pos_y += 14
-                            pos_y += 5
-            else:
-                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_img_skip_title"], fontsize=14, fontname=f_bold)
-                pos_y += 25
-                page.insert_text((margin, pos_y), t["rep_img_skip_desc"],
-                                 fontsize=11, fontname=f_main, color=(0.5, 0.5, 0.5))
-                pos_y += 25
-
-            stats_data = report_data.get("statystyki_zdan")
-
-            if stats_data:
-                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_stats_title"], fontsize=14, fontname=f_bold)
-                pos_y += 22
-                page.insert_text((margin + 15, pos_y), t["rep_stats_desc"], fontsize=10, fontname=f_main, color=(0.3, 0.3, 0.3))
-                pos_y += 18
-
-                struktura_zdan = [
-                    (f"{t['rep_active_lbl']} {stats_data.get('active_ratio', '0%')}", t["rep_active_desc"]),
-                    (f"{t['rep_passive_lbl']} {stats_data.get('passive_ratio', '0%')}", t["rep_passive_desc"]),
-                    (f"{t['rep_verbless_lbl']} {stats_data.get('verbless_ratio', '0%')}", t["rep_verbless_desc"]),
-                ]
-
-                for label, opis in struktura_zdan:
-                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                    page.insert_text((margin + 15, pos_y), label, fontsize=10, fontname=f_bold)
-                    pos_y += 14
-                    pos_y, page = check_new_page(pos_y, report_pdf, page)
-                    page.insert_text((margin + 25, pos_y), opis, fontsize=9, fontname=f_main, color=(0.4, 0.4, 0.4))
-                    pos_y += 16
-            else:
-                pos_y, page = check_new_page(pos_y + 15, report_pdf, page)
-                page.insert_text((margin, pos_y), t["rep_stats_title"], fontsize=14, fontname=f_bold)
-                pos_y += 22
-                page.insert_text((margin + 15, pos_y), t["rep_stats_no_data"], fontsize=10, fontname=f_main, color=(0.5, 0.5, 0.5))
-                pos_y += 20
-
-            # Footer at the bottom of the current page (new page only when there is no room).
-            if pos_y > 790:
-                page = report_pdf.new_page()
-                setup_page_fonts(page)
-            page.insert_text((margin, 820), f"{t['rep_footer_date']} {datetime.date.today()}",
-                             fontsize=9, fontname=f_main, color=(0.5, 0.5, 0.5))
-
-            report_pdf.save(save_path)
-            report_pdf.close()
-
-            MessageBox.information(self, t["success"], t["rep_success_saved"].format(save_path))
+            report_pdf.build_report_pdf(
+                report_data,
+                os.path.basename(self.current_pdf_path),
+                lang,
+                save_path,
+                font_regular=resource_path(os.path.join("ui", "assets", "Roboto-Regular.ttf")),
+                font_bold=resource_path(os.path.join("ui", "assets", "Roboto-Bold.ttf")),
+                logo_path=resource_path(os.path.join("ui", "assets", "logo.png")),
+            )
+            MessageBox.information(self, texts["success"], texts["rep_success_saved"].format(save_path))
 
         except Exception as e:
             logger.exception("Report generation failed")
-            MessageBox.critical(self, t["error"], t["rep_err_gen"].format(str(e)))
+            MessageBox.critical(self, texts["error"], texts["rep_err_gen"].format(str(e)))
 
     def delete_document(self, path):
         """Removes a document from the index and refreshes the start page."""
