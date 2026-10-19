@@ -17,6 +17,7 @@ from common.cancellation import check_cancelled
 import os
 from collections import Counter
 import logging
+from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,8 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
 
     blocks = get_context(raw_blocks)
     # extract_errors_to_json(blocks, "document.json")
+    # with open("document_before.json", "w", encoding="utf-8") as json_file:
+    #     json.dump(asdict(raw_blocks), json_file,  ensure_ascii=False, indent=4)
     chapter_nums = extract_chapter_numbers(blocks)
     logger.info("Extracted %d chapter numbers", len(chapter_nums))
 
@@ -77,7 +80,7 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     proper_names, bibliography_dict = get_proper_names(blocks)
     check_cancelled(cancel_token)
     bib_matches = check_bibliography(blocks, raw_blocks.metadata["producer"], bibliography_dict)
-    acronyms_with_definitions, proper_names = check_first_definition(blocks, proper_names, extracted_acronyms)
+    acronyms_with_definitions, proper_names, italic_matches = check_first_definition(blocks, proper_names, extracted_acronyms)
     acronym_matches, proper_names = check_if_was_defined(blocks, acronyms_with_definitions, proper_names)
     check_cancelled(cancel_token)
     decimal_matches = decimal_check(blocks, chapter_nums)
@@ -91,7 +94,7 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     language_style_matches, sentence_analisys = sentence_check(blocks, check_first_person=check_first_person, acronyms_with_definitions=acronyms_with_definitions, chapter_nums=chapter_nums)
     check_cancelled(cancel_token)
 
-    matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + bib_matches
+    matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + bib_matches + italic_matches
     before_image_filter = len(matches)
     matches = remove_errors_inside_images(matches, raw_blocks)
     logger.info("Image overlap filter removed %d matches", before_image_filter - len(matches))
@@ -101,6 +104,8 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     for cat, count in category_counts.most_common():
         logger.info("  Category '%s': %d", cat, count)
 
+    # with open("errors.json", "w", encoding="utf-8") as errors_file:
+    #     json.dump([asdict(m) for m in matches], errors_file,  ensure_ascii=False, indent=4)
     return matches, sentence_analisys
 
 #plik pomocniczy do uruchamiania analizy bez GUI
