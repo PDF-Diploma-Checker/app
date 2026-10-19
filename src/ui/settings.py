@@ -10,6 +10,7 @@ from analysis.modules.llm import config as app_config
 from . import icons, styles
 from .i18n import t
 from .message_box import MessageBox
+from .ai_setup_dialog import AiSetupDialog
 
 CONTROL_WIDTH = 150
 CONTROL_HEIGHT = 40
@@ -185,6 +186,12 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(
             self._row(t("settings.model_dir"), t("settings.model_dir_desc"), dir_layout, stacked=True)
         )
+        self.effective_dir_label = QLabel()
+        self.effective_dir_label.setWordWrap(True)
+        self.effective_dir_label.setStyleSheet(styles.HINT_STYLE)
+        self.effective_dir_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        main_layout.addSpacing(6)
+        main_layout.addWidget(self.effective_dir_label)
         main_layout.addSpacing(24)
 
         self.combo_device = DropdownCombo()
@@ -208,7 +215,19 @@ class SettingsDialog(QDialog):
             self._row(t("settings.default_language"), t("settings.default_language_desc"), self.combo_language)
         )
 
-        main_layout.addSpacing(28)
+        main_layout.addSpacing(24)
+        btn_setup = QPushButton("  " + t("settings.ai_setup"))
+        btn_setup.setIcon(icons.icon("settings", styles.TEXT_3, 16, 2.0))
+        btn_setup.setFixedHeight(CONTROL_HEIGHT)
+        btn_setup.setStyleSheet(styles.GRAY_BUTTON_STYLE + "QPushButton { padding: 0 14px; }")
+        btn_setup.setCursor(Qt.PointingHandCursor)
+        btn_setup.clicked.connect(self.open_ai_setup)
+        setup_row = QHBoxLayout()
+        setup_row.addWidget(btn_setup)
+        setup_row.addStretch(1)
+        main_layout.addLayout(setup_row)
+
+        main_layout.addSpacing(24)
         main_layout.addWidget(_separator())
         main_layout.addSpacing(20)
 
@@ -237,9 +256,15 @@ class SettingsDialog(QDialog):
         if dir_path:
             self.input_model_dir.setText(os.path.normpath(dir_path))
 
+    def open_ai_setup(self):
+        """System check + CPU/GPU + models folder; afterwards the fields show what was saved."""
+        AiSetupDialog(self, first_run=False).exec()
+        self.load_config()
+
     def load_config(self):
         data = app_config.load_config()
         self.input_model_dir.setText(data.get("model_dir", ""))
+        self.effective_dir_label.setText(t("settings.effective_model_dir", path=app_config.MODEL_DIR))
         idx = self.combo_device.findText(data.get("device", "cpu"))
         if idx >= 0:
             self.combo_device.setCurrentIndex(idx)

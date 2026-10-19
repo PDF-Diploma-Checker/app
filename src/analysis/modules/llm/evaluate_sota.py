@@ -2,9 +2,9 @@ import json
 import re
 import logging
 from typing import Dict, Any, List
-from llama_cpp import Llama
 
 from .config import MODEL_PATH, N_GPU_LAYERS
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,8 @@ def get_llm():
     if _llm_instance is None:
         logger.info("Loading SOTA evaluation LLM from %s", MODEL_PATH)
         try:
-            _llm_instance = Llama(
+            _llm_instance = make_llama(
+                purpose="Ocena SOTA",
                 model_path=str(MODEL_PATH),
                 n_ctx=4096,
                 n_gpu_layers=N_GPU_LAYERS,

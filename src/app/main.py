@@ -24,6 +24,7 @@ from ui.main_window import PDFReader
 
 SMOKE_MODULES = [
     "ui.main_window", "ui.settings", "ui.report_bug", "ui.log_window", "ui.analysis_dialog",
+    "ui.ai_setup_dialog", "common.gpu_check", "common.run_control", "common.resource_monitor",
     "app.entry", "app.pipeline", "app.llm_task",
     "analysis.modules.linguistics.run_linguistics",
     "analysis.modules.redaction.redaction_validator",

@@ -1,16 +1,18 @@
-from llama_cpp import Llama
 import json
 import logging
 from analysis.modules.llm import config
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
 
 class ConsistencyChecker:
-    def __init__(self, model_path=str(config.MODEL_PATH)):
+    def __init__(self, model_path=None):
+        model_path = model_path or str(config.MODEL_PATH)
         logger.info("Loading consistency-checker LLM from %s", model_path)
         try:
-            self.llm = Llama(
+            self.llm = make_llama(
+                purpose="Spójność rysunków",
                 model_path=model_path,
                 n_ctx=4096,
                 n_gpu_layers=config.N_GPU_LAYERS,

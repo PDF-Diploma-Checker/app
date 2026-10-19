@@ -4,7 +4,6 @@ import sys
 import os
 import logging
 
-from llama_cpp import Llama
 
 _src_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 for _p in (os.path.dirname(_src_dir), _src_dir):
@@ -16,6 +15,7 @@ from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.modules.llm.get_subtitles import get_subtitles
 
 from analysis.modules.llm.config import THESIS_PATH, MODEL_PATH, LANGUAGE, N_GPU_LAYERS
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,8 @@ def get_llm():
     if _LLM is None:
         logger.info("Loading summary LLM from %s", MODEL_PATH)
         try:
-            _LLM = Llama(
+            _LLM = make_llama(
+                purpose="Streszczenia",
                 model_path=str(MODEL_PATH),
                 n_ctx=N_CTX,
                 n_threads=N_THREADS,
