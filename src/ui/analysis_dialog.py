@@ -212,7 +212,7 @@ class PipelineWorker(QThread):
                     text = getattr(error, "content", getattr(error, "text", getattr(error, "matched_text", "[Brak tekstu]")))
                     comment = getattr(error, "message", getattr(error, "msg", getattr(error, "comments", "Znaleziono błąd.")))
 
-                if not isinstance(page_nr, int) or page_nr <= 0:
+                if not isinstance(page_nr, int) or page_nr < 0:     # pages are counted from 0 (the title page is 0)
                     page_nr = 1
 
                 x, y, w, h = 50.0, 50.0, 20.0, 20.0

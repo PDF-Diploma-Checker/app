@@ -225,9 +225,14 @@ class RedactionValidator:
                     error.bounding_box = (round(new_x1, 2), 5, round(new_x2, 2), 45)
 
     def remove_errors_from_title_page(self):
-        for error in self.errors[:]:
-            if error.page_number == 0:
-                self.errors.remove(error)
+        """Layout checks make no sense on the title page (page 0), so its errors are dropped. The exception is an
+        error about a figure/table caption: a caption on page 0 means the page holds a real figure and the problem
+        is real (a one-page document, or a title page without its own page number)."""
+        keep = ("missing_caption_source",)
+        self.errors = [
+            error for error in self.errors
+            if error.page_number != 0 or error.category in keep
+        ]
 
     def remove_errors_from_toc_tof_tot(self):
         if self.document_data.toc and self.document_data.toc.page_nums:
@@ -835,6 +840,13 @@ class RedactionValidator:
         else:
             comment = "Rysunek nie posiada poprawnego źródła lub odwołania do bibliografii w swoim podpisie."
 
+        # a caption that is both a text block and the caption of a figure is reported once (on the caption text)
+        reported = {
+            (error.page_number, (error.text or "").strip())
+            for error in self.errors
+            if error.category == "missing_caption_source"
+        }
+
         for visual in self.document_data_linguistics.floating_elements.visual_elements:
             if getattr(visual, "incorrect_caption", 0) == 1:
                 caption_dict = getattr(visual, "caption", {})
@@ -843,6 +855,8 @@ class RedactionValidator:
                     if isinstance(caption_dict, dict)
                     else ""
                 )
+                if (getattr(visual, "page_number", 1), caption_text.strip()) in reported:
+                    continue
 
                 self.errors.append(
                     Error(
