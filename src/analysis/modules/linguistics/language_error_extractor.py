@@ -75,6 +75,7 @@ def _init_language_tools():
             _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('ADJ_SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('FORMAT_DZIESIETNY')
+            _TOOL_PL.disabled_rules.add('OD_X_Y_OD_X_DO_Y')
             _TOOL_PL.disabled_rules.add('SPACJA_ZA_PRZECINKIEM_DZIESITNYM')
             _TOOL_PL.disabled_rules.add('ZDANIE_PODRZEDNE_Z_KTORY_LUB_JAKI')
             _TOOL_PL.disabled_categories.add('MISC')
