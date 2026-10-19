@@ -75,6 +75,7 @@ def _init_language_tools():
             _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('ADJ_SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('FORMAT_DZIESIETNY')
+            _TOOL_PL.disabled_rules.add('OD_X_Y_OD_X_DO_Y')
             _TOOL_PL.disabled_rules.add('SPACJA_ZA_PRZECINKIEM_DZIESITNYM')
             _TOOL_PL.disabled_rules.add('ZDANIE_PODRZEDNE_Z_KTORY_LUB_JAKI')
             _TOOL_PL.disabled_categories.add('MISC')
@@ -168,7 +169,7 @@ def language_tool_analisys(blocks):
                 new_matches.append(match)
 
             for m in new_matches:
-                start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, m.offset, m.error_length)
+                start_page, end_page, word_idxs, error_coordinate, has_index = get_match_info(block.block, m.offset, m.error_length)
                 message = m.message
                 if text_language == 'en':
                     if block.block.language == 'en':
@@ -180,6 +181,10 @@ def language_tool_analisys(blocks):
                         message = english_messages.get(m.category, m.message)
                     else:
                         message = m.message
+
+                if has_index:
+                    continue
+            
                 errors.append(Error_type(
                     content=contents[m.offset:m.offset + m.error_length],
                     category=m.category,

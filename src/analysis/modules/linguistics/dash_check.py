@@ -57,7 +57,7 @@ def dash_check(blocks):
                     if (pos_before >= 0 and text[pos_before].isalpha() and
                             pos_after < len(text) and text[pos_after].isalpha()):
                         continue
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
                 if block.block.language == 'en':
                     message = "Hyphen instead of en dash or spaces around the hyphen in a hyphenated name."
                 else:
@@ -79,7 +79,7 @@ def dash_check(blocks):
             # blad spojnosci jak raz sie uzwa tego i tego
             match = re.search(r'—', text)
             if match:
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, match.start(), 1)
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, match.start(), 1)
                 if block.block.language == 'en':
                     message = "Inconsistency: the text uses both en dashes and em dashes."
                 else:
@@ -102,7 +102,7 @@ def dash_check(blocks):
         for m in re.finditer(dash_no_space_regex, text):
             # Sprawdzamy czy to nie jest zakres dat (cyfra-cyfra), co jest dopuszczalne
             if not (re.match(r'\d', m.group(1) or "") and re.match(r'\d', m.group(2) or "")):
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
                 if block.block.language == 'en':
                     message = "Missing space around dash in interjection."
                 else:
@@ -127,7 +127,7 @@ def dash_check(blocks):
             for m in re.finditer(date_error_regex, text):
                 content = m.group()
                 if '-' in content or ' ' in content:
-                    start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(content))
+                    start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(content))
                     if block.block.language == 'en':
                         message = "English dates do not use spaces around en dashes (–)."
                     else:
@@ -148,7 +148,7 @@ def dash_check(blocks):
             # pl: półpauza lub dywiz bez spacji (1990–2000 lub 1990-2000).
             date_space_regex = r'(\d+\s+[–-]\s+\d+)'
             for m in re.finditer(date_space_regex, text):
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
                 if block.block.language == 'en':
                     message = "In Polish date/number ranges, no spaces are used around the dash."
                 else:

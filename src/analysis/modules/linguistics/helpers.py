@@ -120,6 +120,8 @@ def language(text):
 def get_match_info(block, offset, length):
     '''Adjust coordinates of text content to its position in pdf based on extraction structure.
     Returns coordinates to be later passed to highlight bboxes.'''
+
+    has_index = False
     end_offset = offset + length
     word_idxs = []
     start_page = None
@@ -149,6 +151,8 @@ def get_match_info(block, offset, length):
                         word_end = idx + len(word.text)
                         search_from = idx + len(word.text)
                     if word_start < local_end and word_end > local_start:
+                        if word.is_index:
+                            has_index = True
                         word_idxs.append(word.word_index)
                         lines[(word.page_number, word.line)].append(word)
                         if start_page is None:
@@ -159,6 +163,8 @@ def get_match_info(block, offset, length):
     else:
         for word in block.words:
             if word.start_char < end_offset and word.end_char > offset:
+                if word.is_index:
+                    has_index = True
                 word_idxs.append(word.word_index)
                 lines[(word.page_number, word.line)].append(word)
                 if start_page is None:
@@ -179,7 +185,7 @@ def get_match_info(block, offset, length):
     if not error_coordinate:
         error_coordinate = [{"page": -1, "coordinates": [0, 0, 0, 0]}]
 
-    return start_page, end_page, word_idxs, error_coordinate
+    return start_page, end_page, word_idxs, error_coordinate, has_index
 
 def extract_errors_to_json(matches, name):
     '''Helper function used for debugging, extracts structures to JSON file, and saves in in linguistics folder.'''
