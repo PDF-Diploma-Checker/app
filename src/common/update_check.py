@@ -1,7 +1,8 @@
 """Check whether a newer release is published. No Qt here, so it can be tested on its own.
 
 The app asks the GitHub API for the latest release of the repository that holds the downloads.
-Only a version number is read; nothing is downloaded or installed, the user gets a link to the download page.
+The answer carries the version and the list of the release's files; common.updater uses it to update in place.
+This module itself downloads and installs nothing.
 Any failure (no internet, rate limit, unexpected answer) simply means "no update known".
 """
 
@@ -40,7 +41,8 @@ def is_newer(candidate, current):
 
 
 def check_for_update(current=APP_VERSION):
-    """Return {"version": "0.3.0", "tag": "v0.3.0", "current": "0.2.0"} when a newer release exists, else None."""
+    """Return {"version", "tag", "current", "assets"} when a newer release exists, else None.
+    assets: [{"name", "size", "url", "digest"}] of the release files."""
     try:
         response = requests.get(
             API_URL,
@@ -50,7 +52,13 @@ def check_for_update(current=APP_VERSION):
         if response.status_code != 200:     # 404 = no release yet, 403 = rate limit
             logger.info("Update check: GitHub answered %s", response.status_code)
             return None
-        tag = str(response.json().get("tag_name", ""))
+        release = response.json()
+        tag = str(release.get("tag_name", ""))
+        assets = [
+            {"name": a.get("name"), "size": a.get("size", 0), "url": a.get("browser_download_url"),
+             "digest": a.get("digest") or ""}
+            for a in release.get("assets", []) if a.get("name") and a.get("browser_download_url")
+        ]
     except (requests.RequestException, ValueError, AttributeError) as e:
         logger.info("Update check skipped: %r", e)
         return None
@@ -61,4 +69,4 @@ def check_for_update(current=APP_VERSION):
         return None
     version = ".".join(str(part) for part in parsed)
     logger.info("Update check: version %s is available (this build %s)", version, current)
-    return {"version": version, "tag": tag, "current": current}
+    return {"version": version, "tag": tag, "current": current, "assets": assets}
