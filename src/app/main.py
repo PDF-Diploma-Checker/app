@@ -25,6 +25,7 @@ from ui.main_window import PDFReader
 SMOKE_MODULES = [
     "ui.main_window", "ui.settings", "ui.report_bug", "ui.log_window", "ui.analysis_dialog",
     "ui.ai_setup_dialog", "common.gpu_check", "common.run_control", "common.resource_monitor",
+    "ui.update_dialog", "common.updater",
     "app.entry", "app.pipeline", "app.llm_task",
     "analysis.modules.linguistics.run_linguistics",
     "analysis.modules.redaction.redaction_validator",
@@ -60,6 +61,25 @@ def smoke_test():
     return 1 if failures else 0
 
 
+def _finish_pending_update():
+    """The app was just restarted by the updater: read how the swap went and clean up the leftovers."""
+    try:
+        from common import updater
+        return updater.finish_pending_update()
+    except Exception:
+        logger.exception("Could not finish the pending update")
+        return None
+
+
+def _show_update_result(result):
+    from common.version import APP_VERSION
+    from ui.i18n import t
+    if result["status"] == "ok":
+        QMessageBox.information(None, t("updater.title"), t("updater.result_ok", version=APP_VERSION))
+    else:
+        QMessageBox.warning(None, t("updater.title"), t("updater.result_failed", log=result["log"]))
+
+
 def main():
     app = QApplication(sys.argv)
     styles.apply_global_style(app)
@@ -70,8 +90,11 @@ def main():
             "Nie wykryto Javy 17+. Analiza językowa (LanguageTool) nie będzie działać.\n"
             "Zainstaluj Javę i uruchom aplikację ponownie.",
         )
+    update_result = _finish_pending_update()
     window = PDFReader()
     window.show()
+    if update_result:
+        _show_update_result(update_result)
     sys.exit(app.exec())
 
 

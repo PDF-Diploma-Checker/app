@@ -58,7 +58,13 @@ class UpdateBanner(QFrame):
         )
         row.addWidget(self.message, 1)
 
-        self.download_btn = QPushButton()
+        self.update_btn = QPushButton()          # "Update now": in-app update (only when this copy can update itself)
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE.replace("padding: 11px 22px", "padding: 7px 18px"))
+        self.update_btn.clicked.connect(self._update_now)
+        row.addWidget(self.update_btn)
+
+        self.download_btn = QPushButton()        # opens the download page (fallback, or for a manual download)
         self.download_btn.setCursor(Qt.PointingHandCursor)
         self.download_btn.setStyleSheet(styles.BLUE_BUTTON_STYLE.replace("padding: 11px 22px", "padding: 7px 18px"))
         self.download_btn.clicked.connect(self._open_download_page)
@@ -86,6 +92,11 @@ class UpdateBanner(QFrame):
     # ------------------------------------------------------------------ check
     def start_check(self, check=None):
         """Look for a newer release in a background thread. `check` is replaceable for tests."""
+        staged = self._staged_update()
+        if staged is not None:                  # downloaded earlier, not installed yet: offer to finish it
+            from common.version import APP_VERSION
+            self._on_found({"version": staged.version, "current": APP_VERSION, "assets": [], "staged": True})
+            return
         if not _checks_enabled():
             logger.info("Update check is turned off in app_config.json")
             return
@@ -103,12 +114,46 @@ class UpdateBanner(QFrame):
         except Exception:
             logger.exception("Update check failed")
 
+    @staticmethod
+    def _staged_update():
+        try:
+            from common import updater
+            return updater.staged_update()
+        except Exception:
+            logger.exception("Could not look for a downloaded update")
+            return None
+
+    def _can_update_in_place(self):
+        """True when this copy can update itself and the release has files for it."""
+        if not self._info:
+            return False
+        if self._info.get("staged"):
+            return True
+        try:
+            from common import updater
+            ok, _ = updater.can_self_update()
+            return ok and any(str(a.get("name", "")).startswith(updater.APP_DIR_NAME + "-")
+                              for a in self._info.get("assets", []))
+        except Exception:
+            logger.exception("Could not check the in-place update")
+            return False
+
     def _on_found(self, info):
         self._info = info
         self.retranslate_ui()
         self.show()
 
     # ---------------------------------------------------------------- actions
+    def _update_now(self):
+        if not self._info:
+            return
+        if self._info.get("staged"):
+            from .update_dialog import install_staged
+            install_staged(self)
+            return
+        from .update_dialog import UpdateDialog
+        UpdateDialog(self._info, self).exec()
+
     def _open_download_page(self):
         from common.update_check import DOWNLOAD_PAGE_URL
         QDesktopServices.openUrl(QUrl(DOWNLOAD_PAGE_URL))
@@ -120,8 +165,18 @@ class UpdateBanner(QFrame):
 
     # ------------------------------------------------------------------- text
     def retranslate_ui(self, *_):
+        in_place = self._can_update_in_place()
         if self._info:
-            self.message.setText(t("update.message", new=self._info["version"], current=self._info["current"]))
+            key = "update.ready" if self._info.get("staged") else "update.message"
+            self.message.setText(t(key, new=self._info["version"], current=self._info["current"]))
+        self.update_btn.setText(t("update.install_now" if self._info and self._info.get("staged")
+                                  else "update.update_now"))
+        self.update_btn.setVisible(in_place)
+        self.download_btn.setVisible(not (self._info and self._info.get("staged")))
+        self.download_btn.setStyleSheet(
+            (styles.LINK_BUTTON_STYLE.replace("font-size: 15px", "font-size: 14px") if in_place
+             else styles.BLUE_BUTTON_STYLE.replace("padding: 11px 22px", "padding: 7px 18px"))
+        )
         self.download_btn.setText(t("update.download"))
         self.skip_btn.setText(t("update.skip"))
         self.close_btn.setToolTip(t("common.close"))
