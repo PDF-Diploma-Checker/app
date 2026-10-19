@@ -1,6 +1,8 @@
 import gc
 import traceback
 
+from common.cancellation import check_cancelled
+
 def cleanup_text_llm_instances():
     """
     Release text LLM instances to reduce RAM/VRAM usage between LLM stages
@@ -84,7 +86,7 @@ def build_image_summary(raw_image_report):
     }
 
 
-def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True):
+def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):
     """
     Run the LLM part of the analysis pipeline.
     Return format is intentionally identical to the old nested task_llm():
@@ -112,6 +114,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         plain_txt_purpose = get_plain_text(pdf_path)
         txt_for_llm = extractPDF_llm(pdf_path)
+        check_cancelled(cancel_token)
 
         if not plain_txt_purpose:
             raise ValueError("plain_txt_purpose is empty")
@@ -120,6 +123,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             raise ValueError("extractPDF_llm returned None")
 
         purpose = get_purpose(plain_txt_purpose, language)
+        check_cancelled(cancel_token)
 
         goal_result = check_goal_realization(
             text=plain_txt_purpose,
@@ -128,12 +132,14 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         )
 
         purpose_score = get_score_from_goal_result(goal_result)
+        check_cancelled(cancel_token)
         purpose_reason = str(goal_result.get("reason", "") or "")
 
         cleanup_text_llm_instances()
 
         subtitles = get_subtitles(txt_for_llm)
         summaries = get_summaries(subtitles, language)
+        check_cancelled(cancel_token)
 
         content_res = get_content_grade(purpose, summaries)
 
@@ -160,6 +166,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                 raw_image_report = []
 
             image_summary_data = build_image_summary(raw_image_report)
+            check_cancelled(cancel_token)
 
             cleanup_text_llm_instances()
 
@@ -176,6 +183,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                 quality_errors = []
 
             cleanup_text_llm_instances()
+            check_cancelled(cancel_token)
 
             try:
                 font_errors = get_font_consistency_report(
@@ -194,9 +202,11 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             quality_errors = []
             font_errors = []
 
+        check_cancelled(cancel_token)
         res_id, res_title, res_score, res_method, res_cites, r1, r2, r3 = (
             get_final_sota_report(mapped_doc, language)
         )
+        check_cancelled(cancel_token)
 
         score = get_overall_grade(
             purpose_score,

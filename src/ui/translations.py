@@ -105,6 +105,7 @@ PL = {
     "analysis": {
         "title": "Przeanalizuj dokument",
         "analyzing": "Analizowanie...",
+        "cancelling": "Anulowanie analizy...",
         "config_info": "Plik konfiguracyjny JSON",
         "config_last": "Ostatnio używany plik",
         "delete": "usuń",
@@ -305,6 +306,7 @@ EN = {
     "analysis": {
         "title": "Analyze document",
         "analyzing": "Analyzing...",
+        "cancelling": "Cancelling analysis...",
         "config_info": "JSON configuration file",
         "config_last": "Last used file",
         "delete": "delete",

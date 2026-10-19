@@ -15,6 +15,7 @@ from analysis.modules.llm.config import (
     load_config,
     save_config,
 )
+from common.cancellation import AnalysisCancelled, CancelToken
 
 from . import icons, styles
 from .i18n import t
@@ -132,24 +133,34 @@ class PipelineWorker(QThread):
         self.use_llm = use_llm
         self.language = language
         self.download_models_flag = download_models_flag
+        self.cancel_token = CancelToken()
+
+    def cancel(self):
+        """Ask the pipeline to stop; it does so at its next checkpoint."""
+        self.cancel_token.cancel()
+
+    def _report_progress(self, value, text):
+        self.cancel_token.check()
+        self.progress_update.emit(value, text)
 
     def run(self):
         try:
-            self.progress_update.emit(5, t("analysis.checking_language"))
+            self._report_progress(5, t("analysis.checking_language"))
             download_specific_language(self.language)
 
             if self.use_llm and self.download_models_flag:
-                download_ai_models_with_progress(self.progress_update.emit)
+                download_ai_models_with_progress(self._report_progress)
 
-            self.progress_update.emit(40, t("analysis.starting_engine"))
+            self._report_progress(40, t("analysis.starting_engine"))
             from app.entry import run_analysis_for_pdf
 
             final_report = run_analysis_for_pdf(
                 pdf_path=self.pdf_path,
                 config_path=self.config_path,
-                progress_callback=self.progress_update.emit,
+                progress_callback=self._report_progress,
                 use_llm=self.use_llm,
                 language=self.language,
+                cancel_token=self.cancel_token,
             )
 
             report_objects = getattr(final_report, "linguistics_errors", [])
@@ -217,8 +228,11 @@ class PipelineWorker(QThread):
                 "sota": sota_data if isinstance(sota_data, dict) else None,
                 "language": self.language,
             }
+            self.cancel_token.check()
             self.finished_success.emit(ui_data)
 
+        except AnalysisCancelled:
+            logger.info("Analysis cancelled by the user")
         except Exception as e:
             logger.exception("Analysis pipeline failed")
             self.finished_error.emit(str(e))
@@ -244,6 +258,7 @@ class AnalysisDialog(QDialog):
         self.models_available = are_ai_models_downloaded() if self.ai_available else False
         self.should_download_models = False
         self._gpu_info_ready = False
+        self._close_after_cancel = False
 
         self.setup_ui()
         self._restore_last_config()
@@ -630,12 +645,19 @@ class AnalysisDialog(QDialog):
         self.worker.finished_error.connect(self.on_analysis_error)
         self.worker.start()
 
+    def _is_analysis_running(self):
+        return hasattr(self, "worker") and self.worker.isRunning()
+
     def on_analysis_success(self, final_report):
+        if self.worker.cancel_token.is_cancelled():
+            return
         self.final_report = final_report
         self.accept()
 
     def on_analysis_error(self, message):
         """Tell the user what went wrong and return to the settings screen."""
+        if self.worker.cancel_token.is_cancelled():
+            return
         MessageBox.critical(
             self,
             t("analysis.error_title"),
@@ -643,11 +665,40 @@ class AnalysisDialog(QDialog):
         )
         self.reset_ui_state()
 
-    def cancel_analysis(self):
-        if hasattr(self, "worker") and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-        self.reset_ui_state()
+    def cancel_analysis(self, close_after=False):
+        """Stop the running analysis.
+
+        Python threads cannot be killed safely, so the worker is asked to stop and
+        the UI waits for it to reach the next checkpoint before going back.
+        """
+        self._close_after_cancel = self._close_after_cancel or close_after
+        if not self._is_analysis_running():
+            self._on_worker_cancelled()
+            return
+        if self.worker.cancel_token.is_cancelled():
+            return
+        self.worker.cancel()
+        self.worker.progress_update.disconnect(self.update_progress)
+        self.worker.finished.connect(self._on_worker_cancelled)
+        self.cancel_btn.setEnabled(False)
+        self.progress_label.setText(t("analysis.cancelling"))
+        if self.worker.isFinished():
+            # The thread ended before the connection was made.
+            self._on_worker_cancelled()
+
+    def _on_worker_cancelled(self):
+        self.cancel_btn.setEnabled(True)
+        if self._close_after_cancel:
+            self._close_after_cancel = False
+            super().reject()
+        else:
+            self.reset_ui_state()
+
+    def reject(self):
+        if self._is_analysis_running():
+            self.cancel_analysis(close_after=True)
+            return
+        super().reject()
 
     def reset_ui_state(self):
         self._resize_keep_center(self.CONFIG_SIZE)
