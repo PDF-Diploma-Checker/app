@@ -106,6 +106,6 @@ def run_debugger(pdf_path, debug_mode=False, debug_type="toc"):
             print(f"Znaleziono {len(found_errors)} błędów. Raport w: {output_report_path}")
 
 if __name__ == "__main__":
-    input_pdf = PROJECT_ROOT / "data" / "prace" / "PraceDyplomowe" / "TomaszCiborowski_inz.pdf"
+    input_pdf = PROJECT_ROOT / "data" / "prace" / "PraceDyplomowe" / "NataliaPlocha_inz.pdf"
     
     run_debugger(input_pdf, debug_mode=False, debug_type="toc")

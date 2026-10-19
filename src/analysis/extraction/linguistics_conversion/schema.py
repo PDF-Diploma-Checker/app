@@ -461,36 +461,37 @@ def is_widow_func(combined_words):
     """
     Detects typographical 'widows' within a paragraph. A widow is defined here as
     a very short final line of a paragraph (consisting of 1 or 2 isolated words).
-
-    Args:
-        combined_words (list[WordInfo]): A list of all words making up the paragraph.
-
-    Returns:
-        int: The number of words constituting the widow (1 or 2), or 0 if no widow is detected.
     """
     if not combined_words or getattr(combined_words[-1], "is_index", False):
         return 0
 
-    is_widow = 0
+    lines = []
+    current_line = []
+    last_line_id = None
 
-    if combined_words and len(combined_words) >= 10:
-        last_word = combined_words[-1]
-        second_to_last_word = combined_words[-2]
-        word_text = getattr(last_word, "text", str(last_word))
+    for word in combined_words:
+        line_id = (word.page_number, word.line)
+        if last_line_id is None or line_id == last_line_id:
+            current_line.append(word)
+        else:
+            lines.append(current_line)
+            current_line = [word]
+        last_line_id = line_id
 
-        if word_text.count(" ") <= 1:
-            last_y0 = last_word.bbox[1] if hasattr(last_word, "bbox") and last_word.bbox else 0
-            prev_y0 = second_to_last_word.bbox[1] if hasattr(second_to_last_word, "bbox") and second_to_last_word.bbox else 0
-            if abs(last_y0 - prev_y0) > 3.0:
-                is_widow = 1
-            elif len(combined_words) >= 3:
-                third_to_last_word = combined_words[-3]
-                third_y0 = third_to_last_word.bbox[1] if hasattr(third_to_last_word, "bbox") and third_to_last_word.bbox else 0
-                if abs(prev_y0 - third_y0) > 3.0:
-                    is_widow = 2
+    if current_line:
+        lines.append(current_line)
 
-    return is_widow
+    if len(lines) < 2:
+        return 0
 
+    last_line_words = lines[-1]
+
+    words_in_last_line = len(last_line_words)
+
+    if words_in_last_line in (1, 2):
+        return words_in_last_line
+
+    return 0
 
 def is_bekart_func(combined_words):
     """

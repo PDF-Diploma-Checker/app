@@ -2618,7 +2618,7 @@ class PDFMapper:
         Args:
             new_doc (FinalDocument): The structured document containing the visual elements to be verified.
         """
-        citation_pattern = re.compile(r"\[\s*\d+[\d\s,\-]*\]")
+        citation_pattern = re.compile(r"\[\s*\d+[\d\s,\-]*(\s*,\s*(?:s\.?|p\.?|pp\.?)\s*\d+(?:-\d+)?)*\s*\]", re.IGNORECASE)
 
         source_pattern = re.compile(
             r"\b(źródło|zródło|zrodlo|source|opracowanie własne|na podstawie)\b",
