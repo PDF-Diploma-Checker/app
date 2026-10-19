@@ -23,6 +23,7 @@ from analysis.modules.llm.get_subtitles import extract_subtitles_from_pdf
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_summary import summarize_subtitles
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, OUTPUT_DIR, LANGUAGE, N_GPU_LAYERS
+from analysis.modules.llm.config import resolve_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ def compute_similarity_for_summaries(purpose, summaries, embedding_model=EMBEDDI
 
     try:
         model = SentenceTransformer(
-            embedding_model,
+            resolve_embedding_model(embedding_model),   # the folder we downloaded, no cache symlinks needed
             trust_remote_code=True,
             device=device,
         )

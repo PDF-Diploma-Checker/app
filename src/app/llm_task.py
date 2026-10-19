@@ -1,7 +1,36 @@
 import gc
+import logging
 import traceback
 
+from common import run_control
 from common.cancellation import check_cancelled
+
+logger = logging.getLogger(__name__)
+
+# status lines of the LLM stages (the progress bar value is the second element); keyed by the thesis language
+STAGES = {
+    "pl": {
+        "purpose": (55, "AI: wyszukiwanie celu pracy..."),
+        "goal": (62, "AI: sprawdzanie realizacji celu..."),
+        "summaries": (70, "AI: streszczanie rozdziałów i ocena treści..."),
+        "images": (80, "AI: analiza rysunków i wykresów..."),
+        "sota": (90, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
+    },
+    "en": {
+        "purpose": (55, "AI: finding the thesis purpose..."),
+        "goal": (62, "AI: checking whether the goal was met..."),
+        "summaries": (70, "AI: summarising chapters and rating the content..."),
+        "images": (80, "AI: analysing figures and charts..."),
+        "sota": (90, "AI: rating the state-of-the-art chapter..."),
+    },
+}
+
+
+def _stage(language, name, cancel_token=None):
+    """Stop here if the user cancelled, otherwise announce the next stage."""
+    check_cancelled(cancel_token)
+    value, text = STAGES.get(language, STAGES["pl"])[name]
+    run_control.notify(text, value)
 
 def cleanup_text_llm_instances():
     """
@@ -25,6 +54,15 @@ def cleanup_text_llm_instances():
             if callable(close_fn):
                 close_fn()
             _goal_realization_mod._LLM = None
+
+        from analysis.modules.llm import evaluate_sota as _evaluate_sota_mod
+
+        llm_obj = getattr(_evaluate_sota_mod, "_llm_instance", None)
+        if llm_obj is not None:
+            close_fn = getattr(llm_obj, "close", None)
+            if callable(close_fn):
+                close_fn()
+            _evaluate_sota_mod._llm_instance = None
 
         model_cache = getattr(_get_purpose_mod, "_LLAMA_MODELS", None)
         if isinstance(model_cache, dict):
@@ -122,8 +160,11 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         if txt_for_llm is None:
             raise ValueError("extractPDF_llm returned None")
 
+        _stage(language, "purpose", cancel_token)
         purpose = get_purpose(plain_txt_purpose, language)
         check_cancelled(cancel_token)
+
+        _stage(language, "goal", cancel_token)
 
         goal_result = check_goal_realization(
             text=plain_txt_purpose,
@@ -137,6 +178,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         cleanup_text_llm_instances()
 
+        _stage(language, "summaries", cancel_token)
         subtitles = get_subtitles(txt_for_llm)
         summaries = get_summaries(subtitles, language)
         check_cancelled(cancel_token)
@@ -152,6 +194,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         cleanup_text_llm_instances()
 
         if check_images:
+            _stage(language, "images", cancel_token)
             from analysis.modules.llm.image_analysis.run_image import analyze_images
             from analysis.modules.llm.image_analysis.image_quality_checker import (
                 get_full_image_quality_json,
@@ -203,6 +246,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             font_errors = []
 
         check_cancelled(cancel_token)
+        _stage(language, "sota", cancel_token)
         res_id, res_title, res_score, res_method, res_cites, r1, r2, r3 = (
             get_final_sota_report(mapped_doc, language)
         )
@@ -245,5 +289,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         return result, score, "Analiza LLM zakończona pomyślnie."
 
     except Exception:
+        logger.exception("LLM analysis failed")
         traceback.print_exc()
         return None, None, "Błąd analizy SOTA/LLM."
+    finally:
+        cleanup_text_llm_instances()        # free RAM/VRAM also after an error or a cancelled analysis

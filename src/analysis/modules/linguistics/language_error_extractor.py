@@ -211,7 +211,3 @@ def typo_check(typo_text):
     if not typos:
         return True
     return False
-
-
-
-

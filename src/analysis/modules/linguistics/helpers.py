@@ -10,7 +10,7 @@ import functools
 import spacy
 from spacy.language import Language as Spacy_language
 from spellchecker import SpellChecker
-from common.path import resource_path
+from common.path import LANGUAGETOOL_DIR, resource_path
 import sys
 import re
 from pathlib import Path
@@ -19,8 +19,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 os.environ["TQDM_DISABLE"] = "True"
-app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
-LT_DATA_DIR = os.path.join(app_data, "DiplomaChecker", "LanguageTool")
+LT_DATA_DIR = str(LANGUAGETOOL_DIR)
 os.makedirs(LT_DATA_DIR, exist_ok=True)
 os.environ["LTP_PATH"] = LT_DATA_DIR
 
