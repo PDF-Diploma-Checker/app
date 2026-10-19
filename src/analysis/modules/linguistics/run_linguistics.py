@@ -13,6 +13,7 @@ from analysis.modules.linguistics.bibliography_check import check_bibliography
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 import json
 from common.path import resource_path
+from common.cancellation import check_cancelled
 import os
 from collections import Counter
 import logging
@@ -45,7 +46,7 @@ def remove_errors_inside_images(matches, raw_blocks):
             filtered.append(match)
     return filtered
 
-def run_linguistics(raw_blocks, config_path=None):
+def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     '''Starting point of linguistic analysis. This function runs all of the linguistics functions,
       returns matches list and senetence analysis statistics.'''
     
@@ -74,17 +75,21 @@ def run_linguistics(raw_blocks, config_path=None):
 
     extracted_acronyms = raw_blocks.reference_sections.acronyms
     proper_names, bibliography_dict = get_proper_names(blocks)
+    check_cancelled(cancel_token)
     bib_matches = check_bibliography(blocks, raw_blocks.metadata["producer"], bibliography_dict)
     acronyms_with_definitions, proper_names = check_first_definition(blocks, proper_names, extracted_acronyms)
     acronym_matches, proper_names = check_if_was_defined(blocks, acronyms_with_definitions, proper_names)
+    check_cancelled(cancel_token)
     decimal_matches = decimal_check(blocks, chapter_nums)
     dash_matches = dash_check(blocks)
     language_matches = language_tool_analisys(blocks)
+    check_cancelled(cancel_token)
     list_matches = check_coherence_in_list(blocks, proper_names, acronyms_with_definitions)
 
     main_font = raw_blocks.metadata.get("main_font")
     checked_exeptions = check_exeptions(language_matches, blocks, proper_names, main_font)
     language_style_matches, sentence_analisys = sentence_check(blocks, check_first_person=check_first_person, acronyms_with_definitions=acronyms_with_definitions, chapter_nums=chapter_nums)
+    check_cancelled(cancel_token)
 
     matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + bib_matches
     before_image_filter = len(matches)

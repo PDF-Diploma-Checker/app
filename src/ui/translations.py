@@ -104,6 +104,7 @@ PL = {
     "analysis": {
         "title": "Przeanalizuj dokument",
         "analyzing": "Analizowanie...",
+        "cancelling": "Anulowanie analizy...",
         "config_info": "Plik konfiguracyjny JSON",
         "delete": "usuń",
         "drag_config": "Przeciągnij tu plik konfiguracyjny",
@@ -297,6 +298,7 @@ EN = {
     "analysis": {
         "title": "Analyze document",
         "analyzing": "Analyzing...",
+        "cancelling": "Cancelling analysis...",
         "config_info": "JSON configuration file",
         "delete": "delete",
         "drag_config": "Drag a configuration file here",
