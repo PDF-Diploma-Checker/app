@@ -1,15 +1,17 @@
-from llama_cpp import Llama
 from llama_cpp.llama_chat_format import Llava15ChatHandler
 import base64
 import time
 import logging
 from analysis.modules.llm import config
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
 
 class LlavaEngine:
-    def __init__(self, model_path=str(config.LLAVA_MODEL_PATH), mmproj_path=str(config.LLAVA_MMPROJ_PATH)):
+    def __init__(self, model_path=None, mmproj_path=None):
+        model_path = model_path or str(config.LLAVA_MODEL_PATH)
+        mmproj_path = mmproj_path or str(config.LLAVA_MMPROJ_PATH)
         logger.debug("[LLaVA][INIT] start")
         logger.debug("[LLaVA][INIT] model_path=%s", model_path)
         logger.debug("[LLaVA][INIT] mmproj_path=%s", mmproj_path)
@@ -18,7 +20,8 @@ class LlavaEngine:
 
         try:
             self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-            self.llm = Llama(
+            self.llm = make_llama(
+                purpose="Analiza obrazów (LLaVA)",
                 model_path=model_path,
                 chat_handler=self.chat_handler,
                 n_ctx=4096,

@@ -20,6 +20,7 @@ from analysis.modules.llm.config import THESIS_PATH, LANGUAGE, MODEL_PATH, N_GPU
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 from analysis.modules.llm.get_purpose import get_purpose
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +176,8 @@ def get_llm():
     if _LLM is None:
         logger.info("Loading goal-realization LLM from %s", MODEL_PATH)
         try:
-            _LLM = Llama(
+            _LLM = make_llama(
+                purpose="Realizacja celu",
                 model_path=str(MODEL_PATH),
                 n_ctx=N_CTX,
                 n_threads=N_THREADS,
