@@ -245,6 +245,7 @@ class PDFMapper:
         self.paragraph_buffer = []
         self.list_buffer = []
         self.curr_line = 0
+        self._last_extracted_y0 = None
         self.last_y1 = None
         self.in_bibliography_section = False
         self._line_is_monospace = False
@@ -932,6 +933,10 @@ class PDFMapper:
         is_new_paragraph = False
         debug_reason = ""
 
+
+        if prev_geom and abs(current_y0 - prev_geom.y0) < 3.0:
+            return False, ""
+        
         finished = True
         if full_text.strip():
             stripped = full_text.strip()
@@ -1123,7 +1128,11 @@ class PDFMapper:
 
             prev_span_x1 = span.bbox[2]
 
-        self.curr_line += 1
+        line_y0 = line.spans[0].bbox[1] if line.spans else line.bbox[1]
+        if getattr(self, "_last_extracted_y0", None) is not None:
+            if abs(line_y0 - self._last_extracted_y0) > 3.0:
+                self.curr_line += 1
+        self._last_extracted_y0 = line_y0
         if not full_text.endswith(" ") and not full_text.rstrip().endswith("-"):
             full_text += " "
 
@@ -1150,6 +1159,8 @@ class PDFMapper:
         self.main_font_size = old_doc.get_most_common_font_size()
         self.page_heights = {page.number: page.height for page in old_doc.pages}
 
+        self.avg_line_spacing = old_doc.metadata.get("avarge_line_spacing", 18.0)
+
         new_doc = FinalDocument(
             metadata=old_doc.metadata,
             floating_elements=FloatingElements(),
@@ -1167,10 +1178,9 @@ class PDFMapper:
         self.logical_blocks.sort(key=lambda b: getattr(b, "_seq", 0))
 
         self._merge_adjacent_headings()
-        # self._assign_captions_to_visuals(old_doc.pages, new_doc)
         self._extract_acronyms_to_schema(new_doc)
         self._tag_special_lists(old_doc)
-        self._tag_visual_descriptions()
+        self._tag_visual_descriptions(new_doc)
         self._pair_descriptions_with_visuals(new_doc)
         self._verify_bibliography_references()
         self._verify_caption_sources(new_doc)
@@ -1863,7 +1873,7 @@ class PDFMapper:
                 type="table",
                 page_number=page.number,
                 bbox=list(table.bbox),
-                caption="",
+                caption={"text": table.description} if getattr(table, "description", "") else {},
                 table_data=table.data,
                 format={"num_rows": table.row_count, "num_columns": table.col_count},
             )
@@ -1875,7 +1885,7 @@ class PDFMapper:
                 type="image",
                 page_number=page.number,
                 bbox=list(img.bbox),
-                caption="",
+                caption={"text": img.description} if getattr(img, "description", "") else {},
             )
             new_doc.floating_elements.visual_elements.append(ve)
 
@@ -1983,144 +1993,46 @@ class PDFMapper:
             if matched_tag:
                 block.type = matched_tag
 
-    def _tag_visual_descriptions(self):
+    def _tag_visual_descriptions(self, new_doc):
         """
-        Post-processing routine that identifies text blocks acting as captions for tables or images.
-        It dynamically merges multi-line captions, filters out standard in-text references using
-        linguistic keywords, and verifies candidates by analyzing the vertical spatial gaps
-        above and below the text block.
+        Change block types to image_description and table_description. 
+        Protect from connecting description to lists below.
         """
-        img_pattern = self.IMG_PATTERN
-        tab_pattern = self.TAB_PATTERN
+        known_captions = set()
+        for v in new_doc.floating_elements.visual_elements:
+            caption_dict = getattr(v, "caption", {})
+            if caption_dict and isinstance(caption_dict, dict):
+                text = caption_dict.get("text", "").strip()
+                if text:
+                    known_captions.add(text)
 
-        reference_verbs = re.compile(
-            r"\b(przedstawia|pokazuje|obrazuje|zawiera|zilustrowano|prezentuje|widać|zestawiono)\b",
-            re.IGNORECASE,
-        )
+        if not known_captions:
+            return
 
         list_marker_pattern = re.compile(
             r"^(?:[-–—•●○■]|\d{1,3}[\.)]|[a-z]\))\s*", re.IGNORECASE
         )
 
-        i = 0
-        while i < len(self.logical_blocks):
-            block = self.logical_blocks[i]
+        for block in self.logical_blocks:
+            if getattr(block, "type", None) in ["paragraph", "heading"]:
+                content = getattr(block, "content", "").strip()
+                if not content:
+                    continue
 
-            if getattr(block, "type", None) not in ["paragraph", "heading"]:
-                i += 1
-                continue
-
-            content = getattr(block, "content", "").strip()
-            words = getattr(block, "words", [])
-
-            if not content or not words:
-                i += 1
-                continue
-
-            if reference_verbs.search(content):
-                i += 1
-                continue
-
-            is_table_desc = bool(tab_pattern.match(content))
-            is_img_desc = bool(img_pattern.match(content))
-
-            if not (is_table_desc or is_img_desc):
-                i += 1
-                continue
-
-            while i + 1 < len(self.logical_blocks):
-                next_b = self.logical_blocks[i + 1]
-                next_w = getattr(next_b, "words", [])
-
-                if getattr(next_b, "type", None) != "paragraph" or not next_w:
-                    break
-
-                if next_w[0].page_number != words[-1].page_number:
-                    break
-
-                curr_y1 = max(w.bbox[3] for w in block.words)
-                next_y0 = min(w.bbox[1] for w in next_w)
-                vertical_gap = next_y0 - curr_y1
-
-                if vertical_gap > 18 or vertical_gap < -10:
-                    break
-
-                if block.content.strip().endswith("."):
-                    break
-
-                first_raw_word = next_w[0].text.strip()
-                first_few_words = " ".join(w.text for w in next_w[:3]).strip()
-                next_content = getattr(next_b, "content", "").strip()
+                first_few_words = " ".join(w.text for w in getattr(block, "words", [])[:3]).strip()
                 if (
-                    list_marker_pattern.match(first_raw_word)
+                    list_marker_pattern.match(content)
                     or list_marker_pattern.match(first_few_words)
-                    or list_marker_pattern.match(next_content)
                     or self._classify_block_content(first_few_words)[0] == "list"
-                    or self._classify_block_content(next_content)[0] == "list"
+                    or self._classify_block_content(content)[0] == "list"
                 ):
-                    break
+                    continue
 
-                curr_size = words[0].size if words else None
-                next_size = next_w[0].size if next_w else None
-                if curr_size and next_size and abs(curr_size - next_size) > 0.4:
-                    break
-                if words and words[0].font and next_w[0].font and words[0].font != next_w[0].font:
-                    break
-                curr_x0 = words[0].bbox[0] if words else 0
-                next_x0 = next_w[0].bbox[0] if next_w else 0
-                if curr_x0 - next_x0 > 30:
-                    break
-
-                unique_lines_next = len(set(w.line for w in next_w))
-                if unique_lines_next > 2 or len(getattr(next_b, "content", "")) > 100:
-                    break
-
-                unique_lines_curr = len(set(w.line for w in block.words))
-                if (unique_lines_curr + unique_lines_next) > 4:
-                    break
-
-                separator = " "
-                if block.content.rstrip().endswith("-"):
-                    separator = ""
-                    block.content = block.content.rstrip()[:-1]
-
-                old_len = len(block.content) + len(separator)
-                block.content += separator + getattr(next_b, "content", "").strip()
-
-                old_words_len = len(block.words)
-                for w in next_w:
-                    w.start_char += old_len
-                    w.end_char += old_len
-                    w.word_index += old_words_len
-                    block.words.append(w)
-
-                self.logical_blocks.pop(i + 1)
-
-            page_num = block.words[0].page_number
-            curr_y0 = min(w.bbox[1] for w in block.words)
-            curr_y1 = max(w.bbox[3] for w in block.words)
-
-            gap_above = float("inf")
-            gap_below = float("inf")
-
-            if i > 0:
-                prev_w = getattr(self.logical_blocks[i - 1], "words", [])
-                if prev_w and prev_w[0].page_number == page_num:
-                    prev_y1 = max(w.bbox[3] for w in prev_w)
-                    gap_above = curr_y0 - prev_y1
-
-            if i + 1 < len(self.logical_blocks):
-                next_w = getattr(self.logical_blocks[i + 1], "words", [])
-                if next_w and next_w[0].page_number == page_num:
-                    next_y0 = min(w.bbox[1] for w in next_w)
-                    gap_below = next_y0 - curr_y1
-
-            if gap_above < 35 and gap_below < 35:
-                i += 1
-                continue
-
-            block.type = "table_description" if is_table_desc else "image_description"
-            i += 1
+                if content in known_captions:
+                    if content.lower().startswith(("tabela", "tab.", "table", "tablica", "tab")):
+                        block.type = "table_description"
+                    else:
+                        block.type = "image_description"
 
     def _pair_descriptions_with_visuals(self, new_doc):
         """
@@ -2706,7 +2618,7 @@ class PDFMapper:
         Args:
             new_doc (FinalDocument): The structured document containing the visual elements to be verified.
         """
-        citation_pattern = re.compile(r"\[\s*\d+[\d\s,\-]*\]")
+        citation_pattern = re.compile(r"\[\s*\d+[\d\s,\-]*(\s*,\s*(?:s\.?|p\.?|pp\.?)\s*\d+(?:-\d+)?)*\s*\]", re.IGNORECASE)
 
         source_pattern = re.compile(
             r"\b(źródło|zródło|zrodlo|source|opracowanie własne|na podstawie)\b",

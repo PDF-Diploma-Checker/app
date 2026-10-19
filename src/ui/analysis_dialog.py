@@ -15,6 +15,7 @@ from analysis.modules.llm.config import (
     load_config,
     save_config,
 )
+from common.cancellation import AnalysisCancelled, CancelToken
 
 from common import eta, run_control
 from common.resource_monitor import ResourceMonitor, format_stats
