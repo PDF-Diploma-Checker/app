@@ -35,17 +35,81 @@ EQUIVALENT_DATE_FORMATS = [
 ]
 
 
-def check_item_words(matches, item, block, category, message, content):
+def locate_words(item, fragment, last=False):
+    """
+    Returns the words of the bibliography item that overlap the given text fragment.
+    Word positions are found sequentially in the item text (same approach as get_match_info),
+    because start_char is not always reliable for list items.
+    """
+    words = item.item.words
+    text = item.item.text or ''
+    lower = text.lower()
+    frag = fragment.lower().strip()
+    if not frag:
+        return []
+    start = lower.rfind(frag) if last else lower.find(frag)
+    if start < 0:
+        return []
+    end = start + len(frag)
+    selected = []
+    search_from = 0
+    for word in words:
+        idx = lower.find(word.text.lower(), search_from)
+        if idx == -1:
+            word_start, word_end = word.start_char, word.end_char
+        else:
+            word_start, word_end = idx, idx + len(word.text)
+            search_from = word_end
+        if word_start < end and word_end > start:
+            selected.append(word)
+    return selected
+
+
+def check_item_words(matches, item, block, category, message, content, fragment=None, last=False, on_marker=False):
     """
     Adds a match error with coordinates for a specific bibliography item.
+    When `fragment` is given, only the words of that fragment are highlighted (e.g. the date
+    or the authors), so several errors in one entry do not overlap.
+    When `on_marker=True`, only the list marker word (e.g. [17]) is highlighted.
+    Otherwise, highlights the entry text excluding the list marker.
     """
     if not item.item.words:
         return matches
-    words = item.item.words
+    if fragment:
+        words = locate_words(item, fragment, last)
+        if words:
+            content = fragment
+        else:
+            words = item.item.words[1:] if len(item.item.words) > 1 else item.item.words
+    elif on_marker:
+        words = [item.item.words[0]]
+        content = item.item.words[0].text
+    else:
+        words = item.item.words[1:] if len(item.item.words) > 1 else item.item.words
+
+    if not words:
+        words = item.item.words
     word_idxs = [w.word_index for w in words]
     page_start = words[0].page_number
     page_end = words[-1].page_number
-    error_coordinate = [{"page": words[0].page_number, "coordinates": [min(w.bbox[0] for w in words), min(w.bbox[1] for w in words), max(w.bbox[2] for w in words), max(w.bbox[3] for w in words)]}]
+
+    if fragment or on_marker:
+        lines = {}
+        for w in words:
+            lines.setdefault((w.page_number, w.line), []).append(w)
+        error_coordinate = [
+            {"page": page, "coordinates": [min(w.bbox[0] for w in ws), min(w.bbox[1] for w in ws),
+                                           max(w.bbox[2] for w in ws), max(w.bbox[3] for w in ws)]}
+            for (page, _), ws in sorted(lines.items())]
+    else:
+        pages = {}
+        for w in words:
+            pages.setdefault(w.page_number, []).append(w)
+        error_coordinate = [
+            {"page": page, "coordinates": [min(w.bbox[0] for w in ws), min(w.bbox[1] for w in ws),
+                                           max(w.bbox[2] for w in ws), max(w.bbox[3] for w in ws)]}
+            for page, ws in sorted(pages.items())]
+
     matches.append(add_match(content, block.block_id, page_start, page_end, word_idxs, error_coordinate, category, message))
     return matches
 
@@ -161,10 +225,29 @@ def dominant(values):
     return top_value
 
 
+def entry_group(item):
+    """Entry kind used for coherence grouping. bibtex_type is not filled by the fast parser,
+    so web pages (URL without DOI / persistent id) are separated from publications - they
+    conventionally use a different date notation (full date vs. year)."""
+    if item.bibtex_type:
+        return item.bibtex_type
+    return 'online' if is_online(item) and not has_persistent_id(item) else 'publication'
+
+
+def publication_date(item):
+    """First date of the entry that is not its access date."""
+    access = get_text(item.access_date)
+    for date_val in item.date or []:
+        if get_format(date_val) and get_text(date_val) != access:
+            return date_val
+    return None
+
+
 def group_key(item, grouped_types):
     """Entries are compared within their type only when the type has enough representatives;
     otherwise they are compared against the entire bibliography."""
-    return item.bibtex_type if item.bibtex_type in grouped_types else '*'
+    group = entry_group(item)
+    return group if group in grouped_types else '*'
 
 
 def reliable(item):
@@ -224,8 +307,10 @@ def check_final_dots(matches, Bib_context, bib_blocks):
             if ending == 'dot':
                 continue
             item_block = bib_blocks.get(item.item.item_id)
+            last_word = item.item.words[-1].text if item.item.words else None
             matches = check_item_words(matches, item, item_block, "MISSING_FINAL_DOT",
-                                       messages["MISSING_FINAL_DOT"], item.content.strip())
+                                       messages["MISSING_FINAL_DOT"], item.content.strip(),
+                                       fragment=last_word, last=True)
         return matches
 
     missing = total - with_dot
@@ -284,12 +369,20 @@ def check_item(matches, item, block):
     text = item.content.strip()
 
     is_web_page = is_online(item) and not has_persistent_id(item)
-    if not (item.date and get_text(item.date[0])):
-        if not is_web_page:
-            matches = check_item_words(matches, item, block, "MISSING_DATE", messages["MISSING_DATE"], text)
-    if is_online(item) and not get_text(item.access_date) and not has_persistent_id(item):
+    missing_date = not (item.date and get_text(item.date[0])) and not is_web_page
+    missing_access = is_online(item) and not get_text(item.access_date) and not has_persistent_id(item)
+
+    if missing_date and missing_access:
+        matches = check_item_words(matches, item, block, "MISSING_DATE",
+                                   messages["MISSING_DATE"], text, on_marker=False)
         matches = check_item_words(matches, item, block, "MISSING_ACCESS_DATE_OR_DOI",
-                                   messages["MISSING_ACCESS_DATE_OR_DOI"], text)
+                                   messages["MISSING_ACCESS_DATE_OR_DOI"], text, on_marker=True)
+    elif missing_date:
+        matches = check_item_words(matches, item, block, "MISSING_DATE",
+                                   messages["MISSING_DATE"], text, on_marker=False)
+    elif missing_access:
+        matches = check_item_words(matches, item, block, "MISSING_ACCESS_DATE_OR_DOI",
+                                   messages["MISSING_ACCESS_DATE_OR_DOI"], text, on_marker=False)
     return matches
 
 
@@ -301,7 +394,7 @@ def check_coherence_iso(matches, Bib_context, bib_blocks):
     reliable = [item for item in Bib_context.items
                 if bib_blocks.get(item.item.item_id) and comparable(item)]
 
-    type_counts = Counter(item.bibtex_type for item in reliable if item.bibtex_type)
+    type_counts = Counter(entry_group(item) for item in reliable)
     grouped_types = {name for name, count in type_counts.items() if count >= MIN_TYPE_GROUP}
 
     separators, author_formats = {}, {}
@@ -320,11 +413,9 @@ def check_coherence_iso(matches, Bib_context, bib_blocks):
 
         if item.authors and get_format(item.authors) not in (None, 'different', 'organization'):
             author_formats.setdefault(key, []).append(get_format(item.authors))
-        for date_val in item.date or []:
-            fmt = get_format(date_val)
-            if fmt:
-                date_formats.setdefault(key, []).append(fmt)
-                break
+        date_val = publication_date(item)
+        if date_val:
+            date_formats.setdefault(key, []).append(get_format(date_val))
 
     dominant_author_fmt = {key: value for key, value in ((k, dominant(v)) for k, v in author_formats.items()) if value}
     dominant_date_fmt = {key: value for key, value in ((k, dominant(v)) for k, v in date_formats.items()) if value}
@@ -342,15 +433,16 @@ def check_coherence_iso(matches, Bib_context, bib_blocks):
             if not equivalent and author_fmt != expected:
                 matches = check_item_words(matches, item, block, "AUTHOR_FORMAT_COHERENCE",
                                            messages["AUTHOR_FORMAT_COHERENCE"] + detail(block, expected, author_fmt),
-                                           item.content)
+                                           item.content, fragment=get_text(item.authors))
 
         expected = dominant_date_fmt.get(key)
-        if item.date and expected:
-            found = get_format(item.date[0])
+        date_val = publication_date(item)
+        if date_val and expected:
+            found = get_format(date_val)
             if found and not date_formats_match(found, expected):
                 matches = check_item_words(matches, item, block, "DATE_FORMAT_COHERENCE",
                                            messages["DATE_FORMAT_COHERENCE"] + detail(block, expected, found),
-                                           item.content)
+                                           item.content, fragment=get_text(date_val))
 
     matches = check_final_dots(matches, Bib_context, bib_blocks)
     logger.info("ISO coherence check complete: %d matches found", len(matches))

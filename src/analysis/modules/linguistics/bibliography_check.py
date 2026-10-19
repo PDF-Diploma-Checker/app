@@ -22,7 +22,7 @@ DOI_PATTERNS = {
 }
 
 ACCESS_KEYWORD = re.compile(
-    r'(?<!\w)(?:accessed|access(?=[\s:\]\)]*:)|retrieved|cited|data\s+dostępu|dost[eę]pu?)\b[\s:\]\)]*(?:on\s+)?',
+    r'(?<!\w)(?:accessed|access(?=[\s:\]\)]*:)|retrieved|cited|(?:data\s+)?dost[eę]pu?)\b[\s:\]\)]*(?:on\s+)?',
     re.IGNORECASE)
 ACCESS_DATE_WINDOW = 40
 
@@ -97,8 +97,8 @@ URL_PATTERN = re.compile(r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+')
 UPPER_CASE = r'[A-ZĄĆĘŁŃÓŚŹŻÀ-ÖØ-öø-ÿĀ-ž]'
 LOWER_CASE = r'[a-ząćęłńóśźżà-öø-ÿā-ž]'
 SPECIAL_CHARS = r"[-–']"
-SURNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+(?:{SPECIAL_CHARS}(?:{UPPER_CASE}|{LOWER_CASE})+)*'
-FULLNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+'
+SURNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+(?:(?:{SPECIAL_CHARS}\s*|{UPPER_CASE}){LOWER_CASE}*)*'
+FULLNAME_PATTERN = SURNAME_PATTERN
 SHORT_NAME_PATTERN = rf'(?<!\w){UPPER_CASE}\.?(?!\w)'
 SEPARATOR_PATTERNS = r'(?:\s*(?:,|[Aa]nd\b|[Ii]\b|&)\s*)+'
 END_AUTHOR_PATTERNS = r'(?i)\s*(?:et al\.|i inni|i in\.?)\s*'
@@ -177,6 +177,11 @@ def check_bibliography(blocks, producer, bibliography_dict):
                 bib_item.online = bool(url_span)
                 if 'access_date' in fields:
                     bib_item.access_date = fields['access_date'][2]
+                elif url_span and bib_item.date:
+                    for date in bib_item.date:
+                        if masked.find(next(iter(date)), url_span[1]) >= 0:
+                            bib_item.access_date = date
+                            break
 
                 if 'doi' in fields:
                     bib_item.doi = fields['doi'][2]
@@ -337,30 +342,18 @@ def extract_authors(masked, content, authors):
     for pattern, fmt in AUTHOR_PATTERNS.items():
         match = re.search(pattern, masked)
         if match and not check_quotes(match.start(), match.end(), content):
+            if match.start() != 0:
+                continue
             candidate = (match.end(), match.start(), fmt, pattern)
             if fmt == 'Jan Nowak':
-                if match.start() != 0:      
-                    continue
                 in_authors = match.group(0).strip().lower() in authors_lower
-                if match.start() == 0:
-                    if in_authors:
-                        best_start_known = candidate
-                    else:
-                        best_start_fallback = candidate
+                if in_authors:
+                    best_start_known = candidate
                 else:
-                    if in_authors:
-                        if best_known is None or match.end() < best_known[0]:
-                            best_known = candidate
-                    else:
-                        if best_fallback is None or match.end() < best_fallback[0]:
-                            best_fallback = candidate
+                    best_start_fallback = candidate
             else:
-                if match.start() == 0:
-                    if best_start_other is None or match.end() > best_start_other[0]:
-                        best_start_other = candidate
-                else:
-                    if best_other is None or match.end() > best_other[0]:
-                        best_other = candidate
+                if best_start_other is None or match.end() > best_start_other[0]:
+                    best_start_other = candidate
 
     best_direct = None
     if not (best_start_known or best_start_other or best_start_fallback):
@@ -369,7 +362,7 @@ def extract_authors(masked, content, authors):
                 best_direct = (len(author), 0, 'different', None)
                 break
 
-    winner = best_start_known or best_start_other or best_start_fallback or best_direct or best_known or best_other or best_fallback
+    winner = best_start_known or best_start_other or best_start_fallback or best_direct
     if winner is None:
         return None, '', 0, 0
 
