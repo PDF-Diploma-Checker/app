@@ -712,6 +712,22 @@ class PDFMapper:
             self.logical_blocks.append(p_block)
         self.paragraph_buffer.clear()
 
+
+    def _item_to_paragraph(self, data) -> ParagraphBlock:
+        """
+        Converts a single list item into a paragraph block, leaving out marker offset for correct linguistic parsing,
+        marker remains as item[0], for bibliography checks.
+        """
+        item = data["item"]
+        words = item.words
+        if len(words) > 1 and words[0].start_char == 0 and words[0].end_char == 0:
+            words = words[1:]
+        return ParagraphBlock(
+            block_id=data["block_id"],
+            content=item.text,
+            words=words,
+        )
+
     def _empty_list_buffer(self, reason: str = ""):
         """
         Processes and clears the current list buffer, aggregating accumulated list items
@@ -753,12 +769,7 @@ class PDFMapper:
 
             if not is_bibiography and any(getattr(item, "marker_type", "") == "number_in_brackets" for item in items):
                 for data in self.list_buffer:
-                    it = data["item"]
-                    p_block = ParagraphBlock(
-                        block_id=data["block_id"],
-                        content=data.get("original_text", it.text),
-                        words=it.words,
-                    )
+                    p_block = self._item_to_paragraph(data)
                     p_block._seq = data.get("_seq", self._block_seq)
                     self._block_seq += 1
                     self.logical_blocks.append(p_block)
@@ -805,12 +816,7 @@ class PDFMapper:
             self.logical_blocks.append(new_list_block)
         else:
             data = self.list_buffer[0]
-            item = data["item"]
-            p_block = ParagraphBlock(
-                block_id=data["block_id"],
-                content=data.get("original_text", item.text),
-                words=item.words,
-            )
+            p_block = self._item_to_paragraph(data)
             p_block._seq = data.get("_seq", self._block_seq)
             self.logical_blocks.append(p_block)
         self.list_buffer.clear()
