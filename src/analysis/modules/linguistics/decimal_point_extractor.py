@@ -61,6 +61,24 @@ def decimal_check(blocks, chapter_nums):
     logger.info("  Total matches: %d", len(checked_matches))
     return checked_matches
 
+# Rdzenie słów poprzedzających odwołanie do numeru rozdziału/elementu (np. "w podrozdziale 3.1",
+# "w sekcji 2.4", "na rysunku 2.1"). Dopasowywane jako prefiks, żeby objąć wszystkie formy odmiany.
+REFERENCE_STEMS = ("wersj", "rysun", "tabel", "wykres", "rozdzia", "podrozdzia", "obraz", "wzor", "wzór",
+                   "równani", "listing", "sekcj", "podsekcj", "podpunk", "paragraf", "załącznik", "aneks",
+                   "algorytm", "schemat", "diagram", "fotografi", "zdjęci", "ilustracj")
+# Słowa dopasowywane dokładnie - jako prefiksy dawałyby fałszywe trafienia
+# (np. "roz" -> "rozmiar", "punkt" -> "punktacja", "dodatk" -> "dodatkowo", "table" -> "tablet").
+REFERENCE_WORDS = {"wer", "rys", "tab", "wyk", "roz", "rozdz", "podrozdz", "obr", "rów", "sek", "pkt",
+                   "par", "zał", "fot", "il", "alg", "sec", "fig", "eq", "eqn", "tbl", "ch", "app",
+                   "punkt", "punktu", "punktem", "punkcie", "punkty", "punktów", "punktach", "punktami", "punktom",
+                   "dodatek", "dodatku", "dodatkiem", "dodatki", "dodatków", "dodatkach", "dodatkami", "dodatkom",
+                   "section", "sections", "subsection", "subsections", "chapter", "chapters", "figure", "figures",
+                   "table", "tables", "equation", "equations", "appendix", "appendices"}
+
+def is_reference_word(word):
+    '''Checks if word (lowercase) introduces a reference to a numbered chapter, figure, table etc.'''
+    return word in REFERENCE_WORDS or word.startswith(REFERENCE_STEMS)
+
 def check_decimal_matches(potential_matches, block, chapter_numbers, error_tolerance, chapter_nums):
     '''Filters candidate decimal matches. Discards section/chapter numbering, values inside quotes or proper names
     and listing references.'''
@@ -94,7 +112,7 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
             is_error = 0
         elif in_black_list:
             is_error = 2
-        elif previous_text and len(set(white_list_pl).intersection(previous_text)) > 0:
+        elif any(is_reference_word(word) for word in previous_text):
             is_error = 0
             chapter_numbers.add(match.content)
         elif following_text and len(set(white_list_pl).intersection(following_text)) > 0:
@@ -106,12 +124,12 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
             is_error = 0
         if is_error>= error_tolerance:
             if is_error == 2:
-                if block.block.language == 'en':
+                if block.language == 'en':
                     error_message = "Wrong decimal separator."
                 else:
                     error_message = "Niepoprawny separator dziesiętny."
             else:
-                if block.block.language == 'en':
+                if block.language == 'en':
                     error_message = "Possible use of an incorrect decimal separator."
                 else:
                     error_message = "Możliwe zastosowanie błędnego separatora dziesiętnego."
