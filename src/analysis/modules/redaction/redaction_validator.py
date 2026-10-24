@@ -1129,6 +1129,7 @@ class RedactionValidator:
         ):
             first_chapter_page = self.document_data.toc.entries[0].page
 
+        wrong_pages = []
         for page in self.document_data.pages:
             footer_block = None
 
@@ -1191,22 +1192,35 @@ class RedactionValidator:
                     if match:
                         detected_num = int(match.group(1))
                         if detected_num != page.number:
-                            if lang == "en":
-                                comment = f"Invalid page number. Detected: {detected_num}, expected: {page.number}."
-                            else:
-                                comment = f"Błędny numer strony. Wykryto: {detected_num}, oczekiwano: {page.number}."
-
-                            self.errors.append(
-                                Error(
-                                    id=self._get_next_id(),
-                                    module=self.module,
-                                    category="Wrong_page_number",
-                                    page_number=page.number,
-                                    bounding_box=footer_block.bbox,
-                                    text=raw_text,
-                                    comments=comment,
-                                )
+                            wrong_pages.append(
+                                (page.number, detected_num, footer_block.bbox, raw_text)
                             )
+
+        # Błędna numeracja zwykle przesuwa się na wszystkie kolejne strony,
+        # więc zgłaszamy ją raz - przy pierwszym wystąpieniu
+        if wrong_pages:
+            page_nr, detected_num, bbox, raw_text = wrong_pages[0]
+            other_pages = ", ".join(str(p[0]) for p in wrong_pages[1:])
+            if lang == "en":
+                comment = f"Invalid page number. Detected: {detected_num}, expected: {page_nr}."
+                if other_pages:
+                    comment += f" Check the following pages as well - incorrect numbering also detected on pages: {other_pages}."
+            else:
+                comment = f"Błędny numer strony. Wykryto: {detected_num}, oczekiwano: {page_nr}."
+                if other_pages:
+                    comment += f" Sprawdź również kolejne strony - błędną numerację wykryto także na stronach: {other_pages}."
+
+            self.errors.append(
+                Error(
+                    id=self._get_next_id(),
+                    module=self.module,
+                    category="Wrong_page_number",
+                    page_number=page_nr,
+                    bounding_box=bbox,
+                    text=raw_text,
+                    comments=comment,
+                )
+            )
 
         is_ftr_error = False
         for error in self.errors:
