@@ -2,7 +2,7 @@
 Testy sprawdzania separatora dziesiętnego (decimal_point_extractor).
 
 Uruchomienie (z katalogu głównego repozytorium):
-    .venv/bin/python -m unittest discover -s tests -t . -v
+    .venv/bin/python -m unittest discover -s unit_tests -t . -v
 
 PDF-y w tym katalogu generuje generate_pdfs.py. Nazwy plików opisują oczekiwany wynik:
 - fp_unnecessarily_detected_dot_* - żadna kropka nie powinna zostać zgłoszona,
@@ -26,8 +26,10 @@ CERTAIN_PL = "Niepoprawny separator dziesiętny."
 POSSIBLE_PL = "Możliwe zastosowanie błędnego separatora dziesiętnego."
 
 
-def make_paragraph(text, language="pl", block_id=1):
-    '''Builds a minimal paragraph block context, with words placed on page 2 (after title pages).'''
+def make_paragraph(text, language="pl", document_language="pl", block_id=1):
+    '''Builds a minimal paragraph block context, with words placed on page 2 (after title pages).
+    language - language detected for the block, document_language - language of the whole thesis,
+    set on each block by the pipeline (src/app/pipeline.py) and used for error messages.'''
     words = []
     position = 0
     for index, token in enumerate(text.split(" ")):
@@ -38,11 +40,13 @@ def make_paragraph(text, language="pl", block_id=1):
         ))
         position += len(token) + 1
     block = ParagraphBlock(block_id=block_id, content=text, words=words)
+    block.language = document_language
     return Block_context(contents=text, language=language, block=block)
 
 
-def detected(text, chapter_nums=frozenset(), language="pl"):
-    return {m.content: m.message for m in decimal_check([make_paragraph(text, language)], set(chapter_nums))}
+def detected(text, chapter_nums=frozenset(), language="pl", document_language="pl"):
+    blocks = [make_paragraph(text, language, document_language)]
+    return {m.content: m.message for m in decimal_check(blocks, set(chapter_nums))}
 
 
 class TestReferenceWord(unittest.TestCase):
@@ -111,9 +115,14 @@ class TestDotDetected(unittest.TestCase):
     def test_unit_wins_over_table_of_contents_number(self):
         self.assertEqual(detected("Kurs wynosi 3.1 zł obecnie.", chapter_nums={"3.1"}), {"3.1": CERTAIN_PL})
 
-    def test_english_message_for_english_block(self):
-        self.assertEqual(detected("The average value was 3,5 units in total.", language="en"),
+    def test_message_follows_document_language(self):
+        # Komunikat ma być w języku całej pracy, nie w języku wykrytym dla akapitu
+        self.assertEqual(detected("The average value was 3,5 units in total.", language="en", document_language="en"),
                          {"3,5": "Possible use of an incorrect decimal separator."})
+        self.assertEqual(detected("The average value was 3,5 units in total.", language="en", document_language="pl"),
+                         {"3,5": POSSIBLE_PL})
+        self.assertEqual(detected("Średnia wartość wyniosła 3.5 jednostki.", language="pl", document_language="en"),
+                         {"3.5": "Possible use of an incorrect decimal separator."})
 
 
 class TestGeneratedPdfs(unittest.TestCase):
@@ -127,6 +136,9 @@ class TestGeneratedPdfs(unittest.TestCase):
 
         def run(pdf_path):
             raw_blocks = PDFMapper().map_to_schema(extractPDF(str(pdf_path)))
+            # Tak jak w src/app/pipeline.py - język pracy ustawiany na każdym bloku
+            for block in raw_blocks.logical_blocks:
+                block.language = "pl"
             blocks = get_context(raw_blocks)
             return {m.content: m.message for m in decimal_check(blocks, extract_chapter_numbers(blocks))}
 
