@@ -2,7 +2,7 @@
 Testy sprawdzania separatora dziesiętnego (decimal_point_extractor).
 
 Uruchomienie (z katalogu głównego repozytorium):
-    .venv/bin/python -m unittest discover -s tests -t . -v
+    .venv/bin/python -m unittest discover -s unit_tests -t . -v
 
 PDF-y w tym katalogu generuje generate_pdfs.py. Nazwy plików opisują oczekiwany wynik:
 - fp_unnecessarily_detected_dot_* - żadna kropka nie powinna zostać zgłoszona,

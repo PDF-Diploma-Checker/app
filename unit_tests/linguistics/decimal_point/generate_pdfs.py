@@ -9,7 +9,7 @@ Nazwy plików mówią, jakiego wyniku oczekujemy:
   które muszą zostać wykryte (true positive).
 
 Uruchomienie (z katalogu głównego repozytorium):
-    python tests/linguistics/decimal_point/generate_pdfs.py
+    python unit_tests/linguistics/decimal_point/generate_pdfs.py
 '''
 import shutil
 import subprocess
