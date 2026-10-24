@@ -124,12 +124,12 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
             is_error = 0
         if is_error>= error_tolerance:
             if is_error == 2:
-                if block.language == 'en':
+                if block.block.language == 'en':
                     error_message = "Wrong decimal separator."
                 else:
                     error_message = "Niepoprawny separator dziesiętny."
             else:
-                if block.language == 'en':
+                if block.block.language == 'en':
                     error_message = "Possible use of an incorrect decimal separator."
                 else:
                     error_message = "Możliwe zastosowanie błędnego separatora dziesiętnego."
