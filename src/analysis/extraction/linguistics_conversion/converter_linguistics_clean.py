@@ -2003,7 +2003,7 @@ class PDFMapper:
         for v in new_doc.floating_elements.visual_elements:
             caption_dict = getattr(v, "caption", {})
             if caption_dict and isinstance(caption_dict, dict):
-                text = caption_dict.get("text", "").strip()
+                text = " ".join(caption_dict.get("text", "").split())
                 if text:
                     known_captions.add(text)
 
@@ -2016,7 +2016,7 @@ class PDFMapper:
 
         for block in self.logical_blocks:
             if getattr(block, "type", None) in ["paragraph", "heading"]:
-                content = getattr(block, "content", "").strip()
+                content = " ".join(getattr(block, "content", "").split())
                 if not content:
                     continue
 
@@ -2120,7 +2120,7 @@ class PDFMapper:
         if not valid_bib_numbers:
             return
 
-        citation_pattern = re.compile(r"\[([\d\s,\-]+)\]")
+        citation_pattern = re.compile(r"((?:\[[\d\s,\-]+\])+)")
 
         math_interval_context = re.compile(
             r"\b(przedział\w*|przedziale\w*|zakres\w*|zakresie\w*|zbior\w*|zbiorze\w*|dziedzin\w*|wartość\w*|wartości\w*|interval|range)\s*$",
@@ -2129,28 +2129,24 @@ class PDFMapper:
         def extract_numbers_from_citation(cit_str):
             """
             Parses a citation string and extracts individual reference numbers,
-            handling both comma-separated values and hyphenated ranges.
-
-            Args:
-                cit_str (str): The raw citation string (e.g., '1, 3, 5-7').
-
-            Returns:
-                set[str]: A set of unique reference numbers extracted from the string.
+            handling comma-separated values, hyphenated ranges..
             """
             nums = set()
-            for part in cit_str.split(","):
-                part = part.strip()
-                if "-" in part:
-                    try:
-                        start_s, end_s = part.split("-")
-                        for i in range(int(start_s), int(end_s) + 1):
-                            nums.add(str(i))
-                    except ValueError:
-                        pass
-                else:
-                    num_match = re.search(r"\d+", part)
-                    if num_match:
-                        nums.add(num_match.group())
+            brackets = re.findall(r"\[([\d\s,\-]+)\]", cit_str)
+            for raw_content in brackets:
+                for part in raw_content.split(","):
+                    part = part.strip()
+                    if "-" in part:
+                        try:
+                            start_s, end_s = part.split("-")
+                            for i in range(int(start_s), int(end_s) + 1):
+                                nums.add(str(i))
+                        except ValueError:
+                            pass
+                    else:
+                        num_match = re.search(r"\d+", part)
+                        if num_match:
+                            nums.add(num_match.group())
             return nums
 
         for block in self.logical_blocks:
@@ -2175,22 +2171,18 @@ class PDFMapper:
                     continue
 
                 for match in citation_pattern.finditer(text):
-                    cit_content = match.group(1)
-
-                    if len(re.findall(r"\d+", cit_content)) > 1:
+                    cit_str = match.group(1)
+                    preceding = text[max(0, match.start() - 40):match.start()]
+                    if math_interval_context.search(preceding):
                         continue
-
-                    nums = extract_numbers_from_citation(cit_content)
-
-                    if "0" in nums or any(n == "0" for n in nums):
+                    if re.search(r"(?<!\d)0(?!\d)", cit_str):
                         continue
-                    
+                    nums = extract_numbers_from_citation(cit_str)
                     if nums and not nums.issubset(valid_bib_numbers):
                         start_pos, end_pos = match.span()
                         for word in words:
                             if word.start_char < end_pos and word.end_char > start_pos:
                                 word.incorrect_bibliography = 1
-
     def _extract_acronyms_to_schema(self, new_doc):
         """
         Post-processing routine that identifies the acronyms, abbreviations, or symbols

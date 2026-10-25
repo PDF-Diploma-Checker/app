@@ -99,7 +99,7 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
             else:
                 break
 
-        return " ".join(caption_parts)
+        return " ".join(" ".join(caption_parts).split())
 
     caption_primary = build_full_caption(candidates[primary])
     if caption_primary:
@@ -110,6 +110,66 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
         return caption_secondary, secondary
 
     return "", priority_side
+
+def merge_fragment_images(
+    page: fitz.Page, cur_page: PageData, min_overlap: float = 0.2, pad: float = 5.0
+) -> None:
+    """
+    Merges small raster fragments (e.g. nodes of a diagram stored as separate bitmaps)
+    into the bigger image they overlap. The container's bbox becomes the union of both
+    boxes and the container is re-rendered, so nothing sticking out of the original
+    clip is cut off. Fragment files are removed; the caption of a fragment is inherited
+    if the container has none.
+    """
+    import os
+
+    def area(b):
+        return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+    def inter(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        return max(0.0, w) * max(0.0, h)
+
+    changed = True
+    while changed and len(cur_page.images) > 1:
+        changed = False
+        images = cur_page.images
+        for i, small in enumerate(images):
+            a_small = area(small.bbox)
+            if a_small <= 0 or small.image_type != "raster":
+                continue
+            for j, big in enumerate(images):
+                if i == j or area(big.bbox) <= a_small * 1.05:
+                    continue
+                if inter(small.bbox, big.bbox) / a_small < min_overlap:
+                    continue
+
+                union = fitz.Rect(big.bbox) | fitz.Rect(small.bbox)
+                clip = (union + (-pad, -pad, pad, pad)) & page.rect if big.image_type == "vector" else union
+                try:
+                    if big.image_type == "vector":
+                        pix = page.get_pixmap(clip=clip)
+                        pix.save(big.path)
+                        big.width, big.height = pix.width, pix.height
+                    big.bbox = (union.x0, union.y0, union.x1, union.y1)
+                except Exception as e:
+                    logging.error(f"Failed to re-render merged image {big.path}: {e}")
+                    continue
+
+                if not big.description and small.description:
+                    big.description = small.description
+                try:
+                    if small.path and os.path.isfile(small.path):
+                        os.remove(small.path)
+                except OSError as e:
+                    logging.warning(f"Could not remove {small.path}: {e}")
+                del cur_page.images[i]
+                changed = True
+                break
+            if changed:
+                break
+
 
 def extract_vector_graphics(
     page: fitz.Page,
