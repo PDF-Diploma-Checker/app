@@ -1,4 +1,4 @@
-from .helpers import add_match, normalize_math_letters, has_math_characters, is_latin_word
+from .helpers import add_match, normalize_math_letters, has_math_characters, is_latin_word, is_math_font
 import re
 from .language_error_extractor import typo_check
 import logging
@@ -102,7 +102,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                 if not potential_acronym(text):
                     prev_word = word
                     continue
-                if prev_word.italic and normalize_math_letters(prev_word.text) != text:
+                if prev_word.italic and not is_math_font(prev_word.font) and normalize_math_letters(prev_word.text) != text:
                     prev_word = word
                     continue
                 if roman_numeral.match(clean_text):
