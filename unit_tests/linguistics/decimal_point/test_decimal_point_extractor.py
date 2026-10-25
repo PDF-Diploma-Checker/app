@@ -18,9 +18,9 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, WordInfo  # noqa: E402
 from analysis.modules.linguistics.linguistics_types import Block_context  # noqa: E402
 from analysis.modules.linguistics.decimal_point_extractor import decimal_check, is_reference_word  # noqa: E402
+from unit_tests.utils_test import PDF_COMPILERS, pdf_to_blocks  # noqa: E402
 
 PDF_DIR = Path(__file__).resolve().parent
-COMPILERS = ("pdflatex", "xelatex", "lualatex", "libreoffice_writer")
 
 CERTAIN_PL = "Niepoprawny separator dziesiętny."
 POSSIBLE_PL = "Możliwe zastosowanie błędnego separatora dziesiętnego."
@@ -130,29 +130,23 @@ class TestGeneratedPdfs(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from analysis.extraction.main_extractor import extractPDF
-        from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
-        from analysis.modules.linguistics.helpers import get_context, extract_chapter_numbers
+        from analysis.modules.linguistics.helpers import extract_chapter_numbers
 
         def run(pdf_path):
-            raw_blocks = PDFMapper().map_to_schema(extractPDF(str(pdf_path)))
-            # Tak jak w src/app/pipeline.py - język pracy ustawiany na każdym bloku
-            for block in raw_blocks.logical_blocks:
-                block.language = "pl"
-            blocks = get_context(raw_blocks)
+            _, blocks = pdf_to_blocks(pdf_path)
             return {m.content: m.message for m in decimal_check(blocks, extract_chapter_numbers(blocks))}
 
         cls.run_pdf = staticmethod(run)
 
     def test_fp_unnecessarily_detected_dot(self):
-        for compiler in COMPILERS:
+        for compiler in PDF_COMPILERS:
             with self.subTest(compiler=compiler):
                 self.assertEqual(self.run_pdf(PDF_DIR / f"fp_unnecessarily_detected_dot_{compiler}.pdf"), {})
 
     def test_tp_correctly_detected_dot(self):
         expected = {"3.5": POSSIBLE_PL, "2.75": CERTAIN_PL, "4.2": POSSIBLE_PL, "6.5": POSSIBLE_PL,
                     "7.25": POSSIBLE_PL}
-        for compiler in COMPILERS:
+        for compiler in PDF_COMPILERS:
             with self.subTest(compiler=compiler):
                 self.assertEqual(self.run_pdf(PDF_DIR / f"tp_correctly_detected_dot_{compiler}.pdf"), expected)
 
