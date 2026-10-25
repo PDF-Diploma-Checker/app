@@ -204,15 +204,51 @@ def language_tool_analisys(blocks):
         logger.info("  LT category '%s': %d", cat, count)
     return errors
 
+# Polskie końcówki dodawane do zapożyczeń (np. "rank-owania", "transformer-owym", "framework-u").
+# Posortowane od najdłuższej, żeby odcinać jak najdłuższą końcówkę.
+POLISH_LOANWORD_SUFFIXES = sorted((
+    "owaniami", "owaniach", "owaniem", "owaniom", "owaniu", "owania", "owanie", "owań",
+    "owanego", "owanemu", "owanej", "owanym", "owanych", "owanymi", "owaną", "owana", "owane", "owany", "owani",
+    "owaliśmy", "owałem", "owałam", "owałeś", "owali", "owała", "owało", "owały", "ował", "ować",
+    "ujemy", "ujecie", "ujesz", "ują", "uje", "uję",
+    "owego", "owemu", "owych", "owymi", "owym", "owej", "ową", "owa", "owe", "owy", "owi",
+    "ami", "ach", "iem", "em", "om", "ów", "u", "a", "y", "i", "e",
+), key=len, reverse=True)
+# Rdzenie krótsze niż 4 litery (np. "the" + "a") dawałyby fałszywe trafienia. Rdzenie 4-literowe muszą być
+# częstymi słowami angielskimi ("rank"), bo słownik zawiera też rzadkie skróty ("prog" -> "progamowania").
+MIN_LOANWORD_STEM = 4
+SHORT_LOANWORD_STEM = 5
+MIN_SHORT_STEM_FREQUENCY = 1000
+
+def is_known_word(word):
+    '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
+    if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
+        return True
+    return not spell.unknown(word.lower().split())
+
+def is_polish_inflected_loanword(word):
+    '''Checks if word is a known English word with a Polish ending, e.g. "rankowania", "transformerowym".
+    Stems are checked only in the English dictionary - Polish forms are already recognized by Morfeusz,
+    and Polish stems would accept typos (e.g. "progam" + "owania").'''
+    word = word.lower()
+    for suffix in POLISH_LOANWORD_SUFFIXES:
+        if not word.endswith(suffix):
+            continue
+        stem = word[:-len(suffix)]
+        if len(stem) < MIN_LOANWORD_STEM:
+            continue
+        # Niema końcówka -e jest pomijana przy odmianie (np. "cache" -> "cachowania")
+        for candidate in (stem, stem + "e"):
+            if len(candidate) < SHORT_LOANWORD_STEM:
+                if spell[candidate] >= MIN_SHORT_STEM_FREQUENCY:
+                    return True
+            elif candidate in spell:
+                return True
+    return False
+
 def typo_check(typo_text):
     '''Double check typos found by language analysis with Polish and English dictionaries.'''
-    analysis = morf.analyse(typo_text)
-    words = typo_text.lower().split()
-    for interpretation in analysis:
-        tag = interpretation[2][2]
-        if tag != "ign":
-            return True
-    typos = spell.unknown(words)
-    if not typos:
-        return True
-    return False
+    # Każde słowo osobno - Morfeusz dla całej frazy zwraca interpretacje każdego słowa,
+    # więc jedno znane słowo ukrywałoby literówkę w pozostałych
+    words = typo_text.split()
+    return bool(words) and all(is_known_word(w) or is_polish_inflected_loanword(w) for w in words)
