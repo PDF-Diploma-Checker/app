@@ -118,9 +118,12 @@ def language(text):
     else:
         return 'en'
 
+
+LETTERLIKE_MATH_LETTERS = set("ℂℍℕℙℚℝℤℬℰℱℋℐℒℳℛℯℊℴℭℌℑℜℨℎ")
+
 def normalize_math_letters(text):
     '''Replaces letters and digits written with math font with plain ones.'''
-    return "".join(unicodedata.normalize("NFKC", c) if "\U0001D400" <= c <= "\U0001D7FF" else c for c in text)
+    return "".join(unicodedata.normalize("NFKC", c) if "\U0001D400" <= c <= "\U0001D7FF" or c in LETTERLIKE_MATH_LETTERS else c for c in text)
 
 def has_math_characters(text):
     '''Checks if the text contains math symbols'''
@@ -129,6 +132,12 @@ def has_math_characters(text):
 def is_latin_word(text):
     '''Checks if every letter of the text belongs to the Latin alphabet'''
     return all(unicodedata.name(c, "").startswith("LATIN") for c in text if c.isalpha())
+
+MATH_FONTS = ("math", "cmmi", "cmsy", "cmex", "msbm", "msam", "eufm")
+
+def is_math_font(font):
+    '''Checks if the font is used for typesetting math (variables, symbols)'''
+    return any(m in font.lower() for m in MATH_FONTS)
 
 def get_match_info(block, offset, length):
     '''Adjust coordinates of text content to its position in pdf based on extraction structure.
