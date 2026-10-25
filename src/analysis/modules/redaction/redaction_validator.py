@@ -832,9 +832,9 @@ class RedactionValidator:
                 )
 
         if lang == "en":
-            comment = "The figure does not have a valid source or bibliography reference in its caption."
+            comment = "The figure/table does not have a valid source or bibliography reference in its caption."
         else:
-            comment = "Rysunek nie posiada poprawnego źródła lub odwołania do bibliografii w swoim podpisie."
+            comment = "Rysunek/Tabela nie posiada poprawnego źródła lub odwołania do bibliografii w swoim podpisie."
 
         for visual in self.document_data_linguistics.floating_elements.visual_elements:
             if getattr(visual, "incorrect_caption", 0) == 1:
