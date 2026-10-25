@@ -480,12 +480,23 @@ class PDFMapper:
         if re.search(r"(?:\.\s*){4,}", full_text_with_spaces):
             return 0
 
+
+        math_font_names = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
+        prose_words = [
+            w for w in words
+            if not any(mf in (w.font or "").lower() for mf in math_font_names)
+            and sum(c.isalpha() for c in w.text) >= 3
+        ]
+        if len(prose_words) >= 3:
+            return 0
+
         spaces_count = sum(w.text.count(" ") for w in words) + (len(words) - 1)
 
         total_chars_with_spaces = sum(len(w.text) for w in words) + (len(words) - 1)
 
-        if total_chars_with_spaces > 0:
-            space_density = spaces_count / total_chars_with_spaces
+        space_density = (
+            spaces_count / total_chars_with_spaces if total_chars_with_spaces > 0 else 0.0
+        )
         if space_density > 0.3:
             return 1
 

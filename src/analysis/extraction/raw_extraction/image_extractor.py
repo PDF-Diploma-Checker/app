@@ -66,7 +66,9 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
                 continue
 
             side = "above" if is_close_above else "below"
-            candidates[side].append((by0, by1, full_text))
+            sizes = [sp.size for line in block.lines for sp in line.spans if sp.text.strip()]
+            block_size = max(set(sizes), key=sizes.count) if sizes else None
+            candidates[side].append((by0, by1, full_text, block_size))
 
     candidates["above"].sort(key=lambda item: item[0])
     candidates["below"].sort(key=lambda item: item[0])
@@ -78,7 +80,7 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
         if not block_list:
             return ""
         start_idx = -1
-        for idx, (_, _, text) in enumerate(block_list):
+        for idx, (_, _, text, _) in enumerate(block_list):
             if text.lower().startswith(img_keywords):
                 start_idx = idx
                 break
@@ -88,12 +90,19 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
         caption_parts = [block_list[start_idx][2]]
         last_by1 = block_list[start_idx][1]
+        caption_size = block_list[start_idx][3]
 
         for idx in range(start_idx + 1, len(block_list)):
-            curr_by0, curr_by1, text = block_list[idx]
+            curr_by0, curr_by1, text, curr_size = block_list[idx]
             if (curr_by0 - last_by1) < 18:
                 if text.lower().startswith(img_keywords):
                     break 
+                if (
+                    caption_size is not None
+                    and curr_size is not None
+                    and abs(curr_size - caption_size) > 0.5
+                ):
+                    break
                 caption_parts.append(text)
                 last_by1 = curr_by1
             else:
