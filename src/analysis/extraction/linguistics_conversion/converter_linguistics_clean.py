@@ -115,6 +115,11 @@ class PDFMapper:
         r"(?:(?<=[a-ząćęłńóśźż])|(?<=(?<!\S)[A-ZĄĆĘŁŃÓŚŹŻ])) (?=[ąęĄĘ])"
         r"|(?<=[A-ZĄĆĘŁŃÓŚŹŻ]) (?=[ĄĘ])")
 
+    LEGEND_START_RE = re.compile(r"^\s*(?:gdzie|where)\b", re.IGNORECASE)
+    LEGEND_INTRO_RE = re.compile(r'(?:^|[\s.,;])(?:gdzie|where)\s*:\s*$', re.IGNORECASE)
+    LEGEND_LOOKBACK = 3
+    LEGEND_STUB_MAX_CHARS = 60
+
     @staticmethod
     def _strip_heading_number(text: str) -> str:
         """
@@ -229,6 +234,8 @@ class PDFMapper:
                     changed = False
                     for c in page.text_blocks:
                         if c is b:
+                            continue
+                        if self.LEGEND_START_RE.match(self._block_text(c)):
                             continue
 
                         vertically_aligned = (c.bbox[3] >= y0 - 6 and c.bbox[1] <= y1 + 6)
@@ -1190,6 +1197,7 @@ class PDFMapper:
 
         self._merge_adjacent_headings()
         self._extract_acronyms_to_schema(new_doc)
+        self._tag_formula_legends()
         self._tag_special_lists(old_doc)
         self._tag_visual_descriptions(new_doc)
         self._pair_descriptions_with_visuals(new_doc)
@@ -1945,6 +1953,31 @@ class PDFMapper:
                     self.logical_blocks.pop(i + 1)
                     continue
             i += 1
+
+    def _tag_formula_legends(self):
+        """
+        Lists that follow 'gdzie:' / 'where:' are symbol legends under a formula, not regular lists.
+        The symbol column can be extracted as separate short blocks between 'gdzie:' and the list,
+        so a few previous blocks are checked and the short ones in between are retagged too.
+        """
+        blocks = self.logical_blocks
+        for i, block in enumerate(blocks):
+            if getattr(block, "type", None) != "list" or getattr(block, "is_bibliography", False):
+                continue
+            stubs = []
+            for j in range(i - 1, max(i - 1 - self.LEGEND_LOOKBACK, -1), -1):
+                prev = blocks[j]
+                text = (getattr(prev, "content", "") or "").strip()
+                if getattr(prev, "type", None) == "list":
+                    break
+                if self.LEGEND_INTRO_RE.search(text):
+                    block.type = "acronyms"
+                    for stub in stubs:
+                        stub.type = "acronyms"
+                    break
+                if len(text) > self.LEGEND_STUB_MAX_CHARS:
+                    break
+                stubs.append(prev)
 
     def _tag_special_lists(self, old_doc: DocumentData):
         """

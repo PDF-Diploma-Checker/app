@@ -44,6 +44,7 @@ class ParagraphBlock:  # Informacje o blokach tekstowych, które mogą być para
     debug_empty: str = ""
     words: List[WordInfo] = field(default_factory=list)
     incorrect_caption: int = 0
+    language: str = "pl"
 
 
 @dataclass
@@ -64,6 +65,7 @@ class ListBlock:
     is_bibliography: bool = False
     items: List[ListItem] = field(default_factory=list)
     words: List[WordInfo] = field(default_factory=list)
+    language: str = "pl"
 
 
 @dataclass
