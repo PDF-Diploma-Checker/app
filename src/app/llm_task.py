@@ -166,6 +166,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         _stage(language, "goal", cancel_token)
 
+        cleanup_text_llm_instances()        # the purpose model must leave the video memory before the next model loads
+
         goal_result = check_goal_realization(
             text=plain_txt_purpose,
             purpose=purpose,
