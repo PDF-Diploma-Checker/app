@@ -1,8 +1,16 @@
 from .helpers import nlp_pl, nlp_en, lemmatization
+from .language_error_extractor import typo_check
 import re
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def is_lowercase_typo(ent_text):
+    """
+    Checks if a named entity starts with a lowercase letter and contains an unknown word.
+    """
+    return ent_text[:1].islower() and not typo_check(ent_text)
 
 
 def get_proper_names(blocks):
@@ -59,6 +67,8 @@ def get_proper_names(blocks):
                             bibliography["organizations"].add(ent_text)
                     if not ent.label_ or ent.label_ in SKIP_LABEL_PL or len(ent_text) < 2:
                         continue
+                    if is_lowercase_typo(ent_text):
+                        continue
                     ent_lemma = lemmatization(ent_text, block.language)
                     proper_names.append((ent_text, ent_lemma))
 
@@ -88,6 +98,8 @@ def get_proper_names(blocks):
                         elif ent.label_ == "WORK_OF_ART":
                             bibliography["work"].add(ent_text)   
                     if not ent.label_ or ent.label_ in SKIP_LABELS_EN or len(ent_text) < 2:
+                        continue
+                    if is_lowercase_typo(ent_text):
                         continue
                     ent_lemma = lemmatization(ent_text, block.language)
                     proper_names.append((ent_text, ent_lemma))
