@@ -17,6 +17,7 @@ from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 from analysis.extraction.raw_extraction.image_extractor import (
     extract_raster_images,
     extract_vector_graphics,
+    merge_fragment_images,
 
 )
 
@@ -36,16 +37,6 @@ from analysis.extraction.raw_extraction.front_and_back_matter import (
 
 # from pdf_diploma_checker.src.analysis.extraction.bare_struct import DocumentData, PageData, TextBlock, TextLine, TextSpan, ImageInfo, TableInfo, TocData, TocEntry, TofData, TofEntry, TotData, TotEntry
 # from src.analysis.extraction.bare_struct import DocumentData, PageData, TextBlock, TextLine, TextSpan, ImageInfo, TableInfo, TocData, TocEntry, TofData, TofEntry, TotData, TotEntry
-
-
-# TODO: dodać więcej przykładowych plików pdf do folderu /redaction_debug
-# Format nazwy pdfa: <aspekt_do_sprawdzenia>_example.pdf
-
-# uzywam dekoratora dataclass bo:
-# ma fajne automatyczne funkcje jak tworzenie __init__ automatycznie
-# jest duzo bardziej czytelny (#team_c++)
-# ma wbudowana funkcje asdict() (potem sie przyda do jsona)
-
 
 def extractPDF(file_path: str) -> DocumentData:
     current_span_id = 0
@@ -179,6 +170,7 @@ def extractPDF(file_path: str) -> DocumentData:
             cur_page,
             detected_img_priority,
         )
+        merge_fragment_images(page, cur_page)
         if len(cur_page.images) > 0:
             blank_page = False
         cur_page.is_blank = blank_page
@@ -197,4 +189,3 @@ def extractPDF(file_path: str) -> DocumentData:
     )
     doc.close()
     return document_data
-

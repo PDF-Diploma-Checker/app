@@ -243,8 +243,22 @@ def extract_apa_tables(
             apa_rect = fitz.Rect(min_x, top_y, max_x, bottom_y)
             grouped_table_rects.append(apa_rect)
 
+    vertical_lines = []
+    for d in drawings:
+        r = fitz.Rect(d["rect"])
+        if r.width <= 4 and r.height > 20:
+            vertical_lines.append(r)
+
     for apa_rect in grouped_table_rects:
         try:
+            vlines_inside = [
+                v for v in vertical_lines
+                if v.x0 >= apa_rect.x0 and v.x1 <= apa_rect.x1
+                and v.y0 >= apa_rect.y0 - 5 and v.y1 <= apa_rect.y1 + 5
+            ]
+            if len(vlines_inside) >= 2:
+                continue
+
             is_duplicate = False
             for existing_rect in existing_table_bboxes:
                 intersect = apa_rect & existing_rect
