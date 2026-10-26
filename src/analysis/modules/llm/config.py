@@ -5,11 +5,13 @@ the base build ships without them.
 """
 
 import errno
+import getpass
 import functools
 import importlib.util
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -78,7 +80,22 @@ def default_model_dir():
     return DEFAULT_MODEL_DIR
 
 
+# Settings that describe THIS computer. A settings file copied to another computer (for instance because the app
+# folder was packed after it had been run and configured) must not carry them over: the other computer would "force"
+# a GPU it does not have and look for the models in a folder of somebody else.
+_MACHINE_KEYS = ("device", "n_gpu_layers", "model_dir", "hardware_configured")
+
+
+def _machine_id():
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = ""
+    return f"{platform.node()}|{user}|{sys.platform}"
+
+
 def save_config(cfg):
+    cfg = dict(cfg, machine=_machine_id())
     APP_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = APP_CONFIG_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -92,6 +109,12 @@ def load_config():
         data = json.loads(APP_CONFIG_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             cfg.update(data)
+            saved_on = data.get("machine")
+            if saved_on and saved_on != _machine_id():
+                defaults = default_config()
+                for key in _MACHINE_KEYS:
+                    cfg[key] = defaults[key]
+                logger.warning("The settings file comes from another computer (%s): hardware settings reset", saved_on)
     except FileNotFoundError:
         try:
             save_config(cfg)
