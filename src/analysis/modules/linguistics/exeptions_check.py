@@ -1,6 +1,6 @@
 from collections import defaultdict
 import re
-from .helpers import lemmatization
+from .helpers import lemmatization, font_family
 from .proper_check import check_if_proper
 from .typos_final_filter import refine_typos
 import string
@@ -33,9 +33,9 @@ def check_exeptions(matches, blocks, proper_names, main_font):
                 potential_exeption = False
                 inside_quotes = check_quotes(match.offset, match.offset + match.error_length, text)
                 if not inside_quotes:
+                    if remove_errors_different_font(match, block, main_font):
+                        continue
                     if match.category in {"TYPOS", "SPELLING" ,"COMPOUNDING", "SYNTAX"}:
-                        if remove_errors_different_font(match, block, main_font):
-                            continue
                         try:
                             if any(letter == '-' for letter in match.content):
                                 continue
@@ -75,15 +75,20 @@ def check_exeptions(matches, blocks, proper_names, main_font):
     return valid_errors
 
 
-def remove_errors_different_font(match, block, main_font):
-    '''Exclueds matches that use different font than main tex for example code snippet citations.'''
+def remove_errors_different_font(match, block, main_font, ignore_style=False):
+    '''Exclueds matches that use different font than main tex for example code snippet citations.
+    With ignore_style bold/italic variants of the main font are not treated as a different font.'''
     if not main_font or not match.word_idxs:
         return False
+    main_family = font_family(main_font)
     words_by_idx = {w.word_index: w for w in block.block.words}
     for idx in match.word_idxs:
         word = words_by_idx.get(idx)
-        if word is not None and word.font != main_font:
-            return True
+        if word is None or word.font == main_font:
+            continue
+        if ignore_style and font_family(word.font) == main_family:
+            continue
+        return True
     return False
 
 def check_quotes(start, end, text, return_spans=False):

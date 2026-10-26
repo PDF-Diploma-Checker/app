@@ -139,6 +139,15 @@ def is_math_font(font):
     '''Checks if the font is used for typesetting math (variables, symbols)'''
     return any(m in font.lower() for m in MATH_FONTS)
 
+def font_family(font):
+    '''Returns font name without style (bold/italic), size and subset prefix, e.g. TimesNewRomanPS-BoldMT -> TimesNewRomanPS,
+    NimbusSanL-ReguItal -> NimbusSanL, PLRoman12-Bold -> PLRoman.'''
+    name = font.split("+")[-1]
+    name = re.split(r"[-,]", name, maxsplit=1)[0]
+    name = re.sub(r"MT$", "", name)
+    name = re.sub(r"(bold|italic|ital|oblique)$", "", name, flags=re.IGNORECASE)
+    return re.sub(r"\d+$", "", name).lower()
+
 def get_match_info(block, offset, length):
     '''Adjust coordinates of text content to its position in pdf based on extraction structure.
     Returns coordinates to be later passed to highlight bboxes.'''
