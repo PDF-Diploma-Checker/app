@@ -3,13 +3,15 @@ from .linguistics_types import Error_type
 from .helpers import get_match_info 
 import logging
 from collections import Counter
+from .exeptions_check import remove_errors_different_font
 
 logger = logging.getLogger(__name__)
 
-def dash_check(blocks):
+def dash_check(blocks, main_font=None):
     '''Checks text blocks for correct usage of hyphens, en dashes and em dashes in Polish and English.'''
     logger.info("Starting dash check")
     checked_matches = []
+    different_font_dropped = 0
 
     for block in blocks:
         if block.block.type in {"keywords", "math", "code_snippet"}:
@@ -165,9 +167,10 @@ def dash_check(blocks):
                     word_idxs=word_idxs,
                     error_coordinate= error_coordinare
                 ))
-            
 
-        checked_matches.extend(errors)
+        kept_errors = [e for e in errors if not remove_errors_different_font(e, block, main_font, ignore_style=True)]
+        different_font_dropped += len(errors) - len(kept_errors)
+        checked_matches.extend(kept_errors)
         
     msg_counts = Counter()
     for m in checked_matches:
@@ -182,6 +185,7 @@ def dash_check(blocks):
         else:
             msg_counts["other"] += 1
     logger.info("Dash check complete: %d matches", len(checked_matches))
+    logger.info("  Different font dropped: %d", different_font_dropped)
     for error_type, count in msg_counts.most_common():
         logger.info("  Dash error type '%s': %d", error_type, count)
     return checked_matches
