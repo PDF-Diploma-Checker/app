@@ -1,11 +1,10 @@
 import re
 from .linguistics_types import Error_type
-from .helpers import get_match_info, is_math_font, has_math_characters
+from .helpers import get_match_info 
 from .exeptions_check import check_quotes
 import logging
 from collections import Counter
 from .exeptions_check import remove_errors_different_font
-
 
 logger = logging.getLogger(__name__)
 
@@ -229,45 +228,6 @@ def abbreviation_space_check(blocks, main_font=None):
             checked_matches.append(Error_type(
                 content=text[m.start():word_end], category="PUNCTUATION", message=message,
                 offset=m.start(), error_length=word_end - m.start(), block_id=unit.block_id,
-                page_start=start_page, page_end=end_page, word_idxs=word_idxs, error_coordinate=coords,
-            ))
-    return checked_matches
-
-CITATION_NO_SPACE = re.compile(r'\S*[^\W\d_]\[\d[\d\s,\-–]*\]')
-
-def citation_space_check(blocks, main_font=None):
-    '''Finds bibliography citations glued to the previous word, e.g. "wypełnienia[17]".'''
-    checked_matches = []
-    for block in blocks:
-        unit = block.block
-        if unit.type in {"math", "code_snippet", "toc", "tof", "tot", "acronyms", "keywords"}:
-            continue
-        if unit.type == "list" and getattr(unit, "is_bibliography", False):
-            continue
-        text = block.contents
-        for m in CITATION_NO_SPACE.finditer(text):
-            start, end = m.start(), m.end()
-            if check_quotes(start, end, text):
-                continue
-            if "/" in text[max(0, start - 10):end + 10]:          
-                continue
-            start_page, end_page, word_idxs, coords, has_index = get_match_info(unit, start, end - start)
-            if has_index:                                         
-                continue
-            all_words = unit.words if getattr(unit, "words", None) else [
-                w for item in getattr(unit, "items", []) for w in item.words
-            ]
-            matched = [w for w in all_words if not (w.end_char <= start or w.start_char >= end)]
-            if main_font and any(w.font != main_font for w in matched):   
-                continue
-            if any(is_math_font(w.font) or has_math_characters(w.text) for w in matched):
-                continue
-            lang = getattr(unit, "language", getattr(block, "language", "pl"))
-            message = ("Missing space before a bibliography citation." if lang == "en"
-                       else "Brak spacji przed odwołaniem do bibliografii.")
-            checked_matches.append(Error_type(
-                content=text[start:end], category="PUNCTUATION", message=message,
-                offset=start, error_length=end - start, block_id=unit.block_id,
                 page_start=start_page, page_end=end_page, word_idxs=word_idxs, error_coordinate=coords,
             ))
     return checked_matches
