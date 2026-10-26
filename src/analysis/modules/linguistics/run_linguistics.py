@@ -1,11 +1,11 @@
 from analysis.modules.linguistics.language_error_extractor import *
 from analysis.modules.linguistics.decimal_point_extractor import decimal_check
-from analysis.modules.linguistics.dash_check import dash_check
+from analysis.modules.linguistics.dash_check import dash_check, abbreviation_space_check
 from analysis.modules.linguistics.exeptions_check import *
 from analysis.modules.linguistics.list_check import check_coherence_in_list
 from analysis.modules.linguistics.sentence_check import *
 from analysis.modules.linguistics.proper_names import get_proper_names
-from analysis.modules.linguistics.helpers import get_context, extract_chapter_numbers
+from analysis.modules.linguistics.helpers import get_context, extract_chapter_numbers, extract_errors_to_json
 from analysis.modules.linguistics.first_definition import check_first_definition
 from analysis.modules.linguistics.check_acronym import check_if_was_defined
 from analysis.extraction.main_extractor import extractPDF
@@ -85,16 +85,17 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     check_cancelled(cancel_token)
     decimal_matches = decimal_check(blocks, chapter_nums)
     dash_matches = dash_check(blocks)
+    main_font = raw_blocks.metadata.get("main_font")
+    abbreviation_matches = abbreviation_space_check(blocks, main_font=main_font)
     language_matches = language_tool_analisys(blocks)
     check_cancelled(cancel_token)
     list_matches = check_coherence_in_list(blocks, proper_names, acronyms_with_definitions)
 
-    main_font = raw_blocks.metadata.get("main_font")
     checked_exeptions = check_exeptions(language_matches, blocks, proper_names, main_font)
     language_style_matches, sentence_analisys = sentence_check(blocks, check_first_person=check_first_person, acronyms_with_definitions=acronyms_with_definitions, chapter_nums=chapter_nums)
     check_cancelled(cancel_token)
 
-    matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + bib_matches + italic_matches
+    matches = checked_exeptions + decimal_matches + list_matches + acronym_matches + language_style_matches + dash_matches + abbreviation_matches + bib_matches + italic_matches
     before_image_filter = len(matches)
     matches = remove_errors_inside_images(matches, raw_blocks)
     logger.info("Image overlap filter removed %d matches", before_image_filter - len(matches))

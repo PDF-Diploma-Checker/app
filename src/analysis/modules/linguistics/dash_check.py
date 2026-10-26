@@ -1,6 +1,7 @@
 import re
 from .linguistics_types import Error_type
 from .helpers import get_match_info 
+from .exeptions_check import check_quotes
 import logging
 from collections import Counter
 from .exeptions_check import remove_errors_different_font
@@ -32,7 +33,7 @@ def dash_check(blocks, main_font=None):
         if unit.type in {"acronyms", "toc", "tof", "tot"}:
             for word in unit.words:
                 if word.text == '-':
-                    if block.block.language == 'en':
+                    if unit.language == 'en':
                         message = "Hyphen instead of en dash in a definition."
                     else:
                         message = "Dywiz zamiast półpauzy w definicji."
@@ -151,7 +152,7 @@ def dash_check(blocks, main_font=None):
             date_space_regex = r'(\d+\s+[–-]\s+\d+)'
             for m in re.finditer(date_space_regex, text):
                 start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
-                if block.block.language == 'en':
+                if unit.language == 'en':
                     message = "In Polish date/number ranges, no spaces are used around the dash."
                 else:
                     message = "W polskich zakresach dat/liczb nie używa się spacji wokół myślnika."     
@@ -189,3 +190,45 @@ def dash_check(blocks, main_font=None):
     for error_type, count in msg_counts.most_common():
         logger.info("  Dash error type '%s': %d", error_type, count)
     return checked_matches
+
+
+ABBREV_NO_SPACE = re.compile(
+    r'(?<![\w.])(?:tzw|tzn|np|itp|itd|tj|wg|ww|ds|ang|pol|niem|fr)\.(?=[a-ząćęłńóśźż])'
+)
+
+def abbreviation_space_check(blocks, main_font=None):
+    '''Finds abbreviations followed by a word with no space after the dot, e.g. "tzw.krótkiej".'''
+    checked_matches = []
+    for block in blocks:
+        unit = block.block
+        if unit.type in {"math", "code_snippet", "toc", "tof", "tot", "acronyms", "keywords"}:
+            continue
+        if unit.type == "list" and getattr(unit, "is_bibliography", False):
+            continue
+        text = block.contents
+        for m in ABBREV_NO_SPACE.finditer(text):
+            word_end = m.end()
+            while word_end < len(text) and text[word_end].isalpha():
+                word_end += 1
+            if check_quotes(m.start(), word_end, text):
+                continue
+            if "/" in text[max(0, m.start() - 10):word_end + 10]:   # adresy URL
+                continue
+            start_page, end_page, word_idxs, coords, has_index = get_match_info(unit, m.start(), word_end - m.start())
+            if has_index:
+                continue
+            all_words = unit.words if hasattr(unit, "words") and unit.words else [
+                w for item in getattr(unit, "items", []) for w in item.words
+            ]
+            matched_words = [w for w in all_words if not (w.end_char <= m.start() or w.start_char >= word_end)]
+            if main_font and any(w.font != main_font for w in matched_words):
+                continue
+            lang = getattr(unit, "language", getattr(block, "language", "pl"))
+            message = "Missing space after an abbreviation." if lang == "en" else "Brak spacji po skrócie."
+            checked_matches.append(Error_type(
+                content=text[m.start():word_end], category="PUNCTUATION", message=message,
+                offset=m.start(), error_length=word_end - m.start(), block_id=unit.block_id,
+                page_start=start_page, page_end=end_page, word_idxs=word_idxs, error_coordinate=coords,
+            ))
+    return checked_matches
+
