@@ -66,7 +66,9 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
                 continue
 
             side = "above" if is_close_above else "below"
-            candidates[side].append((by0, by1, full_text))
+            sizes = [sp.size for line in block.lines for sp in line.spans if sp.text.strip()]
+            block_size = max(set(sizes), key=sizes.count) if sizes else None
+            candidates[side].append((by0, by1, full_text, block_size))
 
     candidates["above"].sort(key=lambda item: item[0])
     candidates["below"].sort(key=lambda item: item[0])
@@ -78,7 +80,7 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
         if not block_list:
             return ""
         start_idx = -1
-        for idx, (_, _, text) in enumerate(block_list):
+        for idx, (_, _, text, _) in enumerate(block_list):
             if text.lower().startswith(img_keywords):
                 start_idx = idx
                 break
@@ -88,18 +90,25 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
         caption_parts = [block_list[start_idx][2]]
         last_by1 = block_list[start_idx][1]
+        caption_size = block_list[start_idx][3]
 
         for idx in range(start_idx + 1, len(block_list)):
-            curr_by0, curr_by1, text = block_list[idx]
+            curr_by0, curr_by1, text, curr_size = block_list[idx]
             if (curr_by0 - last_by1) < 18:
                 if text.lower().startswith(img_keywords):
                     break 
+                if (
+                    caption_size is not None
+                    and curr_size is not None
+                    and abs(curr_size - caption_size) > 0.5
+                ):
+                    break
                 caption_parts.append(text)
                 last_by1 = curr_by1
             else:
                 break
 
-        return " ".join(caption_parts)
+        return " ".join(" ".join(caption_parts).split())
 
     caption_primary = build_full_caption(candidates[primary])
     if caption_primary:
@@ -110,6 +119,66 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
         return caption_secondary, secondary
 
     return "", priority_side
+
+def merge_fragment_images(
+    page: fitz.Page, cur_page: PageData, min_overlap: float = 0.2, pad: float = 5.0
+) -> None:
+    """
+    Merges small raster fragments (e.g. nodes of a diagram stored as separate bitmaps)
+    into the bigger image they overlap. The container's bbox becomes the union of both
+    boxes and the container is re-rendered, so nothing sticking out of the original
+    clip is cut off. Fragment files are removed; the caption of a fragment is inherited
+    if the container has none.
+    """
+    import os
+
+    def area(b):
+        return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+    def inter(a, b):
+        w = min(a[2], b[2]) - max(a[0], b[0])
+        h = min(a[3], b[3]) - max(a[1], b[1])
+        return max(0.0, w) * max(0.0, h)
+
+    changed = True
+    while changed and len(cur_page.images) > 1:
+        changed = False
+        images = cur_page.images
+        for i, small in enumerate(images):
+            a_small = area(small.bbox)
+            if a_small <= 0 or small.image_type != "raster":
+                continue
+            for j, big in enumerate(images):
+                if i == j or area(big.bbox) <= a_small * 1.05:
+                    continue
+                if inter(small.bbox, big.bbox) / a_small < min_overlap:
+                    continue
+
+                union = fitz.Rect(big.bbox) | fitz.Rect(small.bbox)
+                clip = (union + (-pad, -pad, pad, pad)) & page.rect if big.image_type == "vector" else union
+                try:
+                    if big.image_type == "vector":
+                        pix = page.get_pixmap(clip=clip)
+                        pix.save(big.path)
+                        big.width, big.height = pix.width, pix.height
+                    big.bbox = (union.x0, union.y0, union.x1, union.y1)
+                except Exception as e:
+                    logging.error(f"Failed to re-render merged image {big.path}: {e}")
+                    continue
+
+                if not big.description and small.description:
+                    big.description = small.description
+                try:
+                    if small.path and os.path.isfile(small.path):
+                        os.remove(small.path)
+                except OSError as e:
+                    logging.warning(f"Could not remove {small.path}: {e}")
+                del cur_page.images[i]
+                changed = True
+                break
+            if changed:
+                break
+
 
 def extract_vector_graphics(
     page: fitz.Page,

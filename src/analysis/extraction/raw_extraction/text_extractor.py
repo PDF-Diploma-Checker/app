@@ -13,6 +13,8 @@ PUNCTUATION = (
     "(", ")", "[", "]", "{", "}", '"', "'", "”", "„",
     ".", ",", ":", ";", "?", "!", "-",
 )
+MATH_FONT_NAMES = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
+OPENING_PUNCTUATION = "([{„\"“'"
 CLOSING_PUNCTUATION = ".,;:!?)]}”\""
 
 
@@ -73,6 +75,107 @@ def check_if_span_taken(word, current_span, raw_line) -> bool:
             return True
     return False
 
+def split_straddling_words(block_words: list, raw_block: dict) -> list:
+    """
+    PyMuPDF's "words" mode splits on whitespace characters only. LaTeX (and Word equations)
+    place inline math next to text using glue/kerning, NOT a space character, so the word
+    list contains tokens glued across a font change, e.g. '𝐺 reprezentuje' (math span + Arial span)
+    or '𝑉∗oznacza'. Such a token is not contained in any single span, so parse_text_block
+    never assigns it to one and the text is silently lost.
+
+    This function splits such tokens at span boundaries (only where the font/size changes), using
+    the text of the raw spans to decide where the cut goes. Each piece gets a bbox taken from the
+    span it belongs to. Tokens that cannot be split reliably are returned unchanged.
+    """
+    spans = []
+    for raw_line in raw_block.get("lines", []):
+        for sp in raw_line.get("spans", []):
+            if sp["text"].strip():
+                spans.append(sp)
+    if len(spans) < 2:
+        return block_words
+
+    result = []
+    for w in block_words:
+        wx0, wy0, wx1, wy1, wtext = w[0], w[1], w[2], w[3], w[4]
+        hit = []
+        for sp in spans:
+            sx0, sy0, sx1, sy1 = sp["bbox"]
+            x_ov = min(wx1, sx1) - max(wx0, sx0)
+            y_ov = min(wy1, sy1) - max(wy0, sy0)
+            if x_ov > 0.5 and y_ov > 0.3 * min(wy1 - wy0, sy1 - sy0):
+                hit.append(sp)
+        if len(hit) < 2:
+            result.append(w)
+            continue
+
+        hit.sort(key=lambda sp: sp["bbox"][0])
+        if len({(sp["font"], round(sp["size"], 1)) for sp in hit}) < 2:
+            result.append(w)
+            continue
+
+        pieces = []
+        rem = wtext
+        ok = True
+        for i, sp in enumerate(hit):
+            if i == len(hit) - 1:
+                piece = rem
+            else:
+                st = sp["text"].strip()
+                piece = None
+                for k in range(min(len(st), len(rem)), 0, -1):
+                    if rem.startswith(st[-k:]):
+                        piece = rem[:k]
+                        break
+                if piece is None:
+                    ok = False
+                    break
+            if not piece:
+                ok = False
+                break
+            pieces.append((sp, piece))
+            rem = rem[len(piece):]
+        if not ok or rem:
+            result.append(w)
+            continue
+
+        touches_math = any(
+            any(m in sp["font"].lower() for m in MATH_FONT_NAMES) for sp, _ in pieces
+        )
+        if not touches_math and any(
+            all(ch in PUNCTUATION for ch in piece) for _, piece in pieces
+        ):
+            result.append(w)
+            continue
+
+        merged = []  # [span, tekst, x0, x1]
+        carry = ""
+        carry_x0 = None
+        for i, (sp, piece) in enumerate(pieces):
+            sbx0, _, sbx1, _ = sp["bbox"]
+            nx0 = wx0 if i == 0 else sbx0
+            nx1 = wx1 if i == len(pieces) - 1 else sbx1
+            if merged and all(ch in CLOSING_PUNCTUATION for ch in piece):
+                merged[-1][1] += piece
+                merged[-1][3] = nx1
+                continue
+            if i < len(pieces) - 1 and all(ch in OPENING_PUNCTUATION for ch in piece):
+                carry += piece
+                carry_x0 = nx0 if carry_x0 is None else carry_x0
+                continue
+            if carry:
+                piece = carry + piece
+                nx0 = carry_x0
+                carry, carry_x0 = "", None
+            merged.append([sp, piece, nx0, nx1])
+        if carry and merged:
+            merged[-1][1] += carry
+        for sp, piece, nx0, nx1 in merged:
+            nw = list(w)
+            nw[0], nw[1], nw[2], nw[3], nw[4] = nx0, sp["bbox"][1], nx1, sp["bbox"][3], piece
+            result.append(tuple(nw))
+    return result
+
 
 def parse_text_block(
     raw_block: dict,
@@ -94,14 +197,14 @@ def parse_text_block(
         for x in word_list:
             if x[5] == raw_block["number"]:
                 block_words.append(x)
+        block_words = split_straddling_words(block_words, raw_block)
 
-        # Lista użytych słów, żeby nie powielać słowa
         used_words = set()
 
         for raw_line in raw_block["lines"]:
             try:
                 spans = []
-                max_font_size = 0.0  # Do znalezienia słowa o największej czcionce w linijce.
+                max_font_size = 0.0  
 
                 for idx_raw, raw_span in enumerate(raw_line["spans"]):
                     if not raw_span["text"].strip():
