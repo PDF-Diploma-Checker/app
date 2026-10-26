@@ -6,9 +6,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-def initials_match(acronym, definition, proper_names, block = None):
+def initials_match(acronym, definition, proper_names, block = None, strict = False):
     """
     Verifies if the acronym initials match the given definition.
+    With strict=True only the exact initials / CamelCase match is accepted.
     """
 
     org_words = [w for w in re.split(r'\s+', definition.strip()) if w]
@@ -40,6 +41,9 @@ def initials_match(acronym, definition, proper_names, block = None):
                 word_lemma = lemmatization(word_clean, def_language)
                 proper_names.append((word_clean, word_lemma))
         return True
+
+    if strict:
+        return False
 
     if not pl_def and len(org_words) >= len(acronym):
         initials_all = [part[0].upper() for w in org_words for part in w.split('-') if part and part[0].isalpha()]
@@ -177,6 +181,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     paragraph_acr_expansion_suffix = re.compile(r'\b([A-Z]{2,})\s*\((?:ang\.|pol\.|fr\.|niem\.|łac\.)?\s*([A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*[\-\u2013\u2014,;]\s*(?:ang\.|pol\.|fr\.|niem\.|łac\.)[^)]*\)', re.UNICODE)
     paragraph_def_then_ang = re.compile(r'\b([A-Z]{2,})\s*\([^()]*?[\s,;\-\u2013\u2014]\s*(?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+([^()]{3,}?)\s*\)', re.UNICODE)
     foreign_def_in_parenthesis = re.compile(r'\(\s*(?:ang\.|pol\.|niem\.|fr\.|\u0142ac\.)\s*["\u201e\u201c\u00ab]?([A-Za-z\u00d3\u00f3\u0104-\u017e][^,;:!?()\[\]"\u201d\u00bb\u2013\u2014]*?)\s*(?=[,;:!?()\[\]"\u201d\u00bb\u2013\u2014]|\s[\-\u2010\u2011]\s|$)', re.UNICODE)
+    paragraph_acr_dash_def = re.compile(r'\b([A-Z]{2,10})\s+[\-\u2013\u2014]\s+([A-Z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b][A-Za-z\u00d3\u00f3\u0104-\u017e\-]*(?:\s+[A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\-]*)+?)(?=\s+[\-\u2013\u2014]|\s*[,;.(]|$)(?:\s*\((?:ang\.|pol\.|niem\.|fr\.|\u0142ac\.)\s+([^()]{3,}?)\s*\))?', re.UNICODE)
     split = re.compile(r"\s[-\u2013\u2014]\s")
 
     if extracted_acronyms:
@@ -215,6 +220,15 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
         if block.type in ("paragraph", "heading", "list"):
             if block.type == "list" and block.is_bibliography:
                 continue
+            if block.type == "paragraph":
+                text = normalize_math_letters(block.content)
+                for acronym, definition, foreign_definition in paragraph_acr_dash_def.findall(text):
+                    if not potential_acronym(acronym):
+                        continue
+                    for candidate in (definition, foreign_definition):
+                        if candidate and initials_match(acronym, candidate, proper_names, block, strict=True):
+                            acronyms_with_definitions = check_position_if_new(acronym, candidate, words, block.block_id, acronyms_with_definitions)
+                            break
             if '(' in block.content or ')' in block.content:
                 text = normalize_math_letters(block.content)
                 new_acronyms = paragraph_acr_first.findall(text)
