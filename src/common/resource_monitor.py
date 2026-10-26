@@ -18,6 +18,7 @@ from common import system_info
 
 logger = logging.getLogger(__name__)
 
+_SMOOTH_SAMPLES = 5            # readings averaged for the number shown in the UI
 _GPU_QUERY = "utilization.gpu,memory.used,memory.total,temperature.gpu"
 
 
@@ -105,9 +106,16 @@ class ResourceMonitor:
         while not self._stop.is_set():
             sample = {"time": time.monotonic(), "cpu": self._cpu.sample()}
             if self.watch_gpu:
-                sample["gpu"] = gpu_live_stats()
-                if sample["gpu"]:
-                    self._gpu_samples.append(sample["gpu"])
+                raw = gpu_live_stats()
+                if raw:
+                    self._gpu_samples.append(raw)
+                    # the card is often idle for a moment while the processor works on the layers that did not fit
+                    # into the video memory, so one reading can be 0% although the model sits on the GPU: show the
+                    # average of the last few readings instead (the log summary keeps the real peak and average)
+                    recent = self._gpu_samples[-_SMOOTH_SAMPLES:]
+                    sample["gpu"] = dict(raw, util=sum(r["util"] for r in recent) / len(recent), util_now=raw["util"])
+                else:
+                    sample["gpu"] = None
             if sample["cpu"] is not None:
                 self._cpu_samples.append(sample["cpu"])
             self.latest = sample
