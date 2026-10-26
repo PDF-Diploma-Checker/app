@@ -290,18 +290,30 @@ class EtaTracker:
                 self.ratio = (now - self.start) / predicted
 
     def remaining(self, now=None):
-        """Seconds left, or None when there is nothing sensible to say yet."""
+        """Seconds left. It always accounts for the time that has already passed, so the total shown next to it
+        (elapsed + left) never contradicts it."""
         now = time.monotonic() if now is None else now
         elapsed = now - self.start
-        if len(self.estimate.stages) == 1:                      # fast mode: the bar is the only information
-            if self._last_value >= 10:
-                return max(elapsed * (100 - self._last_value) / self._last_value, 0.0)
-            return max(self._total - elapsed, 10.0)
-        if self.ratio is None:
-            return max(self._total - elapsed, 0.1 * self._total)
-        ahead = self._total - self._predicted_start.get(self.stage, 0.0)
+        total = max(self._total, 1.0)
+        if len(self.estimate.stages) == 1:
+            # fast mode: the progress bar says little (it stops at 50% until the very end), so use the model
+            left = total - elapsed
+            if left > 0:
+                return max(left, 0.05 * total)
+            return max(0.3 * elapsed, 30.0)             # slower than predicted: some more is still to come
+        if self.ratio is None:                          # still preparing: no real data about the speed yet
+            left = total - elapsed
+            return max(left, 0.1 * total) if left > 0 else max(0.3 * elapsed, 30.0)
+        order = [(k, s) for k, s in self.estimate.stages]
+        keys = [k for k, _ in order]
+        i = keys.index(self.stage) if self.stage in keys else len(keys) - 1
+        current = order[i][1]
+        after = sum(s for _, s in order[i + 1:])
         in_stage = now - self.stage_started.get(self.stage, now)
-        return max(self.ratio * ahead - in_stage, 0.05 * self._total)
+        current_left = self.ratio * current - in_stage
+        if current_left <= 0:                           # this stage runs longer than predicted
+            current_left = 0.25 * in_stage
+        return max(current_left + self.ratio * after, 0.03 * total)
 
     def stage_seconds(self, now=None):
         """Real seconds of every stage reached so far."""
