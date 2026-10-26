@@ -23,6 +23,8 @@ class WordInfo:  # Położenie XY oraz relatywne słowa
     line: int = 0
     incorrect_bibliography: int = 0
     is_index: bool = False
+    glued_to_prev: bool = False        # a "[n]" span that touches the word before it (no gap in the PDF)
+    missing_bib_space: int = 0         # 1 = no space between the text and a bibliography reference: "tekst[17]"
 
 
 @dataclass
@@ -54,6 +56,7 @@ class ListItem:
     text: str
     bbox: List[float]
     words: List[WordInfo] = field(default_factory=list)
+    is_widow: int = 0                  # words of a too short last line (used for bibliography entries)
 
 
 @dataclass

@@ -486,6 +486,8 @@ class PDFMapper:
         full_text_with_spaces = " ".join(w.text for w in words)
         if re.search(r"(?:\.\s*){4,}", full_text_with_spaces):
             return 0
+        if PDFMapper._is_citation_only(full_text_with_spaces):
+            return 0
 
 
         math_font_names = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
@@ -646,6 +648,7 @@ class PDFMapper:
                         page_number=word.page_number,
                         line=word.line,
                         is_index = getattr(word, "is_index", False),
+                        glued_to_prev = getattr(word, "glued_to_prev", False),
                     )
                 )
 
@@ -913,6 +916,28 @@ class PDFMapper:
         self._handle_marker_line(new_marker, None)
 
     # Logika podziału i (wielokrotnych) spacji
+    # "... decyzji. [18]" / "... decyzji. [17, s. 73]": the sentence ended before the citation
+    _SENTENCE_THEN_CITATION = re.compile(r"[.!?:;]\s*(?:\[[^\[\]\n]{1,40}\]\s*)+$")
+    # a line made only of citations: "[18]", "[19], [20]", "[17, s. 73]"
+    _CITATION_ONLY = re.compile(
+        r"(?:\[\s*\d[\d\s,;\-\u2013]*(?:,?\s*(?:s|ss|str|p|pp)\.?\s*\d[\d\s\-\u2013]*)?\]\s*[,;.]?\s*)+",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_citation_only(cls, text):
+        return bool(text) and bool(cls._CITATION_ONLY.fullmatch(text.strip()))
+
+    @classmethod
+    def _ends_sentence(cls, text):
+        """True when `text` ends with sentence punctuation, also when only a bibliography citation follows it."""
+        text = text.strip()
+        return bool(text) and (
+            text[-1] in {".", "!", "?", ":", ";"}
+            or bool(cls._SENTENCE_THEN_CITATION.search(text))
+            or cls._is_citation_only(text)
+        )
+
     def _detect_paragraph_break(
         self,
         current_y0,
@@ -959,20 +984,20 @@ class PDFMapper:
         if full_text.strip():
             stripped = full_text.strip()
             finished = (
-                stripped[-1] in {".", "!", "?", ":", ";"}
+                self._ends_sentence(stripped)
                 or bool(self.IMG_PATTERN.match(stripped))
                 or bool(self.TAB_PATTERN.match(stripped))
             )
         elif self.paragraph_buffer:
             p_content = self.paragraph_buffer[-1]["content"].strip()
             finished = (
-                p_content[-1] in {".", "!", "?", ":", ";"}
+                self._ends_sentence(p_content)
                 or bool(self.IMG_PATTERN.match(p_content))
                 or bool(self.TAB_PATTERN.match(p_content))
             )
         elif self.list_buffer:
             item_text = self.list_buffer[-1]["item"].text.strip()
-            finished = bool(item_text and item_text[-1] in {".", "!", "?", ":", ";"})
+            finished = bool(item_text and self._ends_sentence(item_text))
 
         # Wertykalna przerwa
         if self.last_y1 is not None:
@@ -1060,6 +1085,7 @@ class PDFMapper:
 
         m_gap = statistics.median(line_gaps) if line_gaps else 3.0
         prev_span_x1 = None
+        prev_span_text = ""
 
         span_sizes = [s.size for s in line.spans if s.text.strip()]
         line_base_size = statistics.mode(span_sizes) if span_sizes else getattr(self, "main_font_size", 12.0)
@@ -1088,8 +1114,15 @@ class PDFMapper:
                 prev_span_x1 = span.bbox[2]
                 continue
 
+            glued_to_prev = False
             if prev_span_x1 is not None:
                 current_gap = span.bbox[0] - prev_span_x1
+                # "[17]" printed right against the word before it (the space is only added by the code below)
+                glued_to_prev = bool(
+                    re.match(r"^\[\s*\d", word_text)
+                    and prev_span_text[-1:].isalpha()
+                    and current_gap < 0.12 * max(getattr(span, "size", 0) or 0, 1.0)
+                )
 
                 if not (
                     full_text.rstrip().endswith("-")
@@ -1135,6 +1168,7 @@ class PDFMapper:
                         page_number=page_num,
                         line=self.curr_line,
                         is_index = is_span_index,
+                        glued_to_prev = glued_to_prev and i == 0,
                     )
                 )
 
@@ -1145,6 +1179,7 @@ class PDFMapper:
                 current_sub_x0 = sub_x1 + space_width
 
             prev_span_x1 = span.bbox[2]
+            prev_span_text = word_text
 
         line_y0 = line.spans[0].bbox[1] if line.spans else line.bbox[1]
         if getattr(self, "_last_extracted_y0", None) is not None:
@@ -1202,6 +1237,8 @@ class PDFMapper:
         self._tag_visual_descriptions(new_doc)
         self._pair_descriptions_with_visuals(new_doc)
         self._verify_bibliography_references()
+        self._flag_bibliography_widows()
+        self._flag_lonely_citations()
         self._verify_caption_sources(new_doc)
         self._fix_offsets()
         self._assign_unique_ids()
@@ -2164,7 +2201,8 @@ class PDFMapper:
         if not valid_bib_numbers:
             return
 
-        citation_pattern = re.compile(r"((?:\[[\d\s,\-]+\])+)")
+        page_part = r"\d+\s*,\s*(?:s|ss|str|p|pp)\.?\s*\d+(?:\s*[-\u2013]\s*\d+)?"
+        citation_pattern = re.compile(r"((?:\[(?:[\d\s,\-]+|\s*" + page_part + r"\s*)\])+)", re.IGNORECASE)
 
         math_interval_context = re.compile(
             r"\b(przedział\w*|przedziale\w*|zakres\w*|zakresie\w*|zbior\w*|zbiorze\w*|dziedzin\w*|wartość\w*|wartości\w*|interval|range)\s*$",
@@ -2176,8 +2214,12 @@ class PDFMapper:
             handling comma-separated values, hyphenated ranges..
             """
             nums = set()
-            brackets = re.findall(r"\[([\d\s,\-]+)\]", cit_str)
+            brackets = re.findall(r"\[([^\[\]]+)\]", cit_str)
             for raw_content in brackets:
+                with_page = re.match(r"^\s*(\d+)\s*,\s*(?:s|ss|str|p|pp)\.?\s*\d", raw_content, re.IGNORECASE)
+                if with_page:                                   # "[17, s. 73]": reference 17, page 73
+                    nums.add(with_page.group(1))
+                    continue
                 for part in raw_content.split(","):
                     part = part.strip()
                     if "-" in part:
@@ -2227,6 +2269,71 @@ class PDFMapper:
                         for word in words:
                             if word.start_char < end_pos and word.end_char > start_pos:
                                 word.incorrect_bibliography = 1
+                    elif nums:
+                        self._flag_missing_space_before_citation(text, words, match.start(), match.end())
+
+    def _flag_missing_space_before_citation(self, text, words, start_pos, end_pos):
+        """
+        Marks a correct citation "[n]" that is written without a space after the word before it ("tekst[17]").
+        It is recognised either from the text (the word and the citation are one string) or from the geometry
+        (two spans without any gap, see _extract_words_from_line: WordInfo.glued_to_prev).
+        """
+        cited = [w for w in words if w.start_char < end_pos and w.end_char > start_pos]
+        if not cited:
+            return
+        if any(mono in (getattr(w, "font", "") or "").lower() for w in cited for mono in self.MONOSPACE_FONTS):
+            return                                                      # program code, not a citation
+        before = text[max(0, start_pos - 30):start_pos]
+        if before.endswith(" "):
+            if not cited[0].glued_to_prev:
+                return                                                  # a real space
+            before = before.rstrip()
+        with_page = re.search(r",\s*(?:s|ss|str|p|pp)\.?\s*\d", text[start_pos:end_pos], re.IGNORECASE)
+        letters = r"[^\W\d_]{1,}$" if with_page else r"[^\W\d_]{2,}$"
+        if re.search(letters, before):
+            cited[0].missing_bib_space = 1
+
+    def _flag_bibliography_widows(self):
+        """
+        Bibliography entries are lists, so they never got the paragraph checks. A widow (a last line of 1-2 words)
+        is looked for in every entry; the result is stored on the entry (ListItem.is_widow).
+        """
+        for block in self.logical_blocks:
+            if getattr(block, "is_bibliography", False) and hasattr(block, "items"):
+                for item in block.items:
+                    item.is_widow = is_widow_func(item.words) if item.words else 0
+
+    def _flag_lonely_citations(self):
+        """
+        A citation left alone on its own line ("... decyzji." / "[18]") is a widow, also when the PDF puts it in a
+        separate block (then it is a one-line "paragraph" and the usual last-line check never sees it).
+        - a paragraph made only of citations, right after a paragraph or a list -> widow on the citation words,
+        - a (non-bibliography) list item whose last line is only a citation -> ListItem.is_widow.
+        """
+        blocks = self.logical_blocks
+        for idx, block in enumerate(blocks):
+            if getattr(block, "is_bibliography", False):
+                continue
+            if getattr(block, "type", "") == "paragraph":
+                words = getattr(block, "words", None) or []
+                if not words or len(words) > 4 or not self._is_citation_only(block.content):
+                    continue
+                prev = blocks[idx - 1] if idx > 0 else None
+                if prev is None or getattr(prev, "type", "") not in ("paragraph", "list"):
+                    continue
+                if getattr(prev, "is_bibliography", False):
+                    continue
+                block.is_widow = len(words)
+            elif getattr(block, "type", "") == "list":
+                for item in getattr(block, "items", []) or []:
+                    words = item.words or []
+                    if len(words) < 2:
+                        continue
+                    last = (words[-1].page_number, words[-1].line)
+                    tail = [w for w in words if (w.page_number, w.line) == last]
+                    if len(tail) < len(words) and self._is_citation_only(" ".join(w.text for w in tail)):
+                        item.is_widow = len(tail)
+
     def _extract_acronyms_to_schema(self, new_doc):
         """
         Post-processing routine that identifies the acronyms, abbreviations, or symbols
@@ -2748,6 +2855,7 @@ class PDFMapper:
                 target.incorrect_bibliography = max(
                     target.incorrect_bibliography, word.incorrect_bibliography
                 )
+                target.missing_bib_space = max(target.missing_bib_space, word.missing_bib_space)
                 deleted_spaces.append(space)
                 removed.append(word)
             else:

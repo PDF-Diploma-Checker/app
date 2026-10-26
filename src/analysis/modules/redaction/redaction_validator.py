@@ -532,6 +532,26 @@ class RedactionValidator:
                     error = self._handle_bibliography(word)
                     if error:
                         self.errors.append(error)
+                if getattr(word, "missing_bib_space", 0) == 1:
+                    self.errors.append(self._handle_bibliography_space(word))
+
+    def _handle_bibliography_space(self, word):
+        """Error for a bibliography reference written without a space after the text: "tekst[17]"."""
+        lang = getattr(self, "language", "pl")
+        if lang == "en":
+            comment = "Missing space between the text and the bibliography reference (e.g. 'text [17]', not 'text[17]')."
+        else:
+            comment = "Brak spacji między tekstem a odwołaniem do bibliografii (powinno być np. „tekst [17]”, a nie „tekst[17]”)."
+
+        return Error(
+            id=self._get_next_id(),
+            module=self.module,
+            category="missing_space_before_citation",
+            page_number=word.page_number,
+            bounding_box=word.bbox,
+            text=word.text,
+            comments=comment,
+        )
 
     def _handle_bibliography(self, word):
         """
@@ -572,6 +592,14 @@ class RedactionValidator:
                     error = self._handle_widow(block, widow_which)
                     if error:
                         self.errors.append(error)
+            elif getattr(block, "type", "") == "list" or getattr(block, "is_bibliography", False):
+                # elementy listy (m.in. wpisy bibliografii): wdowa jest zapisana przy kazdym elemencie
+                for item in getattr(block, "items", []):
+                    item_widow = getattr(item, "is_widow", 0)
+                    if item_widow > 0:
+                        error = self._handle_widow(item, item_widow)
+                        if error:
+                            self.errors.append(error)
 
     def check_bibliography_summary(self):
         """
@@ -1753,4 +1781,4 @@ class RedactionValidator:
 
             logging.info(
                 f"ID: {error_id} | type: {category} | page: {page} | text: {text_preview!r}"
-            )      
+            )
