@@ -10,6 +10,7 @@ make_llama() is a drop-in replacement for `Llama(...)` that adds two things the 
 
 import logging
 import os
+import sys
 import time
 
 import numpy as np
@@ -60,6 +61,43 @@ def device_description(n_gpu_layers, vram_used_mb=None):
     return True, f"GPU ({name}), {layers}{memory}"
 
 
+def _free_gpu_memory():
+    import gc
+
+    gc.collect()
+    torch = sys.modules.get("torch")
+    try:
+        if torch is not None and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+
+def _create_with_fallback(purpose, kwargs):
+    """Create the model; when it does not fit into the video memory retry with fewer layers on the GPU.
+
+    Returns (model, layers actually used). A card with little memory (4 GB) cannot hold the model plus its context:
+    llama.cpp then fails with "Failed to load model" or "Failed to create llama_context". Better a slower analysis
+    with some layers on the processor than no analysis at all.
+    """
+    layers = kwargs.get("n_gpu_layers", 0)
+    while True:
+        try:
+            return _CancellableLlama(**dict(kwargs, n_gpu_layers=layers)), layers
+        except (ValueError, RuntimeError, MemoryError) as error:
+            if not layers:
+                raise                                   # already on the processor: a real problem
+            run_control.check_cancelled()
+            lower = layers // 2 if layers > 1 else 0
+            if layers < 0:
+                lower = 24                              # "all layers" did not fit: start from a number
+            logger.warning("%s: the model does not fit with n_gpu_layers=%s (%s); retrying with %s",
+                           purpose, layers, error, lower)
+            run_control.notify(f"{purpose}: za mało pamięci karty, ponawiam z mniejszą liczbą warstw GPU ({lower})")
+            _free_gpu_memory()
+            layers = lower
+
+
 def make_llama(purpose="model", **kwargs):
     """Create a cancellable Llama and report on which device it runs. `purpose` is a short name for the log."""
     run_control.check_cancelled()
@@ -71,7 +109,8 @@ def make_llama(purpose="model", **kwargs):
     before = gpu_check.gpu_memory_used_mb() if watch_memory else None
     started = time.monotonic()
 
-    llm = _CancellableLlama(**kwargs)
+    llm, layers = _create_with_fallback(purpose, kwargs)
+    kwargs["n_gpu_layers"] = layers
 
     seconds = time.monotonic() - started
     after = gpu_check.gpu_memory_used_mb() if watch_memory else None
