@@ -17,7 +17,7 @@ from analysis.modules.llm.config import (
 )
 from common.cancellation import AnalysisCancelled, CancelToken
 
-from common import eta, run_control
+from common import eta, gpu_check, run_control
 from common.resource_monitor import ResourceMonitor, format_stats
 from common.cancellation import AnalysisCancelled, CancelToken
 
@@ -311,7 +311,7 @@ class AnalysisDialog(QDialog):
         """(text, colour, background) describing what the AI calculations will run on, from the saved settings."""
         cfg = load_config()
         layers = cfg.get("n_gpu_layers", 0)
-        if cfg.get("device") == "cuda" and layers:
+        if cfg.get("device") == "cuda" and layers and gpu_check.llama_gpu_support():
             return (t("analysis.device_line_gpu", layers="max" if layers < 0 else layers),
                     styles.SUCCESS, styles.SUCCESS_BG)
         return t("analysis.device_line_cpu"), styles.WARNING, styles.WARNING_BG
@@ -792,11 +792,12 @@ class AnalysisDialog(QDialog):
         if self.monitor is not None and self.stats_label.isVisible():
             self.stats_label.setText(format_stats(self.monitor.latest, t))
         if self.tracker is not None and self.estimate is not None and not self.worker.cancel_token.is_cancelled():
-            total = eta.format_duration(self.estimate.total_s, t)
             left = self.tracker.remaining()
             if left is None:
+                total = eta.format_duration(self.estimate.total_s, t)
                 self.eta_run_label.setText(t("analysis.eta_run_total", total=total))
             else:
+                total = eta.format_duration(self.tracker.elapsed() + left, t)     # always consistent with left
                 self.eta_run_label.setText(t("analysis.eta_run", total=total, left=eta.format_duration(left, t)))
 
     def _stop_monitor(self):
