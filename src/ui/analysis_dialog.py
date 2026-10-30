@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -9,22 +10,22 @@ from PySide6.QtWidgets import (
 
 from analysis.modules.llm.config import (
     are_ai_models_downloaded,
-    download_ai_models_with_progress,
     download_specific_language,
     llm_runtime_available,
     load_config,
     save_config,
 )
-from common.cancellation import AnalysisCancelled, CancelToken
 
 from common import eta, gpu_check, run_control
-from common.resource_monitor import ResourceMonitor, format_stats
+from common.resource_monitor import ResourceMonitor
 from common.cancellation import AnalysisCancelled, CancelToken
 
 from . import icons, styles
 from .ai_setup_dialog import AiSetupDialog
 from .i18n import t
 from .message_box import MessageBox
+from .model_download_dialog import download_models
+from .progress_panel import ResourcePanel, StageList, clock
 
 logger = logging.getLogger(__name__)
 
@@ -152,13 +153,12 @@ class PipelineWorker(QThread):
     finished_success = Signal(dict)
     finished_error = Signal(str)
 
-    def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False):
+    def __init__(self, pdf_path, config_path, use_llm, language):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.use_llm = use_llm
         self.language = language
-        self.download_models_flag = download_models_flag
         self.cancel_token = CancelToken()
 
     def cancel(self):
@@ -175,9 +175,6 @@ class PipelineWorker(QThread):
         try:
             self._report_progress(5, t("analysis.checking_language"))
             download_specific_language(self.language)
-
-            if self.use_llm and self.download_models_flag:
-                download_ai_models_with_progress(self._report_progress)
 
             self._report_progress(40, t("analysis.starting_engine"))
             from app.entry import run_analysis_for_pdf
@@ -284,7 +281,8 @@ class PipelineWorker(QThread):
 
 class AnalysisDialog(QDialog):
     CONFIG_SIZE = (640, 830)
-    PROGRESS_SIZE = (640, 340)
+    PROGRESS_SIZE = (640, 480)              # fast mode: no AI stages, no graphics card
+    PROGRESS_SIZE_AI = (640, 710)
 
     def __init__(self, pdf_path, parent=None):
         super().__init__(parent)
@@ -298,7 +296,6 @@ class AnalysisDialog(QDialog):
         self.config_file_path = None
         self.ai_available = llm_runtime_available()
         self.models_available = are_ai_models_downloaded() if self.ai_available else False
-        self.should_download_models = False
         self._close_after_cancel = False
         self.monitor = None
         self._eta_doc = None
@@ -306,6 +303,7 @@ class AnalysisDialog(QDialog):
         self._eta_ready = False
         self.estimate = None
         self.tracker = None
+        self._started = time.monotonic()
         self.stats_timer = QTimer(self)
         self.stats_timer.setInterval(1000)
         self.stats_timer.timeout.connect(self._refresh_stats)
@@ -340,12 +338,9 @@ class AnalysisDialog(QDialog):
         """Show the AI setup (system check, CPU/GPU, models folder). True when the detailed mode can be used."""
         dialog = AiSetupDialog(self, first_run=first_run)
         dialog.exec()
-        if dialog.saved:
-            if are_ai_models_downloaded():
-                self.should_download_models = False
-            else:
-                self.should_download_models = dialog.download_requested
-        self.models_available = are_ai_models_downloaded() or self.should_download_models
+        if dialog.saved and dialog.download_requested:
+            download_models(self)       # right away, with its own progress window, not hidden in the analysis
+        self.models_available = are_ai_models_downloaded()
         if dialog.saved and not self.models_available:
             MessageBox.information(self, t("analysis.no_models_title"), t("analysis.models_still_missing"))
         return bool(dialog.saved and self.models_available)
@@ -402,8 +397,6 @@ class AnalysisDialog(QDialog):
                 lines.append(t("analysis.eta_history", n=est.n_history))
             else:
                 lines.append(t("analysis.eta_rough"))
-            if self.should_download_models:
-                lines.append(t("analysis.eta_download", size=13))
         self.eta_label.setText("\n".join(lines))
 
     @staticmethod
@@ -593,7 +586,7 @@ class AnalysisDialog(QDialog):
             # system check, CPU/GPU, models folder. Without a usable result the fast mode stays selected.
             needs_setup = (
                 not load_config().get("hardware_configured")
-                or (not are_ai_models_downloaded() and not self.should_download_models)
+                or not are_ai_models_downloaded()
             )
             if needs_setup:
                 first_run = not load_config().get("hardware_configured")
@@ -623,30 +616,36 @@ class AnalysisDialog(QDialog):
         self.progress_widget.setStyleSheet("background: transparent;")
         progress_layout = QVBoxLayout(self.progress_widget)
         progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(14)
+        progress_layout.setSpacing(10)
 
+        # time: what is left (big) and what has passed / the whole (small)
+        self.eta_left_label = QLabel(t("analysis.eta_calc"))
+        self.eta_left_label.setStyleSheet(
+            f"font-size: 24px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
+        )
+        self.eta_detail_label = QLabel()
+        self.eta_detail_label.setStyleSheet(styles.HINT_STYLE)
+
+        # current step + percent above the bar
+        step_row = QHBoxLayout()
+        step_row.setSpacing(10)
         self.progress_label = QLabel(t("analysis.preparing"))
         self.progress_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.progress_label.setWordWrap(True)
         self.progress_label.setStyleSheet(
-            f"font-size: 15px; color: {styles.TEXT_3}; background: transparent; border: none;"
+            f"font-size: 14px; color: {styles.TEXT_3}; background: transparent; border: none;"
         )
-
-        self.device_label = QLabel()
-        self.device_label.setWordWrap(True)
-        self.device_label.setStyleSheet(styles.HINT_STYLE)
-        self.device_label.setVisible(False)
-
-        self.eta_run_label = QLabel()
-        self.eta_run_label.setWordWrap(True)
-        self.eta_run_label.setStyleSheet(
-            f"font-size: 14px; font-weight: 500; color: {styles.TEXT}; background: transparent; border: none;"
+        self.percent_label = QLabel("0%")
+        self.percent_label.setStyleSheet(
+            f"font-size: 14px; font-weight: 600; color: {styles.PRIMARY}; background: transparent; border: none;"
         )
+        step_row.addWidget(self.progress_label, 1)
+        step_row.addWidget(self.percent_label, 0, Qt.AlignTop)
 
-        self.stats_label = QLabel()
-        self.stats_label.setWordWrap(True)
-        self.stats_label.setStyleSheet(styles.HINT_STYLE)
-        self.stats_label.setVisible(False)
+        self.stages_title = self._field_label(t("analysis.stages_title"))
+        self.stage_list = StageList()
+        self.resources_title = self._field_label(t("analysis.resources_title"))
+        self.resource_panel = ResourcePanel()
 
         self.pbar = QProgressBar()
         self.pbar.setStyleSheet(styles.PROGRESS_BAR_STYLE)
@@ -659,15 +658,19 @@ class AnalysisDialog(QDialog):
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self.cancel_analysis)
 
-        progress_layout.addStretch()
-        progress_layout.addWidget(self.progress_label)
-        progress_layout.addWidget(self.device_label)
-        progress_layout.addWidget(self.eta_run_label)
-        progress_layout.addWidget(self.stats_label)
+        progress_layout.addWidget(self.eta_left_label)
+        progress_layout.addWidget(self.eta_detail_label)
+        progress_layout.addSpacing(4)
+        progress_layout.addLayout(step_row)
         progress_layout.addWidget(self.pbar)
-        progress_layout.addSpacing(8)
-        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
+        progress_layout.addSpacing(6)
+        progress_layout.addWidget(self.stages_title)
+        progress_layout.addWidget(self.stage_list)
+        progress_layout.addSpacing(6)
+        progress_layout.addWidget(self.resources_title)
+        progress_layout.addWidget(self.resource_panel)
         progress_layout.addStretch()
+        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
         self.main_layout.addWidget(self.progress_widget, 1)
 
         # --- footer -------------------------------------------------------------------
@@ -757,18 +760,23 @@ class AnalysisDialog(QDialog):
 
     def start_analysis(self):
         self._remember_config_file()
-        self._resize_keep_center(self.PROGRESS_SIZE)
+        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
+        chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
+        self._resize_keep_center(self.PROGRESS_SIZE_AI if is_detailed else self.PROGRESS_SIZE)
         self.config_widget.setVisible(False)
         self.footer.setVisible(False)
         self.progress_widget.setVisible(True)
         self.title_label.setText(t("analysis.analyzing"))
+        self.percent_label.setText("0%")
+        self.eta_left_label.setText(t("analysis.eta_calc"))
+        self.eta_detail_label.clear()
 
-        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
-        chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
-
-        self.device_label.setVisible(is_detailed)
-        if is_detailed:
-            self.device_label.setText(self._device_line()[0])
+        hw = self._eta_hw or {}
+        machine = eta.machine_from_config(load_config(), hw)
+        self.resource_panel.configure(is_detailed, machine.gpu, machine.gpu_layers,
+                                      gpu_name=hw.get("gpu_name", ""), threads=hw.get("threads"))
+        self.stages_title.setVisible(is_detailed)
+        self.stage_list.setVisible(is_detailed)
 
         self.run_pipeline_worker(is_detailed, chosen_lang)
 
@@ -776,13 +784,21 @@ class AnalysisDialog(QDialog):
         eta.take_model_loads()
         self.estimate = self._current_estimate()
         self.tracker = eta.EtaTracker(self.estimate) if self.estimate else None
+        self._started = time.monotonic()
+        if is_detailed:
+            if self.estimate:
+                stages = self.estimate.stages
+            else:
+                stages = [("prep", None), ("purpose", None), ("goal", None), ("summaries", None)]
+                stages += [("images", None)] if self.cb_images.isChecked() else []
+                stages += [("sota", None)]
+            self.stage_list.set_stages(stages)
         self.cancel_btn.setEnabled(True)
         self.worker = PipelineWorker(
             pdf_path=self.pdf_path,
             config_path=self.config_file_path,
             use_llm=is_detailed,
             language=chosen_lang,
-            download_models_flag=self.should_download_models,
         )
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)
@@ -794,23 +810,34 @@ class AnalysisDialog(QDialog):
     def _start_monitor(self, is_detailed):
         """Live GPU/CPU load from the system (nvidia-smi, /proc/stat) for the progress view and the log."""
         self._stop_monitor()
-        self.stats_label.setVisible(is_detailed)
-        self.stats_label.clear()
         self.monitor = ResourceMonitor(watch_gpu=is_detailed)
         self.monitor.start()
         self.stats_timer.start()
+        self._refresh_stats()
 
     def _refresh_stats(self):
-        if self.monitor is not None and self.stats_label.isVisible():
-            self.stats_label.setText(format_stats(self.monitor.latest, t))
-        if self.tracker is not None and self.estimate is not None and not self.worker.cancel_token.is_cancelled():
-            left = self.tracker.remaining()
-            if left is None:
-                total = eta.format_duration(self.estimate.total_s, t)
-                self.eta_run_label.setText(t("analysis.eta_run_total", total=total))
-            else:
-                total = eta.format_duration(self.tracker.elapsed() + left, t)     # always consistent with left
-                self.eta_run_label.setText(t("analysis.eta_run", total=total, left=eta.format_duration(left, t)))
+        if self.monitor is not None:
+            self.resource_panel.update_sample(self.monitor.latest)
+        if self._is_analysis_running() and self.worker.cancel_token.is_cancelled():
+            return
+        elapsed = time.monotonic() - self._started
+        if self.tracker is None:
+            self.eta_left_label.setText(t("analysis.eta_unknown_short"))
+            self.eta_detail_label.setText(t("analysis.eta_elapsed_only", elapsed=clock(elapsed)))
+            return
+        left = self.tracker.remaining()
+        total_s = self.tracker.elapsed() + left                             # always consistent with left
+        if left < 60:
+            self.eta_left_label.setText(t("analysis.eta_left_lt1"))
+        else:
+            self.eta_left_label.setText(t("analysis.eta_left", left=eta.format_duration(left, t)))
+        if total_s < 60:
+            self.eta_detail_label.setText(t("analysis.eta_elapsed_only", elapsed=clock(elapsed)))
+        else:
+            self.eta_detail_label.setText(
+                t("analysis.eta_elapsed", elapsed=clock(elapsed), total=eta.format_duration(total_s, t)))
+        if not self.stage_list.isHidden():
+            self.stage_list.update_state(self.tracker.stage, self.tracker.stage_seconds())
 
     def _stop_monitor(self):
         self.stats_timer.stop()
@@ -902,8 +929,11 @@ class AnalysisDialog(QDialog):
     def update_progress(self, value, text):
         if self.worker.cancel_token.is_cancelled():     # a progress event queued before the cancel arrives late
             return
-        value = max(value, self.pbar.value())       # stages report out of order: the bar never goes back
-        self.pbar.setValue(value)
-        self.progress_label.setText(text)
-        if self.tracker is not None:
+        if value >= 0:
+            value = max(value, self.pbar.value())   # stages report out of order: the bar never goes back
+            self.pbar.setValue(value)
+            self.percent_label.setText(f"{value}%")
+        if text:
+            self.progress_label.setText(text)
+        if self.tracker is not None and value >= 0:
             self.tracker.on_progress(value)
