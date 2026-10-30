@@ -7,10 +7,11 @@ How the number is made
 3. raw_estimate() a model of the work: how many tokens the language model has to read and write at every stage, how
                   fast this machine does it (GPU share of the layers, CPU threads) and how long loading the models
                   takes (the measured load speed of earlier runs, a cautious default for the first one).
-4. history        every finished analysis stores its real duration next to the model's prediction
-                  (data/run_history.json). The estimate is multiplied by the median real/predicted ratio of the earlier
-                  runs of the same kind (mode, GPU or CPU), so it learns the speed of THIS computer. With no history
-                  the figure is only a rough one and the range shown is wide.
+4. history        every finished analysis stores its real duration and the real time of every stage next to the
+                  model's prediction (data/run_history.json). Every stage is multiplied by the median real/predicted
+                  ratio of that stage in the earlier runs of the same kind (mode, GPU or CPU); older records without
+                  the stage predictions use the ratio of the whole run. So the estimate learns the speed of THIS
+                  computer. With no history the figure is only a rough one and the range shown is wide.
 
 EtaTracker follows a running analysis and re-estimates the remaining time at every stage change from the
 real time the finished stages took.
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 GEMMA_GB = 7.3
 LLAVA_GB = 5.0                      # LLaVA model + projector
 GEMMA_LAYERS = 48
-DEFAULT_LOAD_MB_S = 400.0           # reading a model from disk: a cautious value (HDD / slow SSD) for the first run
+DEFAULT_LOAD_MB_S = 1500.0          # reading a model from disk (SSD) for the first run; measured afterwards
 GEMMA_LOADS = 4                     # purpose, goal, summaries, SOTA each load the model again
 LLAVA_LOADS = 2
 TOKENS_PER_CHAR = 0.3
@@ -45,6 +46,9 @@ LOW_HIGH_MANY = (0.9, 1.15)
 # progress bar values at which the stages of run_task_llm() start (see app/llm_task.py STAGES)
 STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("images", 80), ("sota", 90))
 HISTORY_LIMIT = 60
+# raise it whenever raw_estimate() changes: real/predicted ratios measured against an older model would distort the
+# calibration, so only the runs recorded with the same model version are used
+MODEL_VERSION = 2
 
 
 @dataclass
@@ -72,6 +76,7 @@ class Estimate:
     stages: list                    # [(stage key, predicted seconds)] in the order they run, calibrated
     n_history: int
     raw_total_s: float              # the model's prediction without calibration (stored in the history)
+    raw_stages: list = field(default_factory=list)      # [(stage key, seconds)] without calibration
     basis: dict = field(default_factory=dict)
 
 
@@ -133,7 +138,9 @@ def _speeds(machine):
     share = 1.0 if machine.gpu_layers < 0 else min(machine.gpu_layers / GEMMA_LAYERS, 1.0)
     # layers run one after another: per-token time is the sum of the GPU part and the CPU part
     gen = 1.0 / (share / gpu_gen + (1.0 - share) / cpu_gen)
-    prompt = 1.0 / (share / gpu_prompt + (1.0 - share) / cpu_prompt)
+    # a CUDA build of llama.cpp also sends the prompt of the layers kept in RAM through the GPU (big batches), so
+    # reading the prompt stays fast with a partial offload; only the generation runs those layers on the CPU
+    prompt = 1.0 / (share / gpu_prompt + (1.0 - share) / max(cpu_prompt, gpu_prompt / 4))
     return gen, prompt
 
 
@@ -149,10 +156,10 @@ def _load_speed(history):
 
 def raw_estimate(doc, machine, use_llm, check_images, history=()):
     """[(stage, seconds)] predicted by the model of the work, no calibration."""
-    prep = 20.0 + 1.5 * doc.pages                           # engine start, LanguageTool, rules for every page
-    stages = [("prep", prep)]
     if not use_llm:
-        return stages
+        return [("prep", 8.0 + 1.0 * doc.pages)]           # engine start, LanguageTool, rules for every page
+    # with the AI the language checks run next to it: "prep" lasts only until the first AI stage starts
+    stages = [("prep", 3.0 + 0.3 * doc.pages)]
 
     gen, prompt = _speeds(machine)
     load = _load_speed(history)
@@ -164,14 +171,14 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
         return gemma_load + text_tokens * prefill_share / prompt + generated / gen
 
     stages += [
-        ("purpose", work(0.6, 300)),
-        ("goal", work(0.25, 200)),
-        ("summaries", work(1.0, sections * 120)),
+        ("purpose", work(0.6, 100)),
+        ("goal", work(0.25, 150)),
+        ("summaries", work(1.0, sections * 80)),
     ]
     if check_images and doc.images:
         llava_load = LLAVA_GB * 1024 ** 3 / load
-        per_image = 700 / (prompt * LLAVA_SPEEDUP) + 150 / (gen * LLAVA_SPEEDUP)
-        stages.append(("images", LLAVA_LOADS * llava_load + 2 * doc.images * per_image))
+        per_image = 700 / (prompt * LLAVA_SPEEDUP) + 80 / (gen * LLAVA_SPEEDUP)
+        stages.append(("images", LLAVA_LOADS * llava_load + doc.images * per_image))
     stages.append(("sota", work(0.3, 400)))
     return stages
 
@@ -194,13 +201,24 @@ def _kind(use_llm, check_images, gpu):
     return {"llm": bool(use_llm), "images": bool(check_images) if use_llm else False, "gpu": bool(gpu) if use_llm else False}
 
 
+def _record_kind(record):
+    """The kind of a stored run. Records written before "n_images" existed kept the number of figures under "images"
+    (it overwrote the flag), so for them a figure count above 0 is read as "figures were checked"."""
+    images = record.get("images")
+    if "n_images" not in record:
+        images = bool(images) if record.get("llm") else False
+    return {"llm": record.get("llm"), "images": images, "gpu": record.get("gpu")}
+
+
 def record_run(doc, machine, use_llm, check_images, estimate, actual_s, stage_seconds, loads):
     """Store a finished analysis: its real duration next to the model's prediction."""
     record = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         **_kind(use_llm, check_images, machine.gpu),
-        "pages": doc.pages, "chars": doc.chars, "images": doc.images,
+        "model": MODEL_VERSION,
+        "pages": doc.pages, "chars": doc.chars, "n_images": doc.images,
         "raw_predicted_s": round(estimate.raw_total_s, 1) if estimate else None,
+        "raw_stages": {k: round(v, 1) for k, v in estimate.raw_stages} if estimate else {},
         "actual_s": round(actual_s, 1),
         "stages": {k: round(v, 1) for k, v in stage_seconds.items()},
         "loads": [[int(size), round(sec, 1)] for size, sec in loads],
@@ -230,6 +248,17 @@ def take_model_loads():
     return loads
 
 
+def _stage_factor(records, key, default):
+    """Median real/predicted time of one stage in earlier runs (records with stage predictions), else `default`."""
+    ratios = []
+    for record in records:
+        predicted = (record.get("raw_stages") or {}).get(key)
+        actual = (record.get("stages") or {}).get(key)
+        if predicted and predicted > 0 and actual is not None:
+            ratios.append(actual / predicted)
+    return statistics.median(ratios) if ratios else default
+
+
 def estimate(doc, machine, use_llm, check_images, history=None):
     """The estimate shown before the analysis starts."""
     history = load_history() if history is None else history
@@ -237,17 +266,17 @@ def estimate(doc, machine, use_llm, check_images, history=None):
     raw_total = sum(s for _, s in raw)
 
     kind = _kind(use_llm, check_images, machine.gpu)
-    same = [r for r in history if all(r.get(k) == v for k, v in kind.items())
+    same = [r for r in history if r.get("model") == MODEL_VERSION and _record_kind(r) == kind
             and r.get("raw_predicted_s") and r.get("actual_s")]
     ratios = [r["actual_s"] / r["raw_predicted_s"] for r in same]
     factor = statistics.median(ratios) if ratios else 1.0
     low_f, high_f = LOW_HIGH_MANY if len(ratios) >= 3 else LOW_HIGH.get(len(ratios), LOW_HIGH_MANY)
 
-    stages = [(key, s * factor) for key, s in raw]
-    total = raw_total * factor
+    stages = [(key, s * _stage_factor(same, key, factor)) for key, s in raw]
+    total = sum(s for _, s in stages)
     return Estimate(
         total_s=total, low_s=total * low_f, high_s=total * high_f, stages=stages, n_history=len(ratios),
-        raw_total_s=raw_total,
+        raw_total_s=raw_total, raw_stages=raw,
         basis={"pages": doc.pages, "chars": doc.chars, "images": doc.images, "gpu": machine.gpu,
                "gpu_name": machine.gpu_name, "layers": machine.gpu_layers, "threads": machine.threads},
     )

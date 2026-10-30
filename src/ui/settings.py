@@ -11,6 +11,9 @@ from . import icons, styles
 from .i18n import t
 from .message_box import MessageBox
 from .ai_setup_dialog import AiSetupDialog
+from .model_download_dialog import download_models
+from common import gpu_check
+from common.version import APP_VERSION
 
 CONTROL_WIDTH = 150
 CONTROL_HEIGHT = 40
@@ -227,6 +230,22 @@ class SettingsDialog(QDialog):
         setup_row.addStretch(1)
         main_layout.addLayout(setup_row)
 
+        # AI models: are they in the folder in use, and a button to download them without starting an analysis
+        main_layout.addSpacing(24)
+        self.models_status = QLabel()
+        self.models_status.setWordWrap(True)
+        self.btn_download = QPushButton("  " + t("settings.download_models"))
+        self.btn_download.setIcon(icons.icon("download", "#FFFFFF", 16, 2.0))
+        self.btn_download.setFixedHeight(CONTROL_HEIGHT)
+        self.btn_download.setStyleSheet(styles.BLUE_BUTTON_STYLE + "QPushButton { padding: 0 14px; }")
+        self.btn_download.setCursor(Qt.PointingHandCursor)
+        self.btn_download.clicked.connect(self.download_models)
+        models_row = QHBoxLayout()
+        models_row.setSpacing(12)
+        models_row.addWidget(self.models_status, 1)
+        models_row.addWidget(self.btn_download, 0, Qt.AlignVCenter)
+        main_layout.addLayout(self._row(t("settings.models"), t("settings.models_desc"), models_row, stacked=True))
+
         main_layout.addSpacing(24)
         main_layout.addWidget(_separator())
         main_layout.addSpacing(20)
@@ -246,6 +265,10 @@ class SettingsDialog(QDialog):
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.clicked.connect(self.reject)
 
+        version_label = QLabel(t("settings.version", version=APP_VERSION))
+        version_label.setStyleSheet(styles.HINT_STYLE)
+        version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_layout.addWidget(version_label, 0, Qt.AlignVCenter)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
@@ -258,13 +281,34 @@ class SettingsDialog(QDialog):
 
     def open_ai_setup(self):
         """System check + CPU/GPU + models folder; afterwards the fields show what was saved."""
-        AiSetupDialog(self, first_run=False).exec()
+        dialog = AiSetupDialog(self, first_run=False)
+        dialog.exec()
         self.load_config()
+        if dialog.saved and dialog.download_requested:
+            self.download_models()
+
+    def download_models(self):
+        download_models(self)
+        self._update_models_status()
+
+    def _update_models_status(self):
+        available = app_config.llm_runtime_available()
+        present = available and app_config.are_ai_models_downloaded()
+        if not available:
+            text, color = t("settings.models_no_runtime"), styles.TEXT_2
+        elif present:
+            text, color = t("settings.models_present"), styles.SUCCESS
+        else:
+            text, color = t("settings.models_missing", size=f"{gpu_check.AI_MODELS_SIZE_GB:.0f}"), styles.WARNING
+        self.models_status.setText(text)
+        self.models_status.setStyleSheet(f"font-size: 13px; color: {color}; background: transparent; border: none;")
+        self.btn_download.setVisible(available and not present)
 
     def load_config(self):
         data = app_config.load_config()
         self.input_model_dir.setText(data.get("model_dir", ""))
         self.effective_dir_label.setText(t("settings.effective_model_dir", path=app_config.MODEL_DIR))
+        self._update_models_status()
         idx = self.combo_device.findText(data.get("device", "cpu"))
         if idx >= 0:
             self.combo_device.setCurrentIndex(idx)

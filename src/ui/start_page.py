@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from common.path import resource_path
+from common.version import APP_VERSION
 
 from . import icons, styles
 from .i18n import language_signals, t
@@ -243,6 +244,13 @@ class StartPage(QWidget):
             f"font-size: 21px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
         )
         bar.addWidget(brand)
+        version = QLabel(f"v{APP_VERSION}")
+        version.setToolTip(t("settings.version", version=APP_VERSION))
+        version.setStyleSheet(
+            f"font-size: 12px; font-weight: 500; color: {styles.TEXT_2}; background-color: {styles.NEUTRAL_BG};"
+            " border: none; border-radius: 8px; padding: 2px 8px;"
+        )
+        bar.addWidget(version, 0, Qt.AlignVCenter)
         bar.addStretch(1)
 
         self.lang_switch = LanguageSwitch()
