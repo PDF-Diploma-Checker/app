@@ -10,6 +10,8 @@ from analysis.extraction.raw_extraction.text_extractor import (
     fix_latex,
 )
 
+logger = logging.getLogger(__name__)
+
 def find_table_description(table_bbox, text_blocks, priority_side=None):
     """
     Locates the caption or description for a table by analyzing the spatial relationship
@@ -117,7 +119,7 @@ def extract_tables(
         try:
             extracted_data = tab.extract()
         except Exception as e:
-            logging.error(f"Failed to extract table data: {e}")
+            logger.error(f"Failed to extract table data: {e}")
             continue
 
         if tab.col_count < 2:
@@ -183,7 +185,7 @@ def extract_tables(
                 data=cleaned_data,
             )
         )
-        logging.info("Extracted standard table successfully.")
+        logger.info("Extracted standard table successfully.")
 
     return table_bboxes, priority_side
 
@@ -377,9 +379,9 @@ def extract_apa_tables(
                     table_type="apa",
                 )
             )
-            logging.info("Extracted APA table successfully.")
+            logger.info("Extracted APA table successfully.")
         except Exception as e:
-            logging.error(f"Failed to process potential APA table: {e}")
+            logger.error(f"Failed to process potential APA table: {e}")
 
     return apa_bboxes, priority_side
 
@@ -601,8 +603,8 @@ def extract_lineless_tables(
                     )
                 )
                 table_extracted = True
-                logging.info("Extracted lineless table successfully.")
+                logger.info("Extracted lineless table successfully.")
             except Exception as e:
-                logging.error(f"Failed to process potential lineless table: {e}")
+                logger.error(f"Failed to process potential lineless table: {e}")
 
     return lineless_bboxes, priority_side

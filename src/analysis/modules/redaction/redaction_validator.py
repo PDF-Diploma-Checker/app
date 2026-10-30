@@ -15,6 +15,7 @@ import json
 import logging
 import re
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Configuration:
@@ -35,7 +36,7 @@ class Configuration:
 
             self._validateAndAssign(data)
 
-            logging.info(f"Konfiguracja załadowana pomyślnie z {config_path}")
+            logger.info(f"Konfiguracja załadowana pomyślnie z {config_path}")
 
         except FileNotFoundError:
             raise FileNotFoundError(f"nie znaleziono konfiguracji {config_path}")
@@ -103,11 +104,11 @@ class Configuration:
 
             if not self.font_list:
                 if lang == "en":
-                    logging.warning(
+                    logger.warning(
                         "Allowed fonts are not provided in the configuration file"
                     )
                 else:
-                    logging.warning("brak dozwolonych czcionek w konfiguracji")
+                    logger.warning("brak dozwolonych czcionek w konfiguracji")
 
         except KeyError as e:
             if lang == "en":
@@ -860,11 +861,13 @@ class RedactionValidator:
                 )
 
         if lang == "en":
-            comment = "The figure/table does not have a valid source or bibliography reference in its caption."
+            comment = "The figure does not have a valid source or bibliography reference in its caption."
         else:
-            comment = "Rysunek/Tabela nie posiada poprawnego źródła lub odwołania do bibliografii w swoim podpisie."
+            comment = "Rysunek nie posiada poprawnego źródła lub odwołania do bibliografii w swoim podpisie."
 
         for visual in self.document_data_linguistics.floating_elements.visual_elements:
+            if getattr(visual, "type", None) == "table":
+                continue
             if getattr(visual, "incorrect_caption", 0) == 1:
                 caption_dict = getattr(visual, "caption", {})
                 caption_text = (
@@ -1284,9 +1287,9 @@ class RedactionValidator:
 
         if line_spacing is None:
             if lang == "en":
-                logging.warning("Redaction: cannot specify line spacing")
+                logger.warning("Redaction: cannot specify line spacing")
             else:
-                logging.warning("Redaction: nie można określić interlinii")
+                logger.warning("Redaction: nie można określić interlinii")
             return True
         elif abs(line_spacing - self.config.interlinia) > 0.1:
             self.errors.append(
@@ -1356,9 +1359,9 @@ class RedactionValidator:
         lang = getattr(self, "language", "pl")
         if most_used_font_size is None:
             if lang == "en":
-                logging.warning("Redaction: Unable to determine font size.")
+                logger.warning("Redaction: Unable to determine font size.")
             else:
-                logging.warning("Redaction: nie można określić rozmiaru czcionki.")
+                logger.warning("Redaction: nie można określić rozmiaru czcionki.")
             return True
         elif abs(most_used_font_size - self.config.font_size) > 0.1:
             if lang == "en":
@@ -1385,18 +1388,18 @@ class RedactionValidator:
         lang = getattr(self, "language", "pl")
         if not margins:
             if lang == "en":
-                logging.warning("Redaction: Cannot determine margins")
+                logger.warning("Redaction: Cannot determine margins")
             else:
-                logging.warning("Redaction: nie można określić marginesów")
+                logger.warning("Redaction: nie można określić marginesów")
             return True
         if self.config.margin_type == "lustrzany":
             if len(margins) < 2:
                 if lang == "en":
-                    logging.warning(
+                    logger.warning(
                         "Redaction: too few pages to evaluate mirror margins"
                     )
                 else:
-                    logging.warning(
+                    logger.warning(
                         "Redaction: zbyt mało stron do oceny marginesów lustrzanych"
                     )
                 return True
@@ -1472,11 +1475,11 @@ class RedactionValidator:
 
         if self.config.format not in formats:
             if lang == "en":
-                logging.warning(
+                logger.warning(
                     "Redaction: unknown page format in the configuration file"
                 )
             else:
-                logging.warning("Redaction: nieznany format strony w konfiguracji")
+                logger.warning("Redaction: nieznany format strony w konfiguracji")
 
             return False
         exp_w, exp_h = formats[self.config.format]
@@ -1555,9 +1558,9 @@ class RedactionValidator:
         lang = getattr(self, "language", "pl")
         if not font_usage:
             if lang == "en":
-                logging.warning("Redaction: Unable to determine used fonts")
+                logger.warning("Redaction: Unable to determine used fonts")
             else:
-                logging.warning("Redaction: nie można określić używanych czcionek")
+                logger.warning("Redaction: nie można określić używanych czcionek")
             return True
         for font in font_usage.keys():
             if font not in self.config.font_list:
@@ -1642,9 +1645,9 @@ class RedactionValidator:
 
         if not errors_found:
             if lang == "en":
-                logging.info("Redaction: Justification as required")
+                logger.info("Redaction: Justification as required")
             else:
-                logging.info("Redaction: justowanie zgodne z wymaganiami")
+                logger.info("Redaction: justowanie zgodne z wymaganiami")
 
         return not errors_found
 
@@ -1762,10 +1765,10 @@ class RedactionValidator:
         Iterates through every error to get logging info
         """
         if not self.errors:
-            logging.info("No errors to log")
+            logger.info("No errors to log")
             return
 
-        logging.info(f" Redaction Error Summary ({len(self.errors)}) errors")
+        logger.info(f" Redaction Error Summary ({len(self.errors)}) errors")
         for error in self.errors:
             error_id = getattr(error, "id", "No ID")
             category = getattr(error, "category", "No Category")
@@ -1779,6 +1782,6 @@ class RedactionValidator:
             else:
                 text_preview = ""
 
-            logging.info(
+            logger.info(
                 f"ID: {error_id} | type: {category} | page: {page} | text: {text_preview!r}"
             )

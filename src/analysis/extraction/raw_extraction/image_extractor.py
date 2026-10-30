@@ -9,6 +9,7 @@ from analysis.extraction.raw_extraction.bare_struct import (
     ImageInfo,
 )
 
+logger = logging.getLogger(__name__)
 
 def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
     if not document_data or not getattr(document_data, "pages", None):
@@ -163,7 +164,7 @@ def merge_fragment_images(
                         big.width, big.height = pix.width, pix.height
                     big.bbox = (union.x0, union.y0, union.x1, union.y1)
                 except Exception as e:
-                    logging.error(f"Failed to re-render merged image {big.path}: {e}")
+                    logger.error(f"Failed to re-render merged image {big.path}: {e}")
                     continue
 
                 if not big.description and small.description:
@@ -172,7 +173,7 @@ def merge_fragment_images(
                     if small.path and os.path.isfile(small.path):
                         os.remove(small.path)
                 except OSError as e:
-                    logging.warning(f"Could not remove {small.path}: {e}")
+                    logger.warning(f"Could not remove {small.path}: {e}")
                 del cur_page.images[i]
                 changed = True
                 break
@@ -414,9 +415,9 @@ def extract_vector_graphics(
                     pix = page.get_pixmap(clip=bbox)
                     img_path = f"images/p{page_index}_vec_{i}.png"
                     pix.save(img_path)
-                    logging.info(f"Successfully saved vector image: {img_path}")
+                    logger.info(f"Successfully saved vector image: {img_path}")
                 except Exception as e:
-                    logging.error(f"Failed to save vector image for page {page_index}, rect {i}: {e}")
+                    logger.error(f"Failed to save vector image for page {page_index}, rect {i}: {e}")
                     continue
 
                 cur_page.images.append(
@@ -508,7 +509,7 @@ def extract_raster_images(
                 if pix.is_unicolor:
                     continue
             except Exception as e:
-                logging.warning(f"Failed to create Pixmap for block {block.get('number')} on page {page_index}: {e}")
+                logger.warning(f"Failed to create Pixmap for block {block.get('number')} on page {page_index}: {e}")
                 pass
 
             is_background = False
@@ -541,9 +542,9 @@ def extract_raster_images(
             try:
                 with open(img_path, "wb") as img_file:
                     img_file.write(block["image"])
-                logging.info(f"Successfully saved raster image: {img_path}")
+                logger.info(f"Successfully saved raster image: {img_path}")
             except Exception as e:
-                logging.error(f"Failed to save raster image {img_path}: {e}")
+                logger.error(f"Failed to save raster image {img_path}: {e}")
                 continue
 
             cur_page.images.append(
