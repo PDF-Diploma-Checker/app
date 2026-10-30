@@ -4,6 +4,8 @@ import json
 import logging
 
 
+logger = logging.getLogger(__name__)
+
 @dataclass
 class TextSpan:
     span_id: int
@@ -130,7 +132,7 @@ class DocumentData:
         try:
             return asdict(self)
         except Exception as e:
-            logging.error(f"Error converting DocumentData to dictionary: {e}")
+            logger.error(f"Error converting DocumentData to dictionary: {e}")
             raise
 
     def to_json(self, file_path: str, indent: int = 4) -> None:
@@ -138,10 +140,10 @@ class DocumentData:
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(self._to_dict(), f, ensure_ascii=False, indent=indent)
-            logging.info(f"Successfully saved document data to {file_path}.")
+            logger.info(f"Successfully saved document data to {file_path}.")
         except Exception as e:
             # TODO: tutaj tez jakis wyjatek, trzeba ustalic standard zglaszania bledow
-            logging.error(f"Error while saving data to json file: {e}")
+            logger.error(f"Error while saving data to json file: {e}")
 
     def get_page_count(self) -> int:
         """This function returns the number of pages in the document, excluding the title page."""
@@ -150,7 +152,7 @@ class DocumentData:
                 len(self.pages) - 1
             )  # -1, jako że strona tytułowa ma się nie zaliczać do licznika stron.
         except Exception as e:
-            logging.error(f"Error calculating page count: {e}")
+            logger.error(f"Error calculating page count: {e}")
             return max(0, len(self.pages) - 1)
 
     # zwraca słownik z nazwami czcionek i ich ilością wystąpień
@@ -165,7 +167,7 @@ class DocumentData:
                             font_usage[span.font] = font_usage.get(span.font, 0) + 1
             return font_usage
         except Exception as e:
-            logging.error(f"Error getting font usage: {e}")
+            logger.error(f"Error getting font usage: {e}")
             return {}
 
     # zwraca słownik z rozmiarami czcionek i ich ilością wystąpień
@@ -180,7 +182,7 @@ class DocumentData:
                             font_usage[span.size] = font_usage.get(span.size, 0) + 1
             return font_usage
         except Exception as e:
-            logging.error(f"Error getting font size usage: {e}")
+            logger.error(f"Error getting font size usage: {e}")
             return {}
 
     def get_most_common_font(self) -> str | None:
@@ -192,7 +194,7 @@ class DocumentData:
             most_common_font = max(font_usage, key=font_usage.get)
             return most_common_font
         except Exception as e:
-            logging.error(f"Error getting most common font: {e}")
+            logger.error(f"Error getting most common font: {e}")
             return None
 
     def get_most_common_font_size(self) -> float | None:
@@ -204,7 +206,7 @@ class DocumentData:
             most_common_font_size = max(font_size_usage, key=font_size_usage.get)
             return most_common_font_size
         except Exception as e:
-            logging.error(f"Error getting most common font size: {e}")
+            logger.error(f"Error getting most common font size: {e}")
             return None
 
     def get_margins(self) -> Dict[str, float]:
@@ -215,7 +217,7 @@ class DocumentData:
                 margins[page.number] = page.margins
             return margins
         except Exception as e:
-            logging.error(f"Error getting margins: {e}")
+            logger.error(f"Error getting margins: {e}")
             return {}
 
     def get_page_dimensions(self) -> Dict[int, tuple]:
@@ -226,7 +228,7 @@ class DocumentData:
                 dimensions[page.number] = (page.width, page.height)
             return dimensions
         except Exception as e:
-            logging.error(f"Error getting page dimensions: {e}")
+            logger.error(f"Error getting page dimensions: {e}")
             return {}
 
     def get_dominant_line_spacing(self) -> float | None:
@@ -247,7 +249,7 @@ class DocumentData:
             dominant_spacing = max(spacing_counts, key=spacing_counts.get)
             return dominant_spacing
         except Exception as e:
-            logging.error(f"Error getting dominant line spacing: {e}")
+            logger.error(f"Error getting dominant line spacing: {e}")
             return None
 
     def get_span_by_id(self, span_id: int) -> tuple | None:
@@ -276,7 +278,7 @@ class DocumentData:
                                     return span, line, block, page
             return None
         except Exception as e:
-            logging.error(f"Error getting span by ID {span_id}: {e}")
+            logger.error(f"Error getting span by ID {span_id}: {e}")
             return None
 
     def is_rect_intersecting(
@@ -300,5 +302,5 @@ class DocumentData:
                             intersecting_spans.append((span, line, block, page))
             return intersecting_spans
         except Exception as e:
-            logging.error(f"Error checking rect intersection: {e}")
+            logger.error(f"Error checking rect intersection: {e}")
             return []
