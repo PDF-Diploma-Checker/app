@@ -91,7 +91,13 @@ def ensure_release(repo, tag):
     if release is None:
         print(f"\nCreating draft release {tag} in {repo}")
         gh("release", "create", tag, "-R", repo, "--draft", "--title", tag, "--notes", f"DiplomaChecker {tag.lstrip('vV')}")
-        release = find_release(repo, tag)
+        for _ in range(10):         # the release list shows a new draft only after a moment
+            release = find_release(repo, tag)
+            if release is not None:
+                break
+            time.sleep(3)
+        else:
+            sys.exit(f"The draft {tag} was created but GitHub does not list it yet: run the same command again")
     elif not release["draft"]:
         print(f"\nNOTE: release {tag} is already public; files are replaced while users may be downloading")
     return release
