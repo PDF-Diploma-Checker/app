@@ -2753,8 +2753,9 @@ class PDFMapper:
 
     def _verify_caption_sources(self, new_doc):
         """
-        Post-processing routine that verifies whether table and image captions contain
-        proper source attributions. It checks for the presence of bibliography citations
+        Post-processing routine that verifies whether image (figure) captions contain
+        proper source attributions. Table captions are intentionally NOT checked - a table
+        does not have to cite a source, so its 'incorrect_caption' is always 0. It checks for the presence of bibliography citations
         (e.g., '[1]') or specific source-indicating keywords (e.g., 'source', 'own elaboration').
         If neither is found, it flags the caption block or visual element by setting
         'incorrect_caption = 1'.
@@ -2765,7 +2766,7 @@ class PDFMapper:
         citation_pattern = re.compile(r"\[\s*\d+[\d\s,\-]*(\s*,\s*(?:s\.?|p\.?|pp\.?)\s*\d+(?:-\d+)?)*\s*\]", re.IGNORECASE)
 
         source_pattern = re.compile(
-            r"\b(źródło|zródło|zrodlo|source|opracowanie własne|na podstawie)\b",
+            r"\b(źródło|zródło|zrodlo|source|opracowanie własne|na podstawie|prawa autorskie|copyright|©)\b",
             re.IGNORECASE,
         )
 
@@ -2784,6 +2785,9 @@ class PDFMapper:
                     block.incorrect_caption = 0
 
         for visual in new_doc.floating_elements.visual_elements:
+            if getattr(visual, "type", None) == "table":
+                visual.incorrect_caption = 0
+                continue
             caption_dict = getattr(visual, "caption", {})
             if caption_dict and isinstance(caption_dict, dict):
                 content = caption_dict.get("text", "")
