@@ -1,6 +1,6 @@
 [project]
 name = "pdf-diploma-checker"
-version = "0.2.0"
+version = "0.3.1"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
