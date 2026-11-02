@@ -20,8 +20,10 @@ from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm  #
 from analysis.extraction.main_extractor import extractPDF  # noqa: E402
 from analysis.modules.llm.image_analysis.figures import (  # noqa: E402
     collect_figures,
+    consistency_verdict,
     figure_sort_key,
     is_caption,
+    parse_yes_no,
     reference_pattern,
 )
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher  # noqa: E402
@@ -144,6 +146,28 @@ class SummaryTest(unittest.TestCase):
         from app.llm_task import build_image_summary
 
         self.assertFalse(build_image_summary([])["analysis_failed"])
+
+
+class ModelFailureTest(unittest.TestCase):
+    def test_yes_no_needs_a_whole_word(self):
+        self.assertIs(parse_yes_no("YES."), True)
+        self.assertIs(parse_yes_no("No"), False)
+        for answer in ("unknown", "I cannot tell", "", None):
+            self.assertIsNone(parse_yes_no(answer), answer)
+
+    def test_unusable_verdict_is_a_failure_not_a_thesis_error(self):
+        self.assertEqual(consistency_verdict({"poprawnosc_danych": "False"}), "False")
+        self.assertEqual(consistency_verdict({"poprawnosc_danych": False}), "False")
+        self.assertEqual(consistency_verdict({"poprawnosc_danych": "true"}), "True")
+        for answer in ({}, {"poprawnosc_danych": "moze"}, {"poprawnosc_danych": "Error"}):
+            self.assertEqual(consistency_verdict(answer), "Error")
+
+    def test_failed_checks_are_not_listed_as_errors(self):
+        from app.llm_task import split_failed_checks
+
+        real = {"rysunek": "Rys. 1", "blad": "x"}
+        self.assertEqual(split_failed_checks([real, {"rysunek": "Rys. 2", "analysis_failed": True}]), ([real], True))
+        self.assertEqual(split_failed_checks([real]), ([real], False))
 
 
 class ReportPanelTest(unittest.TestCase):

@@ -34,7 +34,11 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
             "powody_odrzucenia": [f"[DPI]: {item.get('blad')} (Wynik: {item.get('zageszczenie_pikseli')})"]
         }
         
+    failed_checks = []
     for item in llava_report:
+        if item.get("analysis_failed"):
+            failed_checks.append(item)
+            continue
         rys = item["rysunek"]
         blad_ai = f"[LLaVA AI]: {item.get('blad_llava')}"
         
@@ -53,7 +57,7 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
     
     final_list.sort(key=lambda x: figure_sort_key(x["rysunek"]))
 
-    return final_list
+    return final_list + failed_checks
 
 if __name__ == "__main__":
     

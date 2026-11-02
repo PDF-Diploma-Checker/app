@@ -3,7 +3,7 @@ import gc
 import logging
 
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures, is_caption
+from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, is_caption
 from analysis.modules.llm.image_analysis.llava_engine import LlavaEngine
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
@@ -64,7 +64,10 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
         if verbose:
             logger.info(f"[{idx}/{len(images_with_refs)}] LLaVA analizuje obrazek {img['id']}...")
         try:
-            extracted_image_data[img["id"]] = llava.extract_data(img["bytes"])
+            image_data = llava.extract_data(img["bytes"])
+            if not (image_data or "").strip():
+                raise ValueError("LLaVA returned no data")
+            extracted_image_data[img["id"]] = image_data
         except Exception:
             # one unreadable figure must not cost the results of all the others
             logger.exception("LLaVA could not read figure %s", img["id"])
@@ -96,10 +99,16 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
                 final_report.append(_failed_entry(img["id"]))
                 continue
 
+            verdict = consistency_verdict(verification)
+            if verdict == "Error":
+                logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
+                final_report.append(_failed_entry(img["id"]))
+                continue
+
             final_report.append({
                 "obrazek": img["id"],
                 "odwolanie": "wystapilo",
-                "poprawnosc_danych": verification.get("poprawnosc_danych", "False"),
+                "poprawnosc_danych": verdict,
                 "bledy": verification.get("bledy", "None")
             })
 

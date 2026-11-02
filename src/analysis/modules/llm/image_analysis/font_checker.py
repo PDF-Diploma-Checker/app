@@ -11,7 +11,7 @@ sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures
+from analysis.modules.llm.image_analysis.figures import collect_figures, parse_yes_no
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
@@ -62,18 +62,19 @@ class LlavaFontEngine:
                 max_tokens=10 
             )
             
-            result_text = response["choices"][0]["message"]["content"].strip().lower()
-            
-            if "yes" in result_text or "true" in result_text:
+            result_text = response["choices"][0]["message"]["content"]
+            verdict = parse_yes_no(result_text)
+
+            if verdict is True:
                 return {"consistent": True, "reason": "OK"}
-            elif "no" in result_text or "false" in result_text:
+            elif verdict is False:
                 return {"consistent": False, "reason": "Model LLaVA wykrył niespójne rozmiary czcionek na obrazku."}
             else:
                 return {"consistent": True, "reason": f"Niejednoznaczna odpowiedź AI: {result_text}. Domyślnie zaakceptowano."}
                 
-        except Exception as e:
+        except Exception:
             logger.exception("Font consistency check inference failed")
-            return {"consistent": False, "reason": f"Błąd przetwarzania AI: {str(e)}"}
+            return {"failed": True}
 
 def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
     """Return a report of figures with inconsistent font sizing."""
@@ -92,6 +93,10 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
         
         assessment = llava.check_font_consistency(img["bytes"])
         
+        if assessment.get("failed"):
+            bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+            continue
+
         is_consistent = assessment.get("consistent", True)
         if str(is_consistent).lower() == "false":
             bad_fonts_report.append({

@@ -51,4 +51,4 @@ class ConsistencyChecker:
             return json.loads(result_text)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
-            return {"poprawnosc_danych": "False", "bledy": "Błąd parsowania wymuszonego JSONa z modelu."}
+            return {"poprawnosc_danych": "Error", "bledy": "Analiza nie powiodła się."}
