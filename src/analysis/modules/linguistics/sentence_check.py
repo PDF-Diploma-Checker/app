@@ -16,6 +16,10 @@ DESCRIPTION_WHITELIST= {"wersja", "wersji", "wersjom", "wersjach", "wersję", "w
                      "wzór", "wzoru", "wzorowi", "wzory", "wzorom", "wzorach", "wzorami", "wzorem", "wzorze",
                      "równanie", "równaniu", "równaniach", "równaniami", "równaniom", "równania", "równaniem", "rów", "listing"}
 
+CAPTION_RE = re.compile(r'^\s*((Rys|Ryc|Rysunek|Tab|Tabela|Wykres|Listing|Fig|Figure|Table)\.?\s*[A-Z]?\d+([.:]\d+)*[.:]?\s|Źródło)')
+SENTENCE_END_RE = re.compile(r'([.!?…:])["”»’)\]]*\s*$')
+VERB_TAGS = {"fin", "praet", "imps", "impt", "bedzie", "winien", "pred"}
+
 #skróty, po których kropka praktycznie nigdy nie kończy zdania
 NEVER_END = {"m.in", "ds", "np", "tj", "ang", "tzw", "prof", "dr", "hab", "inż", "mgr", "ok", "św", "zob", "por", "cyt", "wg", "nr", "im", "zw"}
 INITIAL_RE = re.compile(r"[A-ZĄĆĘŁŃÓŚŹŻ]|Ch|Th|Sz|Cz|Ph")
@@ -130,6 +134,7 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
             for sentence in sentences:
                 first_upper = None
                 if sum(1 for letter in sentence.text if letter.isalpha()) < 15:
+                    sentence_before = sentence.text
                     continue
                 for letter in sentence.text:
                     if letter.isalpha():
@@ -180,11 +185,13 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                     if token.dep_ in {'nsubj', 'nsubj:pass', 'nsubjpass', 'attr'}:
                         is_subject = True
                     if token.pos_ in {'VERB', 'AUX'}:
-                        is_verb = True    
-                    #nawet gdy jedna z części zdania jest bierna, całe zdanie złożone uznawane jest za bierne dla przejrzystości wyników.
+                        is_verb = True
+                    if token.dep_ == 'cop' or (block.language == 'pl' and token.pos_ in {'NOUN', 'PROPN', 'ADV', 'X'} and morfeusz_pos(token.text) <= VERB_TAGS):
+                        is_verb = True
+                    if block.language == 'pl' and token.pos_ in {'VERB', 'AUX'} and "VerbForm=Fin" in token.morph and token.morph.get("VerbType") != ["Quasi"] and not ("Gender=Neut" in token.morph and "Number=Sing" in token.morph):
+                        is_subject = True
                     if token.dep_ == "aux:pass":
                         passive = True
-                    #wykrywanie form typu: Mówi się jako bezosobowe
                     if token.morph.get("Person") and token.morph.get("Person")[0] == "0":
                         is_impersonal = True
                     elif block.language =='pl'and token.text == "się":
@@ -192,7 +199,6 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                             if not any(child.dep_ == "nsubj" for child in token.head.children):
                                 is_impersonal = True
                 if block.language == 'pl' and not is_subject and passive:
-                    #dla zdań biernych, gdy parser nie wykryje podmiotu
                     if any(tok.pos_ in {"NOUN", "PROPN"} and "Case=Nom" in tok.morph for tok in sentence):
                         is_subject = True
                 if not is_subject:
@@ -216,13 +222,15 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                 match_list = []
                 if description_exclude_backup(sentence.text, sentence_before, chapter_nums):
                     continue
-                if not is_subject:
+                end = SENTENCE_END_RE.search(sentence.text)
+                is_sentence = not CAPTION_RE.match(sentence.text) and end is not None and (end.group(1) != ":" or is_verb)
+                if is_sentence and not is_subject:
                     #zdania z czasownikami niewłaściwymi np. "Na podstawie badań można sformułować wnioski" uznawane są za błąd - nie mają podmiotu domyślnego.
                     if block.block.language == 'en':
                         match_list.append(("NO_SUBJECT", "No subject in the sentence."))
                     else:
                         match_list.append(("NO_SUBJECT", "Brak podmiotu w zdaniu."))
-                if not is_verb:
+                if is_sentence and not is_verb:
                     if block.block.language == 'en':
                         match_list.append(("NO_VERB", "No verb in the sentence."))
                     else:
