@@ -34,6 +34,8 @@ from .bare_struct_llm import (
 # TODO: dodać więcej przykładowych plików pdf do folderu /redaction_debug
 # Format nazwy pdfa: <aspekt_do_sprawdzenia>_example.pdf
 debug_mode = 0
+LLM_IMAGES_DIR = "images/llm"
+
 debug_type = "table"  # zmiana trybu debugowania (wpisać interesujący nas aspekt)
 debug_path = (
     "pdf_diploma_checker/src/redaction/redaction_debug/{debug_type}_example.pdf"
@@ -583,7 +585,7 @@ def extract_vector_graphics(
                     priority_side = found_side
 
                 pix = page.get_pixmap(clip=bbox)
-                img_path = f"images/p{page_index}_vec_{i}.png"
+                img_path = f"{LLM_IMAGES_DIR}/p{page_index}_vec_{i}.png"
                 pix.save(img_path)
 
                 cur_page.images.append(
@@ -610,17 +612,9 @@ def extractPDF_llm(file_path: str) -> DocumentData:
         print("plik nie istnieje")
         return
 
-    # sprawdzenie czy mamy folder "images", jeśli nie to tworzymy taki
-    os.makedirs("images", exist_ok=True)
-
-    # usuwanie obrazów z poprzedniego sprawdzania, żeby nie było chaosu
-    for filename in os.listdir("images"):
-        file_to_delete = os.path.join("images", filename)
-        try:
-            if os.path.isfile(file_to_delete):
-                os.remove(file_to_delete)
-        except Exception as e:
-            print(f"Nie udało się usunąć starego pliku {file_to_delete}: {e}")
+    # Własny podfolder: ta ekstrakcja działa w trakcie analizy, a pliki z "images" są wtedy jeszcze potrzebne analizie
+    # rysunków (ścieżki z extractPDF). Pliki o tej samej nazwie są po prostu nadpisywane.
+    os.makedirs(LLM_IMAGES_DIR, exist_ok=True)
 
     # TODO: dalsza walidacja
     doc = fitz.open(file_path)
@@ -758,7 +752,7 @@ def extractPDF_llm(file_path: str) -> DocumentData:
                     detected_img_priority = found_side
 
                 ext = block.get("ext", "png")
-                img_path = f"images/p{page_index}_b{block['number']}.{ext}"
+                img_path = f"{LLM_IMAGES_DIR}/p{page_index}_b{block['number']}.{ext}"
 
                 # zapisywanie obrazów
                 with open(img_path, "wb") as img_file:

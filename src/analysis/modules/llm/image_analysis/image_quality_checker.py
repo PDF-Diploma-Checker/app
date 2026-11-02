@@ -7,6 +7,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
+from .figures import figure_sort_key
 from .quality_analysis import check_image_quality
 from .llava_quality_checker import get_llava_quality_report
 
@@ -50,11 +51,7 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
             
     final_list = list(merged_results.values())
     
-    try:
-        final_list.sort(key=lambda x: float(x["rysunek"].replace("Rys. ", "")))
-    except Exception:
-        logger.exception("Failed to sort image quality report entries by figure number")
-
+    final_list.sort(key=lambda x: figure_sort_key(x["rysunek"]))
 
     return final_list
 
