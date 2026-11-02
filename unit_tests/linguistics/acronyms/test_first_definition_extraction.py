@@ -36,8 +36,8 @@ def make_words(content, page=1):
     return words
 
 
-def make_block(content, block_id=1, language="pl"):
-    p = ParagraphBlock(block_id=block_id, content=content, words=make_words(content))
+def make_block(content, block_id=1, language="pl", page=1):
+    p = ParagraphBlock(block_id=block_id, content=content, words=make_words(content, page=page))
     p.language = language
     return Block_context(contents=content, language=language, block=p)
 
@@ -103,6 +103,40 @@ class TestFirstDefinitionExtraction(unittest.TestCase):
         # Since LLM was defined in block 1, its subsequent use in block 2 must NOT be flagged
         llm_errors = [m for m in undef_matches if m.content == "LLM"]
         self.assertEqual(len(llm_errors), 0)
+
+    def test_acronym_first_in_ang_parentheses(self):
+        block1 = make_block("Zastosowano model błądzenia losowego (IRW, ang. Integrated Random Walk) do opisu ceny.", block_id=1)
+        block2 = make_block("Model IRW można traktować jako lokalny wielomian.", block_id=2, page=2)
+        proper_names = []
+        acronyms_with_defs, proper_names, _ = check_first_definition([block1, block2], proper_names, [])
+        undef_matches, _ = check_if_was_defined([block1, block2], acronyms_with_defs, proper_names)
+
+        self.assertIn("IRW", acronyms_with_defs)
+        self.assertEqual(acronyms_with_defs["IRW"][0], "Integrated Random Walk")
+        self.assertEqual([m for m in undef_matches if m.content == "IRW"], [])
+
+    def test_acronym_first_in_parentheses_variants(self):
+        # "pol." instead of "ang." and a semicolon instead of a comma
+        cases = [
+            ("ZSD", "Wdrożono system (ZSD, pol. Zintegrowany System Decyzyjny) w firmie.", "Zintegrowany System Decyzyjny"),
+            ("IRW", "Zastosowano model (IRW; ang. Integrated Random Walk) do opisu ceny.", "Integrated Random Walk"),
+        ]
+        for acronym, text, expected in cases:
+            with self.subTest(acronym=acronym):
+                acronyms_with_defs, _, _ = check_first_definition([make_block(text)], [], [])
+                self.assertIn(acronym, acronyms_with_defs)
+                self.assertEqual(acronyms_with_defs[acronym][0], expected)
+
+    def test_acronym_used_before_parentheses_definition(self):
+        block1 = make_block("Model IRW opisano w kolejnym podrozdziale.", block_id=1)
+        block2 = make_block("Zastosowano model błądzenia losowego (IRW, ang. Integrated Random Walk) do opisu ceny.", block_id=2, page=2)
+        proper_names = []
+        acronyms_with_defs, proper_names, _ = check_first_definition([block1, block2], proper_names, [])
+        undef_matches, _ = check_if_was_defined([block1, block2], acronyms_with_defs, proper_names)
+
+        irw_errors = [m for m in undef_matches if m.content == "IRW"]
+        self.assertEqual(len(irw_errors), 1)
+        self.assertEqual(irw_errors[0].page_start, 1)
 
 
 class TestGeneratedPdfs(unittest.TestCase):
