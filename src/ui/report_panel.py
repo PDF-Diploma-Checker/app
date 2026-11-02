@@ -160,9 +160,10 @@ def _bar(label, value_text, ratio, color=None, description=None):
 
 
 def _note(text, kind):
-    """A coloured notice: 'ok' (green), 'bad' (red) or 'off' (grey)."""
+    """A coloured notice: 'ok' (green), 'warn' (amber), 'bad' (red) or 'off' (grey)."""
     fg, bg, dot = {
         "ok": (styles.SUCCESS, styles.SUCCESS_BG, styles.SUCCESS_DOT),
+        "warn": (styles.WARNING, styles.WARNING_BG, styles.WARNING_DOT),
         "bad": (styles.DANGER, styles.DANGER_BG, styles.DANGER_DOT),
         "off": (styles.TEXT_2, styles.NEUTRAL_BG, styles.TEXT_2),
     }[kind]
@@ -237,6 +238,8 @@ def build_report_panel(report_data, on_download):
             headings = grade_info.get("off_topic_headings", []) or []
         else:
             grade = _number(grade_info)
+
+    root.addWidget(_note(t("main.disclaimer"), "warn"))
 
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))

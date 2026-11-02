@@ -19,6 +19,7 @@ from . import styles
 STRINGS = {
     "pl": {
         "yes_upper": "TAK", "no_upper": "NIE", "error": "Błąd", "success": "Sukces",
+        "rep_disclaimer": "System może popełniać błędy wynikające z ograniczeń wykorzystanych technologii i nie zastępuje analizy przeprowadzonej przez człowieka. Do wyników analizy należy podchodzić krytycznie.",
         "warning": "Ostrzeżenie", "unknown_fig": "Nieznany rysunek", "no_format": "Brak formatu",
         "no_title": "Brak tytułu", "panel_pts": "pkt", "panel_fig_prefix": "Rys.",
         "rep_no_data_warn": "Brak danych szczegółowej analizy merytorycznej dla tego dokumentu.",
@@ -50,6 +51,7 @@ STRINGS = {
     },
     "en": {
         "yes_upper": "YES", "no_upper": "NO", "error": "Error", "success": "Success",
+        "rep_disclaimer": "The system may make mistakes resulting from the limitations of the technologies used and does not replace analysis by a human. The analysis results should be approached critically.",
         "warning": "Warning", "unknown_fig": "Unknown figure", "no_format": "No format",
         "no_title": "No title", "panel_pts": "pts", "panel_fig_prefix": "Fig.",
         "rep_no_data_warn": "No detailed substantive analysis data for this document.",
@@ -403,8 +405,9 @@ class _Writer:
         return height, draw
 
     def r_note(self, text, kind="ok"):
-        """A coloured notice: green (all fine), red (problem) or grey (skipped)."""
+        """A coloured notice: green (all fine), amber (caution), red (problem) or grey (skipped)."""
         text_c, bg, dot = {"ok": (C["success"], C["success_bg"], C["success_dot"]),
+                           "warn": (C["warning"], C["warning_bg"], C["warning_dot"]),
                            "bad": (C["danger"], C["danger_bg"], C["danger_dot"]),
                            "off": (C["text2"], C["neutral_bg"], C["text2"])}[kind]
         inner = CONTENT_W - 2 * PAD
@@ -474,6 +477,8 @@ def _content(w, s, data):
     img = img if isinstance(img, dict) else {}
     has_images = _number(img.get("total", 0)) > 0
     stats = data.get("statystyki_zdan")
+
+    w.card([w.r_note(s["rep_disclaimer"], "warn")])
 
     # ---- summary tiles
     tiles = []
