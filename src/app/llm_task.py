@@ -4,6 +4,7 @@ import traceback
 
 from common import run_control
 from common.cancellation import check_cancelled
+from common.timing import StageTimer
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,9 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
     if not use_llm:
         return None, None, "Tryb Szybki."
 
+    timer = StageTimer(logger, "LLM")
     try:
+        timer.next("preparing the text")
         from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
         from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
         from analysis.modules.llm.get_grade import get_overall_grade, get_content_grade
@@ -165,6 +168,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         )
         from analysis.modules.llm.get_summary import get_summaries
         from analysis.modules.llm.get_subtitles import get_subtitles
+        from analysis.modules.llm.results_log import log_results
         from analysis.modules.llm.run_sota import get_final_sota_report
         from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 
@@ -181,10 +185,12 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         if txt_for_llm is None:
             raise ValueError("extractPDF_llm returned None")
 
+        timer.next("finding the purpose")
         _stage(language, "purpose", cancel_token)
         purpose = get_purpose(plain_txt_purpose, language)
         check_cancelled(cancel_token)
 
+        timer.next("checking the goal")
         _stage(language, "goal", cancel_token)
 
         cleanup_text_llm_instances()        # the purpose model must leave the video memory before the next model loads
@@ -198,14 +204,17 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         purpose_score = get_score_from_goal_result(goal_result)
         check_cancelled(cancel_token)
         purpose_reason = str(goal_result.get("reason", "") or "")
+        log_results("Thesis purpose and its realization", purpose=purpose, score=purpose_score, reason=purpose_reason)
 
         cleanup_text_llm_instances()
 
+        timer.next("summaries")
         _stage(language, "summaries", cancel_token)
         subtitles = get_subtitles(txt_for_llm)
         summaries = get_summaries(subtitles, language)
         check_cancelled(cancel_token)
 
+        timer.next("embeddings")
         content_res = get_content_grade(purpose, summaries)
 
         if isinstance(content_res, tuple) and len(content_res) == 2:
@@ -214,9 +223,12 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             content_grade_val = content_res if isinstance(content_res, (int, float)) else 0.0
             off_topic_headings = []
 
+        log_results("Content grade", embedding_grade=content_grade_val, off_topic_headings=off_topic_headings)
+
         cleanup_text_llm_instances()
 
         if check_images:
+            timer.next("figures")
             _stage(language, "images", cancel_token)
             analysis_failed = False
 
@@ -281,12 +293,31 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             quality_errors = []
             font_errors = []
 
+        log_results(
+            "Figures",
+            summary=image_summary_data,
+            quality_errors=quality_errors,
+            font_errors=font_errors,
+        )
         check_cancelled(cancel_token)
+        timer.next("SOTA")
         _stage(language, "sota", cancel_token)
         res_id, res_title, res_score, res_method, res_cites, r1, r2, r3 = (
             get_final_sota_report(mapped_doc, language)
         )
         check_cancelled(cancel_token)
+
+        log_results(
+            "State of the art (SOTA)",
+            chapter_id=res_id,
+            title=res_title,
+            score=res_score,
+            basis=res_method,
+            citations=res_cites,
+            r1=r1,
+            r2=r2,
+            r3=r3,
+        )
 
         score = get_overall_grade(
             purpose_score,
@@ -322,6 +353,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "czcionki_obrazkow": font_errors,
         }
 
+        log_results("Final content grade", **content_grade_dict)
+
         return result, score, "Analiza LLM zakończona pomyślnie."
 
     except Exception:
@@ -329,4 +362,5 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         traceback.print_exc()
         return None, None, "Błąd analizy SOTA/LLM."
     finally:
+        timer.finish()
         cleanup_text_llm_instances()        # free RAM/VRAM also after an error or a cancelled analysis

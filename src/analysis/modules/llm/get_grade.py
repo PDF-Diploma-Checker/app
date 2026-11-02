@@ -17,6 +17,7 @@ from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_t
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_subtitles import get_subtitles
 from analysis.modules.llm.get_summary import get_summaries
+from analysis.modules.llm.results_log import log_embedding_results, log_grade_calculation
 from analysis.modules.llm.similarity import compute_similarity_for_summaries
 from analysis.modules.llm.goal_realization import get_purpose_grade
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, LANGUAGE
@@ -24,6 +25,10 @@ from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, LANGUAGE
 logger = logging.getLogger(__name__)
 
 threshold = 0.785
+
+SOTA_WEIGHT = 0.2
+PURPOSE_WEIGHT = 0.2
+EMBEDDING_WEIGHT = 0.6
 
 
 def calculate_embedding_grade(purpose, summaries):
@@ -39,6 +44,7 @@ def calculate_embedding_grade(purpose, summaries):
     total_sections = len(items)
 
     if total_sections == 0:
+        log_embedding_results(purpose, items, threshold, 0.0, 0.0)
         return {
             "grade": 0.0,
             "max_grade": 100.0,
@@ -63,6 +69,8 @@ def calculate_embedding_grade(purpose, summaries):
     p_off = (off_topic_sections / total_sections) * 100.0
     s_emb = 100.0 - p_off
     grade = s_emb
+
+    log_embedding_results(purpose, items, threshold, similarity_result.get("average_similarity", 0.0), grade)
 
     return {
         "grade": round(grade, 2),
@@ -106,7 +114,12 @@ def get_content_grade(purpose, summaries):
 def get_overall_grade(purpose_grade, embedding_grade, sota_grade):
     """Combine partial scores into the final weighted grade."""
 
-    overall_grade = 0.2* sota_grade + 0.2 * purpose_grade + 0.6 * embedding_grade 
+    overall_grade = SOTA_WEIGHT * sota_grade + PURPOSE_WEIGHT * purpose_grade + EMBEDDING_WEIGHT * embedding_grade
+    log_grade_calculation(
+        [("SOTA", sota_grade, SOTA_WEIGHT), ("Purpose realization", purpose_grade, PURPOSE_WEIGHT),
+         ("Embeddings", embedding_grade, EMBEDDING_WEIGHT)],
+        overall_grade,
+    )
     return overall_grade
 
 
