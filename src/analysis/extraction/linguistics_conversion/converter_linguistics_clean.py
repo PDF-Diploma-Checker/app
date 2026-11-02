@@ -246,6 +246,27 @@ class PDFMapper:
                 regions.append((y0, y1))
         return regions
 
+    EQ_NUM_TAIL_RE = re.compile(r"\(\s*\d+(?:[.,]\s*\d+)*\s*\)\s*$")
+
+    def _carry_formula_period(self, math_text):
+        if not self.paragraph_buffer or self.list_buffer:
+            return
+        text = (math_text or "").strip()
+        m = self.EQ_NUM_TAIL_RE.search(text)
+        if not m:
+            return
+        formula = text[: m.start()].rstrip()
+        if not formula.endswith(".") or formula.endswith(".."):
+            return
+        last = self.paragraph_buffer[-1]
+        content = last["content"].rstrip()
+        if not content or content[-1] in ".,!?:;-" or self._ends_sentence(content):
+            return
+        words = last.get("words") or []
+        if not words or getattr(words[-1], "is_index", False):
+            return
+        last["formula_period"] = True
+
     def __init__(self):
         # Stan wewnętrzny
         self.logical_blocks = []
@@ -653,6 +674,10 @@ class PDFMapper:
                 )
 
             combined_content += separator + content
+            if data.get("formula_period") and data["words"]:
+                combined_content += "."
+                combined_words[-1].text += "."
+                combined_words[-1].end_char += 1
             current_offset = len(combined_content)
 
         block_type = "acronyms" if is_acronym_block else "paragraph"
@@ -1755,6 +1780,7 @@ class PDFMapper:
                                     bbox=math_bbox,
                                 )
                             )
+                            self._carry_formula_period(full_text)
                         else:
                             prev_type, prev_marker = self._classify_block_content(
                                 full_text, current_marker
@@ -1837,6 +1863,7 @@ class PDFMapper:
                         bbox=math_bbox,
                     )
                 )
+                self._carry_formula_period(full_text)
                 continue
 
             is_hdr = self.is_header(words_info)
