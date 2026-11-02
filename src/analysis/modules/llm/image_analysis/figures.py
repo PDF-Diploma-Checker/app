@@ -50,6 +50,50 @@ def figure_sort_key(label):
     return [int(n) for n in re.findall(r"\d+", label)], label
 
 
+# Fixed messages of the figure analysis; the report is written in the language of the thesis.
+_TEXTS = {
+    "pl": {
+        "no_reference": "Brak prawdziwego odwołania omawiającego rysunek w tekście pracy (znaleziono jedynie podpis).",
+        "analysis_failed": "Analiza nie powiodła się.",
+        "status_good": "Poprawny",
+        "status_bad": "Wykryto rozbieżności",
+        "status_failed": "Nie przeanalizowano",
+        "details": "Szczegóły",
+        "unknown": "Nieznany",
+        "blurry": "Model LLaVA uznał, że obraz jest niewyraźny lub rozmazany.",
+        "fonts_inconsistent": "Niespójne wielkości czcionek na wykresie/obrazku.",
+        "low_dpi": "Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'.",
+        "dpi_requirement": "Minimum {threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)",
+        "unreadable_file": "Nie udało się zweryfikować pliku: {error}",
+        "replace_image": "Zalecana wymiana grafiki.",
+        "score": "Wynik",
+        "from_pdf": "Wyciągnięto z PDF",
+    },
+    "en": {
+        "no_reference": "The thesis text does not actually discuss this figure (only its caption was found).",
+        "analysis_failed": "The analysis failed.",
+        "status_good": "Correct",
+        "status_bad": "Discrepancies found",
+        "status_failed": "Not analysed",
+        "details": "Details",
+        "unknown": "Unknown",
+        "blurry": "The LLaVA model found the image blurry or unclear.",
+        "fonts_inconsistent": "Inconsistent font sizes in the chart/image.",
+        "low_dpi": "The image was stretched too far, which caused visible pixelation.",
+        "dpi_requirement": "At least {threshold} DPI (a standard screenshot has 96 DPI)",
+        "unreadable_file": "The file could not be verified: {error}",
+        "replace_image": "Replacing the image is recommended.",
+        "score": "Score",
+        "from_pdf": "Extracted from the PDF",
+    },
+}
+
+
+def image_text(language, key, **values):
+    """A fixed message in the thesis language (Polish for any other language)."""
+    return _TEXTS.get(language, _TEXTS["pl"])[key].format(**values)
+
+
 def parse_yes_no(answer):
     """The model's yes/no answer as True/False; None when it gave neither ("unknown" must not count as "no")."""
     words = set(re.findall(r"[a-z]+", (answer or "").lower()))

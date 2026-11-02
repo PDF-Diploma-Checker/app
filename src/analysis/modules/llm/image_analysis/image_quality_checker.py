@@ -7,22 +7,28 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
-from .figures import figure_sort_key
+from .figures import figure_sort_key, image_text
 from .quality_analysis import check_image_quality
 from .llava_quality_checker import get_llava_quality_report
 
 logger = logging.getLogger(__name__)
 
-def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
+def _dpi_reason(item, language):
+    reason = f"[DPI]: {item.get('blad')}"
+    density = item.get("zageszczenie_pikseli")
+    return f"{reason} ({image_text(language, 'score')}: {density})" if density else reason
+
+
+def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False, language="pl"):
     """
     Czysta funkcja do użycia w Twoim głównym pipeline.
     Zwraca ostateczny raport jako listę słowników (JSON).
     """
     if verbose: logger.info("[1/2] Test matematyczny DPI (próg 75)...")
-    dpi_report = check_image_quality(doc_obj, str(pdf_path), dpi_threshold=75)
+    dpi_report = check_image_quality(doc_obj, str(pdf_path), dpi_threshold=75, language=language)
     
     if verbose: logger.info("[2/2] Test wizualny LLaVA (czytelność)...")
-    llava_report = get_llava_quality_report(doc_obj, mapped_doc, verbose=verbose)
+    llava_report = get_llava_quality_report(doc_obj, mapped_doc, verbose=verbose, language=language)
     
     merged_results = {}
     
@@ -30,8 +36,8 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
         rys = item["rysunek"]
         merged_results[rys] = {
             "rysunek": rys,
-            "format": item.get("format", "Nieznany"),
-            "powody_odrzucenia": [f"[DPI]: {item.get('blad')} (Wynik: {item.get('zageszczenie_pikseli')})"]
+            "format": item.get("format", image_text(language, "unknown")),
+            "powody_odrzucenia": [_dpi_reason(item, language)]
         }
         
     failed_checks = []
@@ -49,7 +55,7 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False):
         
             merged_results[rys] = {
                 "rysunek": rys,
-                "format": "Wyciągnięto z PDF",
+                "format": image_text(language, "from_pdf"),
                 "powody_odrzucenia": [blad_ai]
             }
             

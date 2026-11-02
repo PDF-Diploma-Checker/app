@@ -11,7 +11,7 @@ sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures, parse_yes_no
+from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ class LlavaFontEngine:
             logger.exception("Font consistency check inference failed")
             return {"failed": True}
 
-def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
+def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Return a report of figures with inconsistent font sizing."""
     images = collect_figures(doc_obj)
     bad_fonts_report = []
@@ -101,8 +101,7 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
         if str(is_consistent).lower() == "false":
             bad_fonts_report.append({
                 "rysunek": img["id"],
-                "blad": "Niespójne wielkości czcionek na wykresie/obrazku.",
-                "szczegoly_ai": assessment.get("reason", "Model AI zauważył drastyczne różnice w wielkościach tekstu.")
+                "blad": image_text(language, "fonts_inconsistent"),
             })
             
     if verbose: logger.info(f"[AI] Zwalniam VRAM po analizie czcionek...")

@@ -8,6 +8,12 @@ from analysis.modules.llm.llama_factory import make_llama
 logger = logging.getLogger(__name__)
 
 
+_EXTRACT_PROMPTS = {
+    "pl": "Wyciągnij wszystkie etykiety, liczby i dane z tego wykresu/obrazka. Zwróć je jako surowe dane tekstowe.",
+    "en": "Extract all labels, numbers and data from this chart/image. Return them as raw text data.",
+}
+
+
 class LlavaEngine:
     def __init__(self, model_path=None, mmproj_path=None):
         model_path = model_path or str(config.LLAVA_MODEL_PATH)
@@ -38,7 +44,7 @@ class LlavaEngine:
         init_elapsed = time.perf_counter() - init_start
         logger.info("[LLaVA][INIT] done elapsed=%.2fs max_tokens=%s", init_elapsed, self.max_tokens)
 
-    def extract_data(self, image_bytes):
+    def extract_data(self, image_bytes, language="pl"):
         logger.debug("[LLaVA][EXTRACT] start image_bytes=%d max_tokens=%s", len(image_bytes), self.max_tokens)
         extract_start = time.perf_counter()
 
@@ -54,7 +60,7 @@ class LlavaEngine:
                         "role": "user",
                         "content": [
                             {"type": "image_url", "image_url": {"url": data_uri}},
-                            {"type": "text", "text": "Wyciągnij wszystkie etykiety, liczby i dane z tego wykresu/obrazka. Zwróć je jako surowe dane tekstowe."}
+                            {"type": "text", "text": _EXTRACT_PROMPTS.get(language, _EXTRACT_PROMPTS["pl"])}
                         ]
                     }
                 ],
