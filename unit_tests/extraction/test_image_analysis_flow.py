@@ -204,6 +204,64 @@ class ReportPdfTest(unittest.TestCase):
         self.assertNotIn("Rysunek 1:", text)
 
 
+class ThesisLanguageTest(unittest.TestCase):
+    ROWS = [
+        {"obrazek": "Figure 1", "poprawnosc_danych": "True", "bledy": "None"},
+        {"obrazek": "Figure 2", "poprawnosc_danych": "False", "bledy": "x"},
+        {"obrazek": "Figure 3", "poprawnosc_danych": "Error", "bledy": "y"},
+    ]
+
+    def test_summary_follows_the_thesis_language(self):
+        from app.llm_task import build_image_summary
+
+        english = build_image_summary(self.ROWS, "en")
+        self.assertEqual(english["problem_details"], ["Figure 2: Discrepancies found - Details: x",
+                                                      "Figure 3: Not analysed - Details: y"])
+        self.assertIn("Figure 1: Correct - Details: None", english["details"])
+        polish = build_image_summary(self.ROWS, "pl")
+        self.assertEqual(polish["problem_details"][1], "Figure 3: Nie przeanalizowano - Szczegóły: y")
+
+    def test_every_message_exists_in_both_languages(self):
+        from analysis.modules.llm.image_analysis.figures import _TEXTS
+
+        self.assertEqual(set(_TEXTS["pl"]), set(_TEXTS["en"]))
+
+    def test_dpi_check_writes_in_the_thesis_language(self):
+        from analysis.modules.llm.image_analysis.quality_analysis import check_image_quality
+
+        with tempfile.TemporaryDirectory() as tmp:
+            image, pdf = Path(tmp, "small.png"), Path(tmp, "t.pdf")
+            small = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 60, 60), False)
+            small.set_dpi(30, 30)
+            small.save(str(image))
+            doc = fitz.open()
+            doc.new_page()
+            doc.save(str(pdf))
+            doc.close()
+            thesis = SimpleNamespace(pages=[SimpleNamespace(images=[
+                SimpleNamespace(path=str(image), bbox=(0, 0, 9, 9), description="Figure 1. X", image_type="raster")])])
+            report = check_image_quality(thesis, str(pdf), language="en")
+        self.assertEqual(report[0]["rysunek"], "Figure 1")
+        self.assertIn("pixelation", report[0]["blad"])
+        self.assertIn("At least 75 DPI", report[0]["wymaganie"])
+
+
+class ReportPdfFontsTest(unittest.TestCase):
+    def test_font_problem_is_a_sentence_not_a_raw_dict(self):
+        from ui.report_pdf import build_report_pdf
+
+        data = {"content_grade": {"grade": 50, "max_grade": 100},
+                "image_analysis": {"total": 1, "bad_count": 0, "good_count": 1},
+                "czcionki_obrazkow": [{"rysunek": "Figure 1", "blad": "Inconsistent font sizes"}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp, "report.pdf"))
+            build_report_pdf(data, "t.pdf", "en", path)
+            with fitz.open(path) as doc:
+                text = " ".join(" ".join(page.get_text().split()) for page in doc)
+        self.assertIn("Inconsistent font sizes", text)
+        self.assertNotIn("{", text)
+
+
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

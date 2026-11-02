@@ -93,12 +93,14 @@ def split_failed_checks(entries):
     return errors, len(errors) != len(entries)
 
 
-def build_image_summary(raw_image_report):
+def build_image_summary(raw_image_report, language="pl"):
     """
     Build image_analysis dictionary in the same format as the old pipeline task_llm.
     """
     if raw_image_report is None:
         raw_image_report = []
+
+    from analysis.modules.llm.image_analysis.figures import image_text
 
     # The report has one entry per paragraph that mentions a figure; the totals count figures.
     worst_status = {}
@@ -107,7 +109,7 @@ def build_image_summary(raw_image_report):
     problem_lines = []
 
     for item in raw_image_report:
-        img_id = item.get("obrazek", item.get("id", "Nieznany"))
+        img_id = item.get("obrazek", item.get("id", image_text(language, "unknown")))
         is_correct = item.get("poprawnosc_danych", "True")
         errors = item.get("bledy", "None")
 
@@ -117,18 +119,19 @@ def build_image_summary(raw_image_report):
         if is_correct == "Error":
             failed = True
             worst_status.setdefault(img_id, "failed")
-            status_text = "Nie przeanalizowano"
+            status = "failed"
         elif is_correct == "False" or is_correct is False:
             worst_status[img_id] = "bad"
-            status_text = "Wykryto rozbieznosci"
+            status = "bad"
         else:
             if worst_status.get(img_id) != "bad":
                 worst_status[img_id] = "good"
-            status_text = "Poprawny"
+            status = "good"
 
-        line = f"{img_id}: {status_text} - Szczegoly: {errors}"
+        status_text = image_text(language, f"status_{status}")
+        line = f"{img_id}: {status_text} - {image_text(language, 'details')}: {errors}"
         image_details_lines.append(line)
-        if status_text != "Poprawny":
+        if status != "good":
             problem_lines.append(line)
 
     statuses = list(worst_status.values())
@@ -220,13 +223,13 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             try:
                 from analysis.modules.llm.image_analysis.run_image import analyze_images
 
-                raw_image_report = analyze_images(doc_obj, mapped_doc)
+                raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
             except Exception:
                 logger.exception("Image consistency analysis failed")
                 raw_image_report = []
                 analysis_failed = True
 
-            image_summary_data = build_image_summary(raw_image_report)
+            image_summary_data = build_image_summary(raw_image_report, language)
             check_cancelled(cancel_token)
 
             cleanup_text_llm_instances()
@@ -241,6 +244,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                     mapped_doc,
                     pdf_path,
                     verbose=False,
+                    language=language,
                 )
                 quality_errors, failed = split_failed_checks(quality_errors or [])
                 analysis_failed = analysis_failed or failed
@@ -261,6 +265,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                     doc_obj,
                     mapped_doc,
                     verbose=False,
+                    language=language,
                 )
                 font_errors, failed = split_failed_checks(font_errors or [])
                 analysis_failed = analysis_failed or failed

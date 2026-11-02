@@ -3,7 +3,7 @@ import gc
 import logging
 
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, is_caption
+from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, image_text, is_caption
 from analysis.modules.llm.image_analysis.llava_engine import LlavaEngine
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
@@ -23,12 +23,12 @@ def adapt_data_for_images(doc_obj, mapped_doc):
     return paragraphs, collect_figures(doc_obj)
 
 
-def _failed_entry(image_id):
+def _failed_entry(image_id, language):
     """Report entry of a figure the models could not process: not a thesis error, so it is marked separately."""
-    return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Error", "bledy": "Analiza nie powiodła się."}
+    return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Error", "bledy": image_text(language, "analysis_failed")}
 
 
-def analyze_images(doc_obj, mapped_doc, verbose=False):
+def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Analyze image references and verify paragraph-to-image consistency."""
     matcher = ReferenceMatcher()
     paragraphs, images = adapt_data_for_images(doc_obj, mapped_doc)
@@ -45,7 +45,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
                 "obrazek": img["id"],
                 "odwolanie": "brak",
                 "poprawnosc_danych": "False",
-                "bledy": ["Brak prawdziwego odwołania omawiającego rysunek w tekście pracy (znaleziono jedynie podpis)."]
+                "bledy": [image_text(language, "no_reference")]
             })
         else:
             images_with_refs.append({"id": img["id"], "bytes": img["bytes"], "refs": refs})
@@ -64,14 +64,14 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
         if verbose:
             logger.info(f"[{idx}/{len(images_with_refs)}] LLaVA analizuje obrazek {img['id']}...")
         try:
-            image_data = llava.extract_data(img["bytes"])
+            image_data = llava.extract_data(img["bytes"], language)
             if not (image_data or "").strip():
                 raise ValueError("LLaVA returned no data")
             extracted_image_data[img["id"]] = image_data
         except Exception:
             # one unreadable figure must not cost the results of all the others
             logger.exception("LLaVA could not read figure %s", img["id"])
-            final_report.append(_failed_entry(img["id"]))
+            final_report.append(_failed_entry(img["id"], language))
 
     if verbose:
         logger.info(f"\n[AI] Koniec pracy LLaVA. Zwalniam VRAM karty graficznej...")
@@ -93,16 +93,16 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
                 logger.info(f" -> Sędzia ocenia akapit dla rysunku {img['id']}...")
 
             try:
-                verification = checker.check(ref_para, img_data_text)
+                verification = checker.check(ref_para, img_data_text, language)
             except Exception:
                 logger.exception("Consistency check failed for figure %s", img["id"])
-                final_report.append(_failed_entry(img["id"]))
+                final_report.append(_failed_entry(img["id"], language))
                 continue
 
             verdict = consistency_verdict(verification)
             if verdict == "Error":
                 logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
-                final_report.append(_failed_entry(img["id"]))
+                final_report.append(_failed_entry(img["id"], language))
                 continue
 
             final_report.append({
