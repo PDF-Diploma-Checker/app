@@ -170,6 +170,40 @@ class ModelFailureTest(unittest.TestCase):
         self.assertEqual(split_failed_checks([real]), ([real], False))
 
 
+class ReportPdfTest(unittest.TestCase):
+    def _pdf_text(self, image_analysis):
+        from ui.report_pdf import build_report_pdf
+
+        data = {"content_grade": {"grade": 50, "max_grade": 100}, "image_analysis": image_analysis}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp, "report.pdf"))
+            build_report_pdf(data, "t.pdf", "pl", path)
+            with fitz.open(path) as doc:
+                return " ".join(" ".join(page.get_text().split()) for page in doc)
+
+    def test_discrepancy_list_has_only_the_problems(self):
+        from app.llm_task import build_image_summary
+
+        text = self._pdf_text(build_image_summary([
+            {"obrazek": "Rys. 1", "poprawnosc_danych": "True", "bledy": "None"},
+            {"obrazek": "Rys. 2", "poprawnosc_danych": "False", "bledy": "Zla wartosc"},
+        ]))
+        self.assertIn("Zla wartosc", text)
+        self.assertNotIn("Rys. 1:", text)
+
+    def test_all_correct_has_no_discrepancy_list(self):
+        from app.llm_task import build_image_summary
+
+        text = self._pdf_text(build_image_summary([{"obrazek": "Rys. 1", "poprawnosc_danych": "True", "bledy": "None"}]))
+        self.assertNotIn("Lista szczegółowa", text)
+
+    def test_report_saved_by_older_version_is_filtered_too(self):
+        text = self._pdf_text({"total": 2, "bad_count": 1, "good_count": 1, "details": [
+            "Rysunek 1: Poprawny - Szczegoly: None", "Rysunek 2: Wykryto rozbieznosci - Szczegoly: Zla wartosc"]})
+        self.assertIn("Zla wartosc", text)
+        self.assertNotIn("Rysunek 1:", text)
+
+
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
