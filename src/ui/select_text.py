@@ -129,6 +129,12 @@ class SelectablePdfView(QPdfView):
                 box.setStyleSheet(styles.HIGHLIGHT_BOX_ERROR)
                 self.highlight_boxes.append(box)
 
+            for extra in err.get("extra_rects", []):
+                ebox = HighlightBox(extra, self.viewport())
+                ebox.is_error = True
+                ebox.setStyleSheet(styles.HIGHLIGHT_BOX_ERROR)
+                self.highlight_boxes.append(ebox)
+
         self.update_markers_pos()
 
     def update_markers_pos(self):
