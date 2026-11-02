@@ -265,7 +265,10 @@ class ReportPdfFontsTest(unittest.TestCase):
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        from PySide6.QtWidgets import QApplication, QLabel
+        try:
+            from PySide6.QtWidgets import QApplication, QLabel
+        except ImportError as error:    # e.g. a CI runner without the system libraries Qt needs (libEGL)
+            self.skipTest(f"Qt is not available: {error}")
 
         self.app = QApplication.instance() or QApplication([])
         from ui.report_panel import build_report_panel
