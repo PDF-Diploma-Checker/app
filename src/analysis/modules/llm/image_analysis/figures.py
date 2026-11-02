@@ -50,6 +50,22 @@ def figure_sort_key(label):
     return [int(n) for n in re.findall(r"\d+", label)], label
 
 
+def parse_yes_no(answer):
+    """The model's yes/no answer as True/False; None when it gave neither ("unknown" must not count as "no")."""
+    words = set(re.findall(r"[a-z]+", (answer or "").lower()))
+    if words & {"yes", "true"}:
+        return True
+    if words & {"no", "false"}:
+        return False
+    return None
+
+
+def consistency_verdict(verification):
+    """Normalize the consistency model's answer to 'True', 'False', or 'Error' when it gave no usable verdict."""
+    value = str(verification.get("poprawnosc_danych", "")).strip().lower()
+    return {"true": "True", "false": "False"}.get(value, "Error")
+
+
 def _area(img):
     x0, y0, x1, y1 = img.bbox
     return abs(x1 - x0) * abs(y1 - y0)

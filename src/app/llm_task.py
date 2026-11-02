@@ -87,6 +87,12 @@ def cleanup_text_llm_instances():
         pass
 
 
+def split_failed_checks(entries):
+    """Separate thesis errors from figures the model could not check: returns (errors, whether any check failed)."""
+    errors = [entry for entry in entries if not entry.get("analysis_failed")]
+    return errors, len(errors) != len(entries)
+
+
 def build_image_summary(raw_image_report):
     """
     Build image_analysis dictionary in the same format as the old pipeline task_llm.
@@ -236,8 +242,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                     pdf_path,
                     verbose=False,
                 )
-                if quality_errors is None:
-                    quality_errors = []
+                quality_errors, failed = split_failed_checks(quality_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
                 logger.exception("Image quality analysis failed")
                 quality_errors = []
@@ -256,8 +262,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                     mapped_doc,
                     verbose=False,
                 )
-                if font_errors is None:
-                    font_errors = []
+                font_errors, failed = split_failed_checks(font_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
                 logger.exception("Image font analysis failed")
                 font_errors = []
