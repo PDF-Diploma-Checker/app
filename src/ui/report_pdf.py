@@ -567,7 +567,7 @@ def _content(w, s, data):
             for err in fonts:
                 if isinstance(err, dict):
                     rows += w.r_figure(str(err.get("rysunek", s["unknown_fig"])), None,
-                                       [str(b) for b in err.get("errors", err.get("powody_odrzucenia", [str(err)]))])
+                                       [str(b) for b in err.get("errors", err.get("powody_odrzucenia", [err.get("blad", str(err))]))])
                 else:
                     rows += w.r_bullets([str(err)], 9.8, C["text3"], C["danger_dot"])
             w.card(rows)

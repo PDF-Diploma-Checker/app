@@ -9,7 +9,7 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures, parse_yes_no
+from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class LlavaQualityEngine:
             logger.exception("Image quality assessment inference failed")
             return {"failed": True}
 
-def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
+def get_llava_quality_report(doc_obj, mapped_doc, verbose=False, language="pl"):
     images = collect_figures(doc_obj)
     bad_images_report = []
     
@@ -95,7 +95,7 @@ def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
         if str(czytelny).lower() == "false":
             bad_images_report.append({
                 "rysunek": img["id"], 
-                "blad_llava": assessment.get("powod", "Obraz nieczytelny.")
+                "blad_llava": image_text(language, "blurry")
             })
             
     if verbose: 

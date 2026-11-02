@@ -6,6 +6,26 @@ from analysis.modules.llm.llama_factory import make_llama
 logger = logging.getLogger(__name__)
 
 
+_PROMPTS = {
+    "pl": """
+        Dane z obrazka: {image_data}
+        Akapit z pracy: {paragraph}
+
+        Przeanalizuj, czy dane w akapicie zgadzają się z obrazkiem.
+        Zwróć wynik w JSON. Klawisze: "poprawnosc_danych" (jako string "True" lub "False") oraz "bledy" (jako string "None" lub cytaty błędnych zdań).
+        Odpowiadaj po polsku.
+        """,
+    "en": """
+        Data from the image: {image_data}
+        Paragraph from the thesis: {paragraph}
+
+        Check whether the data in the paragraph agrees with the image.
+        Return the result as JSON. Keys: "poprawnosc_danych" (the string "True" or "False") and "bledy" (the string "None" or quotes of the incorrect sentences).
+        Answer in English.
+        """,
+}
+
+
 class ConsistencyChecker:
     def __init__(self, model_path=None):
         model_path = model_path or str(config.MODEL_PATH)
@@ -22,15 +42,10 @@ class ConsistencyChecker:
             logger.exception("Failed to load consistency-checker LLM from %s", model_path)
             raise RuntimeError(f"Failed to load consistency-checker LLM from {model_path}") from e
 
-    def check(self, paragraph, image_data):
-        prompt = f"""
-        Dane z obrazka: {image_data}
-        Akapit z pracy: {paragraph}
-        
-        Przeanalizuj, czy dane w akapicie zgadzają się z obrazkiem.
-        Zwróć wynik w JSON. Klawisze: "poprawnosc_danych" (jako string "True" lub "False") oraz "bledy" (jako string "None" lub cytaty błędnych zdań).
-        """
-        
+    def check(self, paragraph, image_data, language="pl"):
+        template = _PROMPTS.get(language, _PROMPTS["pl"])
+        prompt = template.replace("{image_data}", str(image_data)).replace("{paragraph}", str(paragraph))
+
         try:
             response = self.llm.create_chat_completion(
                 messages=[
@@ -51,4 +66,4 @@ class ConsistencyChecker:
             return json.loads(result_text)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
-            return {"poprawnosc_danych": "Error", "bledy": "Analiza nie powiodła się."}
+            return {"poprawnosc_danych": "Error", "bledy": "None"}

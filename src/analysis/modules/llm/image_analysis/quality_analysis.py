@@ -3,7 +3,7 @@ import sys
 import json
 import logging
 
-from analysis.modules.llm.image_analysis.figures import collect_figures, figure_sort_key
+from analysis.modules.llm.image_analysis.figures import collect_figures, figure_sort_key, image_text
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ except ImportError:
     raise ImportError("Brak biblioteki PyMuPDF. Uruchom: pip install PyMuPDF")
 
 
-def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
+def check_image_quality(doc_obj, pdf_path, dpi_threshold=75, language="pl"):
     low_quality_report = []
     
     figures = collect_figures(doc_obj)
@@ -72,8 +72,8 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
                         "format": extension.upper().replace(".", ""),
                         "rozdzielczosc_wewnetrzna": f"{w}x{h} px",
                         "zageszczenie_pikseli": f"~{actual_dpi} DPI",
-                        "blad": "Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'.",
-                        "wymaganie": f"Minimum {dpi_threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)"
+                        "blad": image_text(language, "low_dpi"),
+                        "wymaganie": image_text(language, "dpi_requirement", threshold=dpi_threshold)
                     })
         except Exception as e:
             logger.exception("Failed to read image quality data for %s", img_path)
@@ -81,8 +81,8 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
                 "rysunek": img_id,
                 "format": extension.upper().replace(".", ""),
                 "rozdzielczosc_wewnetrzna": "Błąd odczytu",
-                "blad": f"Nie udało się zweryfikować pliku: {e}",
-                "wymaganie": "Zalecana wymiana grafiki."
+                "blad": image_text(language, "unreadable_file", error=e),
+                "wymaganie": image_text(language, "replace_image")
             })
             
     low_quality_report.sort(key=lambda x: figure_sort_key(x["rysunek"]))
