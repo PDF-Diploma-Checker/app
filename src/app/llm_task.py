@@ -199,7 +199,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         if isinstance(content_res, tuple) and len(content_res) == 2:
             content_grade_val, off_topic_headings = content_res
         else:
-            content_grade_val = content_res if isinstance(content_res, (int, float)) else 0.0
+            content_grade_val = content_res if isinstance(content_res, (int, float)) else None
             off_topic_headings = []
 
         log_results("Content grade", embedding_grade=content_grade_val, off_topic_headings=off_topic_headings)
