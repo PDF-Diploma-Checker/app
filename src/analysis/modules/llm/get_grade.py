@@ -25,12 +25,11 @@ from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, LANGUAGE
 
 logger = logging.getLogger(__name__)
 
-# Calibrated for paraphrase-multilingual-MiniLM-L12-v2 on real theses: sections of a thesis stay above 0.30 when compared
-# with the rest of that thesis, unrelated text stays below 0.20. A different embedding model needs its own value.
+# Below this a section is off-topic without asking the model. A different embedding model needs its own values.
 threshold = 0.25
-# Between the two values the embeddings cannot tell: a section of a neighbouring subject scores like a real section of
-# the thesis, so the text model decides (see section_relevance.py). All tested neighbouring sections were below this one.
-REVIEW_THRESHOLD = 0.5
+# Below this the embeddings cannot tell: a section of a neighbouring subject scored up to 0.67, a real section of a thesis
+# from 0.49, so the text model decides (see section_relevance.py).
+REVIEW_THRESHOLD = 0.7
 
 SOTA_WEIGHT = 0.2
 PURPOSE_WEIGHT = 0.2
