@@ -1,10 +1,9 @@
 import json
-import re
 import gc
 import logging
-from pathlib import Path
 
 from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, image_text, is_caption
 from analysis.modules.llm.image_analysis.llava_engine import LlavaEngine
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
@@ -13,51 +12,23 @@ logger = logging.getLogger(__name__)
 
 
 def adapt_data_for_images(doc_obj, mapped_doc):
-    """Extract clean paragraphs and deduplicated image payloads for image analysis."""
+    """Extract clean paragraphs and deduplicated figures for image analysis."""
     paragraphs = []
-    
+
     for block in mapped_doc.logical_blocks:
         text = getattr(block, "content", "").strip()
         if text:
             paragraphs.append(text)
-            
-    caption_pattern = re.compile(r"(?i)rys(?:unek|\.)?\s*(\d+(?:\.\d+)?)")
-    unique_images = {}
-    
-    for page in doc_obj.pages:
-        for img in page.images:
-            desc = getattr(img, "description", "")
-            if desc:
-                match = caption_pattern.search(desc)
-                if match:
-                    found_id = match.group(1)
-                    
-                    if found_id not in unique_images:
-                        unique_images[found_id] = {"desc": desc, "bytes": None}
-                        img_path = Path(img.path)
-                        if img_path.exists():
-                            try:
-                                with open(img_path, "rb") as f:
-                                    unique_images[found_id]["bytes"] = f.read()
-                            except OSError:
-                                logger.exception("Failed to read image file %s", img_path)
-                    else:
-                        old_desc = unique_images[found_id]["desc"]
-                        if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
-                            unique_images[found_id]["desc"] = desc
-                            img_path = Path(img.path)
-                            if img_path.exists():
-                                try:
-                                    with open(img_path, "rb") as f:
-                                        unique_images[found_id]["bytes"] = f.read()
-                                except OSError:
-                                    logger.exception("Failed to read image file %s", img_path)
-                        
-    images = [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
-    
-    return paragraphs, images
 
-def analyze_images(doc_obj, mapped_doc, verbose=False):
+    return paragraphs, collect_figures(doc_obj)
+
+
+def _failed_entry(image_id, language):
+    """Report entry of a figure the models could not process: not a thesis error, so it is marked separately."""
+    return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Error", "bledy": image_text(language, "analysis_failed")}
+
+
+def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Analyze image references and verify paragraph-to-image consistency."""
     matcher = ReferenceMatcher()
     paragraphs, images = adapt_data_for_images(doc_obj, mapped_doc)
@@ -66,21 +37,15 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
     final_report = []
 
     for img in images:
-        raw_refs = matcher.find_references(paragraphs, img["id"])
-        refs = []
-        for r in raw_refs:
-            if re.match(rf"(?i)^rys(?:unek|\.)?\s*{re.escape(str(img['id']))}\s*[:\.\-]", r.strip()):
-                continue
-            if len(r.strip()) < 50 and "rys" in r.lower():
-                continue
-            refs.append(r)
+        raw_refs = matcher.find_references(paragraphs, img["number"], img["family"])
+        refs = [r for r in raw_refs if not is_caption(r, img["number"], img["family"])]
 
         if not refs:
             final_report.append({
                 "obrazek": img["id"],
                 "odwolanie": "brak",
                 "poprawnosc_danych": "False",
-                "bledy": ["Brak prawdziwego odwołania omawiającego rysunek w tekście pracy (znaleziono jedynie podpis)."]
+                "bledy": [image_text(language, "no_reference")]
             })
         else:
             images_with_refs.append({"id": img["id"], "bytes": img["bytes"], "refs": refs})
@@ -98,8 +63,16 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
     for idx, img in enumerate(images_with_refs, 1):
         if verbose:
             logger.info(f"[{idx}/{len(images_with_refs)}] LLaVA analizuje obrazek {img['id']}...")
-        extracted_image_data[img["id"]] = llava.extract_data(img["bytes"])
-  
+        try:
+            image_data = llava.extract_data(img["bytes"], language)
+            if not (image_data or "").strip():
+                raise ValueError("LLaVA returned no data")
+            extracted_image_data[img["id"]] = image_data
+        except Exception:
+            # one unreadable figure must not cost the results of all the others
+            logger.exception("LLaVA could not read figure %s", img["id"])
+            final_report.append(_failed_entry(img["id"], language))
+
     if verbose:
         logger.info(f"\n[AI] Koniec pracy LLaVA. Zwalniam VRAM karty graficznej...")
         
@@ -112,17 +85,30 @@ def analyze_images(doc_obj, mapped_doc, verbose=False):
     checker = ConsistencyChecker()
     
     for img in images_with_refs:
+        if img["id"] not in extracted_image_data:
+            continue
         img_data_text = extracted_image_data[img["id"]]
         for ref_para in img["refs"]:
             if verbose:
                 logger.info(f" -> Sędzia ocenia akapit dla rysunku {img['id']}...")
-                
-            verification = checker.check(ref_para, img_data_text)
-            
+
+            try:
+                verification = checker.check(ref_para, img_data_text, language)
+            except Exception:
+                logger.exception("Consistency check failed for figure %s", img["id"])
+                final_report.append(_failed_entry(img["id"], language))
+                continue
+
+            verdict = consistency_verdict(verification)
+            if verdict == "Error":
+                logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
+                final_report.append(_failed_entry(img["id"], language))
+                continue
+
             final_report.append({
                 "obrazek": img["id"],
                 "odwolanie": "wystapilo",
-                "poprawnosc_danych": verification.get("poprawnosc_danych", "False"),
+                "poprawnosc_danych": verdict,
                 "bledy": verification.get("bledy", "None")
             })
 

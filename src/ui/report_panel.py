@@ -160,9 +160,10 @@ def _bar(label, value_text, ratio, color=None, description=None):
 
 
 def _note(text, kind):
-    """A coloured notice: 'ok' (green), 'bad' (red) or 'off' (grey)."""
+    """A coloured notice: 'ok' (green), 'warn' (amber), 'bad' (red) or 'off' (grey)."""
     fg, bg, dot = {
         "ok": (styles.SUCCESS, styles.SUCCESS_BG, styles.SUCCESS_DOT),
+        "warn": (styles.WARNING, styles.WARNING_BG, styles.WARNING_DOT),
         "bad": (styles.DANGER, styles.DANGER_BG, styles.DANGER_DOT),
         "off": (styles.TEXT_2, styles.NEUTRAL_BG, styles.TEXT_2),
     }[kind]
@@ -238,6 +239,8 @@ def build_report_panel(report_data, on_download):
         else:
             grade = _number(grade_info)
 
+    root.addWidget(_note(t("main.disclaimer"), "warn"))
+
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
     card, lay = _card()
@@ -255,13 +258,22 @@ def build_report_panel(report_data, on_download):
     # ---- figures
     root.addWidget(_section(t("main.graphics_header")))
     card, lay = _card()
+    if img.get("analysis_failed"):
+        lay.addWidget(_note(t("main.figures_analysis_failed"), "bad"))
     if grade_info is not None and total_figs > 0:
+        bad_figs = int(_number(img.get("bad_count", 0)))
+        lay.addWidget(_note(t("main.figures_consistency", total=total_figs, good=int(_number(img.get("good_count", 0))),
+                              bad=bad_figs), "bad" if bad_figs else "ok"))
+        problems = img.get("problem_details", []) or []
+        if problems:
+            lay.addWidget(_label(t("main.figures_problems"), f"font-size: 13px; font-weight: 700; color: {styles.DANGER}; {TRANSPARENT}"))
+            lay.addWidget(_bullets(problems, styles.DANGER_DOT))
         quality, fonts = data.get("jakosc_obrazkow") or [], data.get("czcionki_obrazkow") or []
         lay.addWidget(_note(t("main.image_quality_errors", count=len(quality)) if quality else t("main.image_quality_ok"),
                             "bad" if quality else "ok"))
         lay.addWidget(_note(t("main.font_consistency_errors", count=len(fonts)) if fonts else t("main.font_consistency_ok"),
                             "bad" if fonts else "ok"))
-    else:
+    elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked"), "off"))
     raster = img.get("image_raster", []) or []
     if raster:
