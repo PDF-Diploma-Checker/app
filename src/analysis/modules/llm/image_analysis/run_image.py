@@ -1,10 +1,9 @@
 import json
-import gc
 import logging
 
 from analysis.modules.llm import config
 from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, image_text, is_caption
-from analysis.modules.llm.image_analysis.llava_engine import LlavaEngine
+from analysis.modules.llm.image_analysis.vision_engine import VisionEngine, too_small_to_read
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
 
@@ -26,6 +25,11 @@ def adapt_data_for_images(doc_obj, mapped_doc):
 def _failed_entry(image_id, language):
     """Report entry of a figure the models could not process: not a thesis error, so it is marked separately."""
     return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Error", "bledy": image_text(language, "analysis_failed")}
+
+
+def _unreadable_entry(image_id, language):
+    """A figure too unclear to compare: nothing went wrong with the models and nothing is proved against the text."""
+    return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unreadable_figure")}
 
 
 def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
@@ -53,68 +57,64 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     if not images_with_refs:
         return final_report
 
-    if verbose:
-        logger.info(f"\n[AI] Ładowanie modelu wizyjnego LLaVA do VRAM...")
-
-    logger.info("Loading LLaVA vision model for image analysis (%d images)", len(images_with_refs))
-    llava = LlavaEngine()
+    logger.info("Loading the vision model for image analysis (%d images)", len(images_with_refs))
     extracted_image_data = {}
-    
-    for idx, img in enumerate(images_with_refs, 1):
-        if verbose:
-            logger.info(f"[{idx}/{len(images_with_refs)}] LLaVA analizuje obrazek {img['id']}...")
-        try:
-            image_data = llava.extract_data(img["bytes"], language)
-            if not (image_data or "").strip():
-                raise ValueError("LLaVA returned no data")
-            extracted_image_data[img["id"]] = image_data
-        except Exception:
-            # one unreadable figure must not cost the results of all the others
-            logger.exception("LLaVA could not read figure %s", img["id"])
-            final_report.append(_failed_entry(img["id"], language))
 
-    if verbose:
-        logger.info(f"\n[AI] Koniec pracy LLaVA. Zwalniam VRAM karty graficznej...")
-        
-    del llava
-    gc.collect() 
-
-    if verbose:
-        logger.info(f"\n[AI] Ładowanie Sędziego (Gemma) do VRAM...")
-        
-    checker = ConsistencyChecker()
-    
-    for img in images_with_refs:
-        if img["id"] not in extracted_image_data:
-            continue
-        img_data_text = extracted_image_data[img["id"]]
-        for ref_para in img["refs"]:
+    with VisionEngine("Analiza obrazów") as engine:
+        for idx, img in enumerate(images_with_refs, 1):
             if verbose:
-                logger.info(f" -> Sędzia ocenia akapit dla rysunku {img['id']}...")
-
+                logger.info("[%d/%d] Odczyt rysunku %s...", idx, len(images_with_refs), img["id"])
             try:
-                verification = checker.check(ref_para, img_data_text, language)
+                # a model reading an unclear image makes up plausible values: such a figure is not compared at all
+                if too_small_to_read(img["bytes"]) or engine.is_blurry(img["bytes"]):
+                    final_report.append(_unreadable_entry(img["id"], language))
+                    continue
+                image_data = engine.read_chart(img["bytes"])
+                if not image_data:
+                    raise ValueError("The vision model returned no data")
+                extracted_image_data[img["id"]] = image_data
             except Exception:
-                logger.exception("Consistency check failed for figure %s", img["id"])
+                # one unreadable figure must not cost the results of all the others
+                logger.exception("Could not read figure %s", img["id"])
                 final_report.append(_failed_entry(img["id"], language))
+
+    if not extracted_image_data:
+        return final_report
+
+    if verbose:
+        logger.info("[AI] Ładowanie modelu sprawdzającego spójność (Gemma) do VRAM...")
+
+    checker = ConsistencyChecker()
+    try:
+        for img in images_with_refs:
+            if img["id"] not in extracted_image_data:
                 continue
+            img_data_text = extracted_image_data[img["id"]]
+            for ref_para in img["refs"]:
+                if verbose:
+                    logger.info(" -> Ocena akapitu dla rysunku %s...", img["id"])
 
-            verdict = consistency_verdict(verification)
-            if verdict == "Error":
-                logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
-                final_report.append(_failed_entry(img["id"], language))
-                continue
+                try:
+                    verification = checker.check(ref_para, img_data_text, language)
+                except Exception:
+                    logger.exception("Consistency check failed for figure %s", img["id"])
+                    final_report.append(_failed_entry(img["id"], language))
+                    continue
 
-            final_report.append({
-                "obrazek": img["id"],
-                "odwolanie": "wystapilo",
-                "poprawnosc_danych": verdict,
-                "bledy": verification.get("bledy", "None")
-            })
+                verdict = consistency_verdict(verification)
+                if verdict == "Error":
+                    logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
+                    final_report.append(_failed_entry(img["id"], language))
+                    continue
 
-    # Zwalniamy model sędziego po analizie, aby nie blokował VRAM dla kolejnych etapów.
-    del checker
-    gc.collect()
+                final_report.append({
+                    "obrazek": img["id"],
+                    "odwolanie": "wystapilo",
+                    "poprawnosc_danych": verdict,
+                    "bledy": verification.get("bledy", "None")
+                })
+    finally:
+        checker.close()     # the model must not block the video memory for the next stages
 
     return final_report
 

@@ -115,12 +115,12 @@ def run_diagnostics(pdf_path):
     logger.info("\n" + "="*50)
     logger.info("--- PODSUMOWANIE ZYSKÓW ---")
     logger.info("="*50)
-    logger.info(f"1. LLaVA (Obrazy) uruchomi się: {len(unique_images)} razy (Zredukowano z {sum(1 for p in doc_obj.pages for _ in p.images)})")
+    logger.info(f"1. Model wizyjny (Obrazy) uruchomi się: {len(unique_images)} razy (Zredukowano z {sum(1 for p in doc_obj.pages for _ in p.images)})")
     logger.info(f"2. Sędzia (Tekst) uruchomi się: {total_llm_calls} razy (Odrzucono {total_filtered_out} zbędnych wywołań)")
     logger.info("="*50)
     
     # Realistyczne szacowanie czasu (RTX 4070 SUPER)
-    # LLaVA: ~10s, Sędzia: ~25s (przy kontekście 4096 tokenów)
+    # Model wizyjny: ~10s, Sędzia: ~25s (przy kontekście 4096 tokenów)
     est_seconds = (len(unique_images) * 10) + (total_llm_calls * 25)
     logger.info(f"Przewidywany czas wykonania: ok. {est_seconds // 60} min {est_seconds % 60} sek.")
 

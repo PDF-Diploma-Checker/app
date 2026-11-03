@@ -1,80 +1,20 @@
 import sys
 import json
-import gc
-import base64
 import logging
 from pathlib import Path
-from llama_cpp.llama_chat_format import Llava15ChatHandler
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
-from analysis.modules.llm import config
 from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
-from analysis.modules.llm.llama_factory import make_llama
+from analysis.modules.llm.image_analysis.vision_engine import VisionEngine
 
 logger = logging.getLogger(__name__)
 
 
-class LlavaFontEngine:
-    """LLaVA-based engine for single-image font consistency checks."""
-    def __init__(self, model_path=None, mmproj_path=None):
-        model_path = model_path or str(config.LLAVA_MODEL_PATH)
-        mmproj_path = mmproj_path or str(config.LLAVA_MMPROJ_PATH)
-        logger.info("Loading font-consistency LLaVA model from %s", model_path)
-        try:
-            self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-            self.llm = make_llama(
-                purpose="Czcionki na rysunkach",
-                model_path=model_path,
-                chat_handler=self.chat_handler,
-                n_ctx=4096,
-                n_gpu_layers=config.N_GPU_LAYERS,
-                logits_all=True,
-                verbose=False
-            )
-        except Exception as e:
-            logger.exception("Failed to load font-consistency LLaVA model from %s", model_path)
-            raise RuntimeError(f"Failed to load font-consistency LLaVA model from {model_path}") from e
+FONT_QUESTION = "Is any text in this image much bigger or much smaller than the other labels?"
 
-    def check_font_consistency(self, image_bytes):
-        """Return whether font sizes in an image appear visually consistent."""
-        base64_img = base64.b64encode(image_bytes).decode('utf-8')
-        data_uri = f"data:image/jpeg;base64,{base64_img}"
-
-        prompt = """Analyze the text and labels inside this single chart/image. 
-        Are the font sizes consistent? (For example, all axis labels should be roughly the same size, with no randomly huge or tiny texts mixed together). 
-        If the fonts are consistent and look uniform, answer ONLY with the word: YES.
-        If the fonts are inconsistent or have mismatched sizes, answer ONLY with the word: NO.
-        Do not explain. Do not use any other words."""
-
-        try:
-            response = self.llm.create_chat_completion(
-                messages=[{
-                    "role": "user", 
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_uri}}, 
-                        {"type": "text", "text": prompt}
-                    ]
-                }],
-                temperature=0.0,
-                max_tokens=10 
-            )
-            
-            result_text = response["choices"][0]["message"]["content"]
-            verdict = parse_yes_no(result_text)
-
-            if verdict is True:
-                return {"consistent": True, "reason": "OK"}
-            elif verdict is False:
-                return {"consistent": False, "reason": "Model LLaVA wykrył niespójne rozmiary czcionek na obrazku."}
-            else:
-                return {"consistent": True, "reason": f"Niejednoznaczna odpowiedź AI: {result_text}. Domyślnie zaakceptowano."}
-                
-        except Exception:
-            logger.exception("Font consistency check inference failed")
-            return {"failed": True}
 
 def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Return a report of figures with inconsistent font sizing."""
@@ -84,31 +24,24 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl
     if not images:
         return bad_fonts_report
 
-    if verbose: logger.info(f"\n[AI] Ładowanie modelu wizyjnego LLaVA (Spójność Czcionek) do VRAM...")
-    
-    llava = LlavaFontEngine()
-    
-    for idx, img in enumerate(images, 1):
-        if verbose: logger.info(f"[{idx}/{len(images)}] LLaVA weryfikuje czcionki Rysunku {img['id']}...")
-        
-        assessment = llava.check_font_consistency(img["bytes"])
-        
-        if assessment.get("failed"):
-            bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
-            continue
+    with VisionEngine("Czcionki na rysunkach") as engine:
+        for idx, img in enumerate(images, 1):
+            if verbose:
+                logger.info("[%d/%d] Weryfikacja czcionek rysunku %s...", idx, len(images), img["id"])
+            try:
+                inconsistent = parse_yes_no(engine.ask_yes_no(img["bytes"], FONT_QUESTION))
+            except Exception:
+                logger.exception("Font consistency check inference failed")
+                bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+                continue
+            if inconsistent:
+                bad_fonts_report.append({
+                    "rysunek": img["id"],
+                    "blad": image_text(language, "fonts_inconsistent"),
+                })
 
-        is_consistent = assessment.get("consistent", True)
-        if str(is_consistent).lower() == "false":
-            bad_fonts_report.append({
-                "rysunek": img["id"],
-                "blad": image_text(language, "fonts_inconsistent"),
-            })
-            
-    if verbose: logger.info(f"[AI] Zwalniam VRAM po analizie czcionek...")
-    del llava
-    gc.collect()
-    
     return bad_fonts_report
+
 
 if __name__ == "__main__":
     import time
