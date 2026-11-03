@@ -17,6 +17,7 @@ EtaTracker follows a running analysis and re-estimates the remaining time at eve
 real time the finished stages took.
 """
 
+import re
 import json
 import logging
 import os
@@ -32,13 +33,22 @@ logger = logging.getLogger(__name__)
 # Rough speeds of llama.cpp with Gemma 3 12B (Q4_K_M), tokens per second. They only matter until the history has
 # calibrated the model, and they follow what the system reports (VRAM class, CPU threads).
 GEMMA_GB = 7.3
-LLAVA_GB = 5.0                      # LLaVA model + projector
+VISION_GB = 5.6                     # vision model + projector
 GEMMA_LAYERS = 48
-DEFAULT_LOAD_MB_S = 1500.0          # reading a model from disk (SSD) for the first run; measured afterwards
+DEFAULT_LOAD_MB_S = 3000.0          # reading a model from disk, mostly from its cache; measured afterwards
 GEMMA_LOADS = 4                     # purpose, goal, summaries, SOTA each load the model again
-LLAVA_LOADS = 2
+VISION_LOADS = 3                    # reading the figures, their quality, their fonts
 TOKENS_PER_CHAR = 0.3
-LLAVA_SPEEDUP = 1.7                 # the 7B vision model is faster than the 12B text model
+GOAL_FRAGMENT_CHARS = 9000          # how much of the end of the thesis the goal check reads
+# generated tokens of the stages, measured on real theses
+PURPOSE_TOKENS = 70
+SECTION_TOKENS = 35                 # one summary (most end before their limit of 64)
+SECTION_PROMPT_TOKENS = 400
+FIGURE_TOKENS = 70                  # reading a figure, its yes/no checks and comparing it with the text
+GOAL_TOKENS = (100, 0.003)          # base + per character: a longer thesis gets a longer reasoning
+SOTA_TOKENS = (120, 0.03)           # base + per character: every part of the chapter is checked against 3 rules
+_FIGURE_CAPTION = re.compile(r"^\s*(rys|rycin|wykres|figure|fig\.|fot|schemat|diagram)[^\W\d]*\.?\s*(\d+(?:\.\d+)*)", re.I | re.M)
+_SECTION_HEADING = re.compile(r"^\s*(\d+\.\d+(?:\.\d+)*)\.?\s+\S", re.M)
 
 LOW_HIGH = {0: (0.6, 1.8), 1: (0.8, 1.35), 2: (0.8, 1.35)}      # range around the estimate by number of past runs
 LOW_HIGH_MANY = (0.9, 1.15)
@@ -48,7 +58,7 @@ STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("images", 80)
 HISTORY_LIMIT = 60
 # raise it whenever raw_estimate() changes: real/predicted ratios measured against an older model would distort the
 # calibration, so only the runs recorded with the same model version are used
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 
 
 @dataclass
@@ -56,6 +66,8 @@ class DocFacts:
     pages: int
     chars: int
     images: int
+    sections: int = 0       # numbered sections such as "2.1": each gets a summary
+    figures: int = 0        # images with a caption: only these are analysed
 
 
 @dataclass
@@ -92,7 +104,10 @@ def doc_facts(pdf_path):
             pages = doc.page_count
             chars = sum(len(page.get_text()) for page in doc)
             images = sum(len(page.get_images()) for page in doc)
-        return DocFacts(pages, chars, images)
+            text = "\n".join(page.get_text() for page in doc)
+        sections = len(set(_SECTION_HEADING.findall(text)))     # the table of contents repeats them: count each once
+        figures = len({(word.lower()[:3], number) for word, number in _FIGURE_CAPTION.findall(text)})
+        return DocFacts(pages, chars, images, sections, figures)
     except Exception:
         logger.exception("Cannot read %s for the time estimate", pdf_path)
         return None
@@ -165,21 +180,22 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
     load = _load_speed(history)
     gemma_load = GEMMA_GB * 1024 ** 3 / load
     text_tokens = doc.chars * TOKENS_PER_CHAR
-    sections = doc.pages / 6.0 + 3
 
-    def work(prefill_share, generated):
-        return gemma_load + text_tokens * prefill_share / prompt + generated / gen
+    def work(prefill_tokens, generated):
+        return gemma_load + prefill_tokens / prompt + generated / gen
 
+    base, per_char = GOAL_TOKENS
     stages += [
-        ("purpose", work(0.6, 100)),
-        ("goal", work(0.25, 150)),
-        ("summaries", work(1.0, sections * 80)),
+        ("purpose", work(0.3 * text_tokens, PURPOSE_TOKENS)),
+        ("goal", work(min(doc.chars, GOAL_FRAGMENT_CHARS) * TOKENS_PER_CHAR, base + per_char * doc.chars)),
     ]
-    if check_images and doc.images:
-        llava_load = LLAVA_GB * 1024 ** 3 / load
-        per_image = 700 / (prompt * LLAVA_SPEEDUP) + 80 / (gen * LLAVA_SPEEDUP)
-        stages.append(("images", LLAVA_LOADS * llava_load + doc.images * per_image))
-    stages.append(("sota", work(0.3, 400)))
+    if doc.sections:
+        stages.append(("summaries", work(doc.sections * SECTION_PROMPT_TOKENS, doc.sections * SECTION_TOKENS)))
+    if check_images and doc.figures:
+        vision_load = VISION_GB * 1024 ** 3 / load
+        stages.append(("images", VISION_LOADS * vision_load + gemma_load + doc.figures * FIGURE_TOKENS / gen))
+    base, per_char = SOTA_TOKENS
+    stages.append(("sota", work(0, base + per_char * doc.chars)))
     return stages
 
 
@@ -216,7 +232,7 @@ def record_run(doc, machine, use_llm, check_images, estimate, actual_s, stage_se
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         **_kind(use_llm, check_images, machine.gpu),
         "model": MODEL_VERSION,
-        "pages": doc.pages, "chars": doc.chars, "n_images": doc.images,
+        "pages": doc.pages, "chars": doc.chars, "n_images": doc.images, "sections": doc.sections, "figures": doc.figures,
         "raw_predicted_s": round(estimate.raw_total_s, 1) if estimate else None,
         "raw_stages": {k: round(v, 1) for k, v in estimate.raw_stages} if estimate else {},
         "actual_s": round(actual_s, 1),
