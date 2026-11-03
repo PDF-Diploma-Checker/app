@@ -5,8 +5,54 @@ from .evaluate_sota import get_llm
 
 logger = logging.getLogger(__name__)
 
-PROMPT_EVALUATE_PL = """Jesteś ekspertem analizującym strukturę prac naukowych... [treść promptu]"""
-PROMPT_EVALUATE_EN = """You are an expert analyzing the structure of academic papers... [treść promptu]"""
+PROMPT_EVALUATE_PL = """Jesteś ekspertem analizującym strukturę prac naukowych. 
+Twoim zadaniem jest ocenić, czy podany rozdział stanowi SOTA (State of the Art / Przegląd literatury / Stan obecny).
+
+Rozdział SOTA charakteryzuje się:
+1. Odwołaniami do literatury przedmiotu i innych badań (np. [1], [2], nazwiska autorów).
+2. Analizą i porównaniem istniejących na rynku lub w nauce rozwiązań, metod lub technologii.
+3. Wskazywaniem luk w obecnej wiedzy lub opisywaniem historii problemu.
+4. Jest to CIĄGŁY TEKST (narracja), a nie lista punktów, spis nagłówków czy bibliografia.
+
+CZEGO UNIKAĆ (To NIE JEST SOTA):
+- Rozdziały techniczne i organizacyjne (np. opis struktury pracy, podział ról w zespole, instrukcje obsługi, opis działania stworzonej aplikacji).
+- Słowniki pojęć, wykazy skrótów, spisy tabel.
+- Zwykłe wymienianie bibliografii bez narracji.
+
+Tytuł ocenianego rozdziału: {title}
+Fragment treści: {content}
+
+Zwróć wynik WYŁĄCZNIE w formacie JSON o następującej strukturze:
+{{
+  "czy_sota": true lub false,
+  "pewnosc_procentowa": liczba całkowita od 0 do 100,
+  "uzasadnienie": "Krótkie, jednozdaniowe uzasadnienie decyzji"
+}}
+"""
+PROMPT_EVALUATE_EN = """You are an expert analyzing the structure of academic papers.
+Your task is to evaluate whether the provided chapter represents the SOTA (State of the Art / Literature Review / Current State).
+
+A SOTA chapter is characterized by:
+1. References to literature and other research (e.g., [1], [2], authors' names).
+2. Analysis and comparison of existing solutions, methods, or technologies in the market or science.
+3. Pointing out gaps in current knowledge or describing the history of the problem.
+4. It is CONTINUOUS TEXT (narrative), not a bulleted list, table of contents, or bibliography.
+
+WHAT TO AVOID (This is NOT SOTA):
+- Technical and organizational chapters (e.g., description of thesis structure, division of roles, user manuals, application description).
+- Glossaries, list of abbreviations, list of tables.
+- Mere listing of bibliography without narrative.
+
+Title of the evaluated chapter: {title}
+Content snippet: {content}
+
+Return the result EXCLUSIVELY in JSON format with the following structure:
+{{
+  "czy_sota": true or false,
+  "pewnosc_procentowa": integer from 0 to 100,
+  "uzasadnienie": "Short, one-sentence justification for the decision"
+}}
+"""
 
 def get_sota_chapter(blocks: list, language: str = "pl"):
     """Select the best SOTA chapter candidate and return metadata and content."""

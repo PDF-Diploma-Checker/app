@@ -24,7 +24,9 @@ from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, LANGUAGE
 
 logger = logging.getLogger(__name__)
 
-threshold = 0.785
+# Calibrated for paraphrase-multilingual-MiniLM-L12-v2 on real theses: sections of a thesis stay above 0.30 when compared
+# with the rest of that thesis, unrelated text stays below 0.20. A different embedding model needs its own value.
+threshold = 0.25
 
 SOTA_WEIGHT = 0.2
 PURPOSE_WEIGHT = 0.2
@@ -40,27 +42,29 @@ def calculate_embedding_grade(purpose, summaries):
         embedding_model=EMBEDDING_MODEL,
     )
 
-    items = similarity_result.get("items", [])
+    # a section without text says nothing about the topic
+    items = [item for item in similarity_result.get("items", []) if item.get("has_content", True)]
     total_sections = len(items)
 
     if total_sections == 0:
-        log_embedding_results(purpose, items, threshold, 0.0, 0.0)
+        log_embedding_results(purpose, items, threshold, 0.0, None)
         return {
-            "grade": 0.0,
+            "grade": None,
             "max_grade": 100.0,
-            "s_emb": 0.0,
+            "s_emb": None,
             "threshold": threshold,
             "total_sections": 0,
             "off_topic_sections": 0,
-            "p_off": 100.0,
+            "p_off": 0.0,
             "items": [],
         }
 
     off_topic_sections = 0
 
     for item in items:
-        cosine_similarity = float(item.get("cosine_similarity", 0.0))
-        below_threshold = cosine_similarity < threshold
+        # off-topic only when the section fits neither the purpose nor the rest of the thesis
+        best_similarity = max(float(item.get("cosine_similarity", 0.0)), float(item.get("section_similarity", 0.0)))
+        below_threshold = best_similarity < threshold
         item["below_threshold"] = below_threshold
 
         if below_threshold:
@@ -92,7 +96,7 @@ def get_content_grade(purpose, summaries):
         summaries=summaries
     )
     
-    grade = embedding_result.get("grade", 0.0)
+    grade = embedding_result.get("grade")
     items = embedding_result.get("items", [])
     
     # Extract off-topic heading labels (items below threshold)
@@ -112,14 +116,16 @@ def get_content_grade(purpose, summaries):
     return (grade, off_topic_headings)
 
 def get_overall_grade(purpose_grade, embedding_grade, sota_grade):
-    """Combine partial scores into the final weighted grade."""
+    """Combine partial scores into the final weighted grade. A score that could not be computed (None: a thesis
+    without numbered sections) is left out and the weights of the others are scaled up, it does not count as 0."""
 
-    overall_grade = SOTA_WEIGHT * sota_grade + PURPOSE_WEIGHT * purpose_grade + EMBEDDING_WEIGHT * embedding_grade
-    log_grade_calculation(
-        [("SOTA", sota_grade, SOTA_WEIGHT), ("Purpose realization", purpose_grade, PURPOSE_WEIGHT),
-         ("Embeddings", embedding_grade, EMBEDDING_WEIGHT)],
-        overall_grade,
-    )
+    parts = [("SOTA", sota_grade, SOTA_WEIGHT), ("Purpose realization", purpose_grade, PURPOSE_WEIGHT),
+             ("Embeddings", embedding_grade, EMBEDDING_WEIGHT)]
+    known = [part for part in parts if part[1] is not None]
+    total_weight = sum(weight for _, _, weight in known)
+    scaled = [(name, grade, weight / total_weight) for name, grade, weight in known]
+    overall_grade = sum(grade * weight for _, grade, weight in scaled)
+    log_grade_calculation(scaled, overall_grade)
     return overall_grade
 
 
