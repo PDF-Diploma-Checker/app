@@ -215,6 +215,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         check_cancelled(cancel_token)
 
         timer.next("embeddings")
+        cleanup_text_llm_instances()        # the review of doubtful sections loads the text model again
         content_res = get_content_grade(purpose, summaries, language)
 
         if isinstance(content_res, tuple) and len(content_res) == 2:

@@ -35,25 +35,25 @@ class EmbeddingGradeTest(unittest.TestCase):
         return [item for item in items if item["display"] in getattr(self, "model_rejects", ())]
 
     def test_section_fitting_the_thesis_is_on_topic_despite_low_purpose_similarity(self):
-        self.assertEqual(self.grade(_section(0.12, 0.60), _section(0.40, 0.55))["grade"], 100.0)
+        self.assertEqual(self.grade(_section(0.12, 0.75), _section(0.40, 0.72))["grade"], 100.0)
         self.review.assert_not_called()
 
     def test_doubtful_section_goes_to_the_model_which_can_reject_it(self):
         self.model_rejects = ["Sieci"]
-        result = self.grade(_section(0.45, 0.60), _section(0.34, 0.26, name="Sieci"))
+        result = self.grade(_section(0.45, 0.80), _section(0.34, 0.26, name="Sieci"))
         self.assertEqual(result["off_topic_sections"], 1)
         self.assertEqual([s["display"] for s in self.review.call_args.args[2]], ["Sieci"])
 
     def test_doubtful_section_kept_by_the_model_is_on_topic(self):
-        self.assertEqual(self.grade(_section(0.45, 0.60), _section(0.34, 0.26))["grade"], 100.0)
+        self.assertEqual(self.grade(_section(0.45, 0.80), _section(0.34, 0.26))["grade"], 100.0)
 
     def test_section_fitting_nothing_is_off_topic_without_the_model(self):
-        result = self.grade(_section(0.45, 0.60), _section(0.05, 0.10, name="Przepis na ciasto"))
+        result = self.grade(_section(0.45, 0.80), _section(0.05, 0.10, name="Przepis na ciasto"))
         self.assertEqual(result["grade"], 50.0)
         self.assertEqual(result["off_topic_sections"], 1)
 
     def test_empty_section_does_not_count(self):
-        result = self.grade(_section(0.45, 0.60), _section(0.0, has_content=False))
+        result = self.grade(_section(0.45, 0.80), _section(0.0, has_content=False))
         self.assertEqual((result["grade"], result["total_sections"]), (100.0, 1))
 
     def test_thesis_without_sections_has_no_grade(self):
