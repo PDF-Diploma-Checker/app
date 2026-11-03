@@ -23,7 +23,8 @@ What it does
 
 Release procedure
     1. Put the new number in  src/common/version.py  (APP_VERSION) - it must be equal to the release tag without "v".
-    2. Build each variant, run this script for each one.
+    2. Build each variant, run this script for each one with  --tag vX.Y.Z  (the tag you will publish). The script
+       stops if the build inside <dist-folder> is of another version (its _internal/VERSION.txt, written by the spec).
     3. Create a GitHub release with that tag in the download repository and upload every file the script printed.
     4. Running apps find the release on start and offer "Update now". Nothing is installed again; models stay.
     Upload ALL printed files of a variant together. A release may hold several platforms/variants.
@@ -100,10 +101,32 @@ def split_file(path, part_size=PART_SIZE):
 
 
 def _app_version():
-    match = re.search(r"APP_VERSION\s*=\s*[\"']([^\"']+)[\"']", (SRC / "common" / "version.py").read_text(encoding="utf-8"))
+    match = re.search(r"^APP_VERSION\s*=\s*[\"']([^\"']+)[\"']", (SRC / "common" / "version.py").read_text(encoding="utf-8"), re.M)
     if not match:
         sys.exit("APP_VERSION not found in src/common/version.py: pass --version")
     return match.group(1)
+
+
+def _build_version(dist):
+    """The version the build in `dist` was made from (_internal/VERSION.txt), or None for builds made before it existed."""
+    path = dist / "_internal" / "VERSION.txt"
+    return path.read_text(encoding="utf-8").strip() if path.is_file() else None
+
+
+def check_version(dist, tag=None, version=None):
+    """Return the release version; exit if the build, the tag, --version and APP_VERSION do not all agree."""
+    built = _build_version(dist)
+    source = _app_version()
+    wanted = {"build (_internal/VERSION.txt)": built, "--tag": tag.lstrip("vV") if tag else None,
+              "--version": version, "APP_VERSION in src/common/version.py": source}
+    known = {k: v for k, v in wanted.items() if v}
+    if len(set(known.values())) > 1:
+        lines = "\n".join(f"  {k:40s} {v}" for k, v in known.items())
+        sys.exit(f"Version mismatch, nothing was packed:\n{lines}\n"
+                 "Set APP_VERSION to the release version, rebuild the variant and run this script again.")
+    if built is None:
+        print(f"WARNING: {dist} has no _internal/VERSION.txt (built with an old spec): its version cannot be checked")
+    return next(iter(known.values()))
 
 
 def main(argv=None):
@@ -113,6 +136,7 @@ def main(argv=None):
     ap.add_argument("--variant", choices=("base", "cpu", "gpu"), required=True)
     ap.add_argument("--out", type=Path, default=Path("release_files"))
     ap.add_argument("--part-size-mib", type=int, default=PART_SIZE // (1024 * 1024))
+    ap.add_argument("--tag", help="the release tag you will publish (e.g. v0.3.1); checked against the build's version")
     ap.add_argument("--version", help="release version (default: APP_VERSION from src/common/version.py)")
     ap.add_argument("--no-delta", action="store_true", help="do not build the manifest and pack for differential updates")
     args = ap.parse_args(argv)
@@ -120,6 +144,8 @@ def main(argv=None):
     exe = APP_DIR_NAME + (".exe" if args.platform == "windows" else "")
     if not (args.dist / exe).is_file() or not (args.dist / "_internal").is_dir():
         sys.exit(f"{args.dist} does not look like the build output: {exe} and _internal/ are expected there")
+    version = check_version(args.dist, args.tag, args.version)
+    print(f"Release version {version}")
 
     args.out.mkdir(parents=True, exist_ok=True)
     name = f"{APP_DIR_NAME}-{args.platform}-{args.variant}." + ("zip" if args.platform == "windows" else "tar.gz")
@@ -139,7 +165,6 @@ def main(argv=None):
         uploads = [archive] + uploads
 
     if not args.no_delta:
-        version = args.version or _app_version()
         print(f"Building the differential update data for version {version}")
         manifest = delta.build_pack(args.dist, args.out, args.platform, args.variant, version, part_size=part_size)
         uploads += [args.out / part["name"] for part in manifest["parts"]]
@@ -149,6 +174,7 @@ def main(argv=None):
     for path in uploads:
         print(f"  {path.name:55s} {path.stat().st_size / 1024 / 1024:9.1f} MiB")
     print(f"\nSHA-256 of the whole archive: {digest}")
+    return uploads
 
 
 if __name__ == "__main__":
