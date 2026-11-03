@@ -23,6 +23,10 @@ def get_vision_quality_report(doc_obj, mapped_doc, verbose=False, language="pl")
                 logger.exception("Image quality assessment inference failed")
                 bad_images_report.append({"rysunek": img["id"], "analysis_failed": True})
                 continue
+            if blurry is None:      # not checked is something else than checked and fine
+                logger.warning("No clear quality answer for figure %s", img["id"])
+                bad_images_report.append({"rysunek": img["id"], "analysis_failed": True})
+                continue
             if blurry:
                 bad_images_report.append({"rysunek": img["id"], "blad_wizyjny": image_text(language, "blurry")})
 

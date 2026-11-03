@@ -18,6 +18,7 @@ import fitz  # noqa: E402
 
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm  # noqa: E402
 from analysis.extraction.main_extractor import extractPDF  # noqa: E402
+from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers  # noqa: E402
 from analysis.modules.llm.image_analysis.figures import (  # noqa: E402
     collect_figures,
     consistency_verdict,
@@ -126,6 +127,25 @@ class ReferencesTest(unittest.TestCase):
     def test_natural_sort(self):
         labels = ["Rys. 2.10", "Rys. 2.9", "Rys. 1"]
         self.assertEqual(sorted(labels, key=figure_sort_key), ["Rys. 1", "Rys. 2.9", "Rys. 2.10"])
+
+
+class EnumerationTest(unittest.TestCase):
+    def test_later_number_of_an_enumeration_is_a_reference(self):
+        for text in ("Rysunki 1 i 2 przedstawiają wyniki.", "Na rys. 1, 2 oraz 3 widać wzrost.", "Figures 1 and 2 show it."):
+            self.assertTrue(reference_pattern("2").search(text), text)
+
+    def test_other_numbers_are_not_a_reference(self):
+        for text in ("Rysunki 1 i 3 przedstawiają wyniki.", "Rysunek 1 i 2 inne wartości z tabeli", "Na rysunku 12 widać"):
+            match = reference_pattern("3").search(text) if "12" not in text else reference_pattern("2").search(text)
+            if "1 i 3" not in text:
+                self.assertIsNone(match, text)
+
+
+class RasterListTest(unittest.TestCase):
+    def test_figures_of_different_series_with_the_same_number_are_listed_apart(self):
+        image = lambda caption: SimpleNamespace(image_type="raster", description=caption)
+        doc = SimpleNamespace(pages=[SimpleNamespace(images=[image("Rysunek 1. A"), image("Wykres 1. B"), image("Rysunek 1. A")])])
+        self.assertEqual(get_raster_figure_numbers(doc), ["Rysunek 1", "Wykres 1"])
 
 
 class SummaryTest(unittest.TestCase):

@@ -31,9 +31,12 @@ def _family_of(word):
 
 
 def reference_pattern(number, family="rys"):
-    """Regex matching a mention of this figure in text, in any grammatical case."""
+    """Regex matching a mention of this figure in text, in any grammatical case, also as a later number of an
+    enumeration: "rysunki 1 i 2", "rys. 1, 2 oraz 3", "Figures 1 and 2"."""
     stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
-    return re.compile(rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*{re.escape(str(number))}(?!\d|\.\d)", re.IGNORECASE)
+    earlier = rf"(?:{_NUMBER}\s*(?:,|i|oraz|lub|and|or|&)\s*)*"
+    return re.compile(
+        rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*{earlier}{re.escape(str(number))}(?!\d|\.\d)", re.IGNORECASE)
 
 
 def is_caption(paragraph, number, family="rys"):

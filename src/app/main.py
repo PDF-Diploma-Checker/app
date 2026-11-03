@@ -18,7 +18,7 @@ log_file = configure_logging()
 logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-from analysis.modules.llm.config import check_and_download_requirements, java_available
+from analysis.modules.llm.config import check_and_download_requirements, java_available, llm_runtime_available
 from ui import styles
 from ui.main_window import PDFReader
 
@@ -37,7 +37,11 @@ def smoke_test():
     import importlib
     failures = []
 
-    for name in SMOKE_MODULES:
+    modules = list(SMOKE_MODULES)
+    if llm_runtime_available():     # the base variant has no AI libraries
+        modules += ["analysis.modules.llm.image_analysis.run_image", "analysis.modules.llm.image_analysis.font_checker",
+                    "analysis.modules.llm.image_analysis.image_quality_checker"]
+    for name in modules:
         try:
             importlib.import_module(name)
         except Exception as e:
@@ -59,6 +63,19 @@ def smoke_test():
     with open("smoke_test.log", "w", encoding="utf-8") as f:
         f.write("\n".join(failures) if failures else "SMOKE OK")
     return 1 if failures else 0
+
+
+def analysis_test(pdf_path):
+    """Run a full detailed analysis of a PDF in this build, with the real models. Exit code 0 = it finished with results
+    and with no failed figure stage. For checking a build before a release: --analysis-test thesis.pdf"""
+    from app.entry import run_analysis_for_pdf
+
+    result = getattr(run_analysis_for_pdf(pdf_path, use_llm=True), "llm_result", None)
+    images = (result or {}).get("image_analysis") or {}
+    ok = bool(result) and not images.get("analysis_failed")
+    with open("analysis_test.log", "w", encoding="utf-8") as f:
+        f.write(("ANALYSIS OK " if ok else "ANALYSIS FAILED ") + repr(images) + "\n")
+    return 0 if ok else 1
 
 
 def _finish_pending_update():
@@ -101,6 +118,8 @@ def main():
 if __name__ == "__main__":
     if "--smoke-test" in sys.argv:
         sys.exit(smoke_test())
+    if "--analysis-test" in sys.argv:
+        sys.exit(analysis_test(sys.argv[sys.argv.index("--analysis-test") + 1]))
     try:
         main()
     except Exception:
