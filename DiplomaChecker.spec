@@ -40,7 +40,11 @@ hiddenimports += collect_submodules("analysis")
 hiddenimports += collect_submodules("ui")
 hiddenimports += collect_submodules("common")
 hiddenimports += collect_submodules("app", filter=lambda n: n != "app.main")
-datas += collect_data_files("analysis")
+# only what the app reads at run time: test data and saved results (with the text of real theses) stay out of the build
+datas += collect_data_files("analysis", excludes=[
+    "**/wyniki/**", "**/evaluation/**", "**/redaction_debug/**", "**/example_img/**", "**/support_scripts/**",
+    "modules/redaction/test", "**/*.md",
+])
 
 a = Analysis(
     ["src/app/main.py"],
