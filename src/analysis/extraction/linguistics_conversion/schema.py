@@ -498,6 +498,31 @@ def is_widow_func(combined_words):
 
     return 0
 
+_LINK = re.compile(r"https?://|ftp://|www\.|doi\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+
+
+def ends_with_link(combined_words):
+    """
+    True when the last line of a bibliography entry holds a URL or DOI, or only the end of one broken at the line
+    break ("https://doi.org/10.1000/" / "abc-def"). Such a line cannot be shortened, so it is not a widow.
+    """
+    lines = {}
+    for word in combined_words:
+        lines.setdefault((word.page_number, word.line), []).append(word.text)
+    lines = list(lines.values())
+
+    if any(_LINK.search(text) for text in lines[-1]):
+        return True
+    for line in reversed(lines[:-1]):
+        if line[-1].endswith((",", ";", ")", "]")):     # the link ended there, what follows is ordinary text
+            return False
+        if _LINK.search(line[-1]):
+            return True
+        if len(line) > 1:                               # a line of ordinary words: no link is being continued
+            return False
+    return False
+
+
 def is_bekart_func(combined_words):
     """
     Detects typographical 'bastards' (also known as orphans in some conventions)
