@@ -9,7 +9,7 @@ sys.path.append(str(current_dir.parents[3]))
 
 from .figures import figure_sort_key, image_text
 from .quality_analysis import check_image_quality
-from .llava_quality_checker import get_llava_quality_report
+from .vision_quality_checker import get_vision_quality_report
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False, la
     if verbose: logger.info("[1/2] Test matematyczny DPI (próg 75)...")
     dpi_report = check_image_quality(doc_obj, str(pdf_path), dpi_threshold=75, language=language)
     
-    if verbose: logger.info("[2/2] Test wizualny LLaVA (czytelność)...")
-    llava_report = get_llava_quality_report(doc_obj, mapped_doc, verbose=verbose, language=language)
+    if verbose: logger.info("[2/2] Test wizualny (czytelność)...")
+    vision_report = get_vision_quality_report(doc_obj, mapped_doc, verbose=verbose, language=language)
     
     merged_results = {}
     
@@ -41,12 +41,12 @@ def get_full_image_quality_json(doc_obj, mapped_doc, pdf_path, verbose=False, la
         }
         
     failed_checks = []
-    for item in llava_report:
+    for item in vision_report:
         if item.get("analysis_failed"):
             failed_checks.append(item)
             continue
         rys = item["rysunek"]
-        blad_ai = f"[LLaVA AI]: {item.get('blad_llava')}"
+        blad_ai = f"[AI]: {item.get('blad_wizyjny')}"
         
         if rys in merged_results:
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
 #         "rysunek": "Rys. 2.1",
 #         "format": "Wyciągnięto z PDF",
 #         "powody_odrzucenia": [
-#             "[LLaVA AI]: Model LLaVA uznał, że obraz jest niewyraźny lub rozmazany."
+#             "[AI]: Model wizyjny uznał, że obraz jest niewyraźny lub rozmazany."
 #         ]
 #     },
 #     {
@@ -102,7 +102,7 @@ if __name__ == "__main__":
 #         "format": "JPG",
 #         "powody_odrzucenia": [
 #             "[DPI]: Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'. (Wynik: ~30 DPI)",
-#             "[LLaVA AI]: Model LLaVA uznał, że obraz jest niewyraźny lub rozmazany."
+#             "[AI]: Model wizyjny uznał, że obraz jest niewyraźny lub rozmazany."
 #         ]
 #     }
 # ]

@@ -31,9 +31,12 @@ def _family_of(word):
 
 
 def reference_pattern(number, family="rys"):
-    """Regex matching a mention of this figure in text, in any grammatical case."""
+    """Regex matching a mention of this figure in text, in any grammatical case, also as a later number of an
+    enumeration: "rysunki 1 i 2", "rys. 1, 2 oraz 3", "Figures 1 and 2"."""
     stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
-    return re.compile(rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*{re.escape(str(number))}(?!\d|\.\d)", re.IGNORECASE)
+    earlier = rf"(?:{_NUMBER}\s*(?:,|i|oraz|lub|and|or|&)\s*)*"
+    return re.compile(
+        rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*{earlier}{re.escape(str(number))}(?!\d|\.\d)", re.IGNORECASE)
 
 
 def is_caption(paragraph, number, family="rys"):
@@ -60,7 +63,9 @@ _TEXTS = {
         "status_failed": "Nie przeanalizowano",
         "details": "Szczegóły",
         "unknown": "Nieznany",
-        "blurry": "Model LLaVA uznał, że obraz jest niewyraźny lub rozmazany.",
+        "blurry": "Model wizyjny uznał, że obraz jest niewyraźny lub rozmazany.",
+        "unreadable_figure": "Rysunek jest zbyt nieczytelny, by porównać go z tekstem.",
+        "mismatch": "{element}: w tekście {text}, na rysunku {image}",
         "fonts_inconsistent": "Niespójne wielkości czcionek na wykresie/obrazku.",
         "low_dpi": "Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'.",
         "dpi_requirement": "Minimum {threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)",
@@ -77,7 +82,9 @@ _TEXTS = {
         "status_failed": "Not analysed",
         "details": "Details",
         "unknown": "Unknown",
-        "blurry": "The LLaVA model found the image blurry or unclear.",
+        "blurry": "The vision model found the image blurry or unclear.",
+        "unreadable_figure": "The figure is too unclear to compare it with the text.",
+        "mismatch": "{element}: {text} in the text, {image} in the figure",
         "fonts_inconsistent": "Inconsistent font sizes in the chart/image.",
         "low_dpi": "The image was stretched too far, which caused visible pixelation.",
         "dpi_requirement": "At least {threshold} DPI (a standard screenshot has 96 DPI)",

@@ -275,8 +275,9 @@ Katalog modeli powinien mieć następującą strukturę:
 PATH_TO_MODELS_DIR/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 
 Na przykład w systemie Linux:
@@ -285,8 +286,9 @@ Na przykład w systemie Linux:
 /home/YOUR_USERNAME/models/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 
 Na przykład w systemie Windows:
@@ -295,8 +297,9 @@ Na przykład w systemie Windows:
 C:/Users/YOUR_USERNAME/models/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 
 ### Wymagania techniczne
@@ -611,8 +614,9 @@ The model directory should have the following structure:
 PATH_TO_MODELS_DIR/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 
 For example, on Linux:
@@ -621,8 +625,9 @@ For example, on Linux:
 /home/YOUR_USERNAME/models/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 
 For example, on Windows:
@@ -631,8 +636,9 @@ For example, on Windows:
 C:/Users/YOUR_USERNAME/models/
 ├── gemma3_12b/
 │   └── google_gemma-3-12b-it-Q4_K_M.gguf
-├── llava-v1.6-mistral-7b.Q4_K_M.gguf
-└── mmproj-model-f16.gguf
+├── qwen2_5_vl/
+│   ├── Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf
+│   └── mmproj-F16.gguf
 ```
 ### Technical requirements
 

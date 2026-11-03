@@ -144,7 +144,7 @@ class SetupWizard(QDialog):
             reply = QMessageBox.question(
                 self,
                 "Brak modeli AI",
-                "W wybranym katalogu nie znaleziono wymaganych modeli AI (Gemma i LLaVA - ok. 8GB).\n"
+                "W wybranym katalogu nie znaleziono wymaganych modeli AI (Gemma i Qwen2.5-VL - ok. 14 GB).\n"
                 "Czy chcesz pobrać je teraz?",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No

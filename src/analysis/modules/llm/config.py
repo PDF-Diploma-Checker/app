@@ -31,9 +31,11 @@ EMBEDDING_REPO_PREFIX = "sentence-transformers/"
 
 GEMMA_REPO = "nocturne23/gemma-3-12b-it-Q4_K_M-GGUF"
 GEMMA_FILE = "gemma-3-12b-it-q4_k_m.gguf"  # exact name from the repo (case matters on Linux)
-LLAVA_REPO = "cjpais/llava-1.6-mistral-7b-gguf"
-LLAVA_FILE = "llava-v1.6-mistral-7b.Q4_K_M.gguf"
-MMPROJ_FILE = "mmproj-model-f16.gguf"
+VISION_REPO = "unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
+VISION_FILE = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
+VISION_MMPROJ_FILE = "mmproj-F16.gguf"
+VISION_SUBDIR = "qwen2_5_vl"
+REPLACED_MODEL_FILES = ("llava-v1.6-mistral-7b.Q4_K_M.gguf", "mmproj-model-f16.gguf")     # the old vision model
 
 
 def llm_runtime_available():
@@ -65,11 +67,9 @@ def default_config():
 
 
 def _models_present(model_dir):
-    """True when the three model files of the AI mode are in `model_dir`."""
-    model_dir = Path(model_dir)
-    return all(p.is_file() for p in (
-        model_dir / "gemma3_12b" / GEMMA_FILE, model_dir / LLAVA_FILE, model_dir / MMPROJ_FILE,
-    ))
+    """True when `model_dir` holds the Gemma model. Only that counts: a folder of an earlier version must stay in use
+    when the vision model changes, otherwise 8 GB would be downloaded again next to the missing file."""
+    return (Path(model_dir) / "gemma3_12b" / GEMMA_FILE).is_file()
 
 
 def default_model_dir():
@@ -128,13 +128,13 @@ def load_config():
 # module-level names of this file that other modules copy with "from ...config import NAME"
 _EXPORTED = (
     "DEVICE", "N_GPU_LAYERS", "MODEL_DIR", "LANGUAGE", "EMBEDDING_MODEL", "MODEL_PATH",
-    "LLAVA_MODEL_PATH", "LLAVA_MMPROJ_PATH", "EMBEDDING_DIR", "OUTPUT_DIR", "THESIS_PATH",
+    "VISION_MODEL_PATH", "VISION_MMPROJ_PATH", "EMBEDDING_DIR", "OUTPUT_DIR", "THESIS_PATH",
 )
 
 
 def _apply(cfg):
     global DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL, EMBEDDING_DIR
-    global MODEL_PATH, LLAVA_MODEL_PATH, LLAVA_MMPROJ_PATH, OUTPUT_DIR, THESIS_PATH
+    global MODEL_PATH, VISION_MODEL_PATH, VISION_MMPROJ_PATH, OUTPUT_DIR, THESIS_PATH
 
     DEVICE = str(cfg.get("device", "cpu")).lower().strip()
     try:
@@ -148,8 +148,8 @@ def _apply(cfg):
     EMBEDDING_MODEL = str(cfg.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
 
     MODEL_PATH = MODEL_DIR / "gemma3_12b" / GEMMA_FILE
-    LLAVA_MODEL_PATH = MODEL_DIR / LLAVA_FILE
-    LLAVA_MMPROJ_PATH = MODEL_DIR / MMPROJ_FILE
+    VISION_MODEL_PATH = MODEL_DIR / VISION_SUBDIR / VISION_FILE
+    VISION_MMPROJ_PATH = MODEL_DIR / VISION_SUBDIR / VISION_MMPROJ_FILE
     EMBEDDING_DIR = MODEL_DIR / "embeddings" / EMBEDDING_MODEL.split("/")[-1]
 
     OUTPUT_DIR = Path(str(cfg.get("output_dir") or DATA_DIR / "output")).expanduser()
@@ -219,13 +219,22 @@ def resolve_embedding_model(name=None):
 
 
 def ai_models_status():
-    """Which model files are present: {'gemma': bool, 'llava': bool, 'mmproj': bool, 'embeddings': bool}."""
+    """Which model files are present: {'gemma': bool, 'vision': bool, 'mmproj': bool, 'embeddings': bool}."""
     return {
         "gemma": MODEL_PATH.is_file(),
-        "llava": LLAVA_MODEL_PATH.is_file(),
-        "mmproj": LLAVA_MMPROJ_PATH.is_file(),
+        "vision": VISION_MODEL_PATH.is_file(),
+        "mmproj": VISION_MMPROJ_PATH.is_file(),
         "embeddings": embedding_path() is not None,
     }
+
+
+def _remove_replaced_models():
+    """Free the 5 GB of the old vision model, once the new one is in place. Only these exact files are touched."""
+    for name in REPLACED_MODEL_FILES:
+        try:
+            (MODEL_DIR / name).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove the old model file %s", MODEL_DIR / name)
 
 
 def are_ai_models_downloaded():
@@ -305,16 +314,18 @@ def download_ai_models_with_progress(progress_callback=None):
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             hf_hub_download(repo_id=GEMMA_REPO, filename=GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
 
-        MODEL_DIR.mkdir(parents=True, exist_ok=True)
-        if not LLAVA_MODEL_PATH.is_file():
+        VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not VISION_MODEL_PATH.is_file():
             run_control.check_cancelled()
-            report(50, "Pobieranie modelu LLaVA...")
-            hf_hub_download(repo_id=LLAVA_REPO, filename=LLAVA_FILE, local_dir=str(MODEL_DIR))
+            report(50, "Pobieranie modelu Qwen2.5-VL (ok. 5 GB)...")
+            hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
-        if not LLAVA_MMPROJ_PATH.is_file():
+        if not VISION_MMPROJ_PATH.is_file():
             run_control.check_cancelled()
-            report(70, "Pobieranie projektora LLaVA...")
-            hf_hub_download(repo_id=LLAVA_REPO, filename=MMPROJ_FILE, local_dir=str(MODEL_DIR))
+            report(70, "Pobieranie projektora Qwen2.5-VL...")
+            hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+
+        _remove_replaced_models()
 
         if embedding_path() is None:
             run_control.check_cancelled()

@@ -278,7 +278,7 @@ def build_report_panel(report_data, on_download):
     raster = img.get("image_raster", []) or []
     if raster:
         lay.addWidget(_label(t("main.raster_detected"), f"font-size: 12px; font-weight: 600; color: {styles.TEXT_2}; {TRANSPARENT}"))
-        lay.addWidget(_chips([t("main.figure_chip", num=n) for n in raster]))
+        lay.addWidget(_chips([n if not str(n)[:1].isdigit() else t("main.figure_chip", num=n) for n in raster]))
     root.addWidget(card)
 
     # ---- sentence statistics

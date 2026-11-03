@@ -541,7 +541,7 @@ def _content(w, s, data):
         raster = img.get("raster_numbers", img.get("image_raster", [])) or []
         if raster:
             rows += [w.r_gap(6), w.r_label(s["rep_raster_ident"], C["primary_dark"], 10, 6),
-                     w.r_chips([f"{s['panel_fig_prefix']} {n}" for n in raster])]
+                     w.r_chips([n if not str(n)[:1].isdigit() else f"{s['panel_fig_prefix']} {n}" for n in raster])]
         details = img.get("problem_details")
         if details is None:     # a report saved by an older version lists every figure in "details"
             details = [d for d in img.get("details", []) or [] if "Poprawny" not in str(d)]
