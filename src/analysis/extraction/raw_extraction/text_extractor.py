@@ -16,6 +16,7 @@ PUNCTUATION = (
 MATH_FONT_NAMES = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
 OPENING_PUNCTUATION = "([{„\"“'"
 CLOSING_PUNCTUATION = ".,;:!?)]}”\""
+COMBINING_MARKS = "".join(map(chr, range(0x0300, 0x0370)))
 
 
 def fix_latex(text):
@@ -118,22 +119,24 @@ def split_straddling_words(block_words: list, raw_block: dict) -> list:
         rem = wtext
         ok = True
         for i, sp in enumerate(hit):
+            # a math accent is drawn as a zero-width span of its own, but the token holds it before the symbol: "\u0302x"
+            marks = len(rem) - len(rem.lstrip(COMBINING_MARKS)) if not sp["text"].strip().startswith(rem[:1]) else 0
             if i == len(hit) - 1:
                 piece = rem
             else:
                 st = sp["text"].strip()
                 piece = None
-                for k in range(min(len(st), len(rem)), 0, -1):
-                    if rem.startswith(st[-k:]):
-                        piece = rem[:k]
+                for k in range(min(len(st), len(rem) - marks), 0, -1):
+                    if rem[marks:].startswith(st[-k:]):
+                        piece = rem[:marks + k]
                         break
                 if piece is None:
                     ok = False
                     break
-            if not piece:
+            if not piece[marks:]:
                 ok = False
                 break
-            pieces.append((sp, piece))
+            pieces.append((sp, piece[marks] + piece[:marks] + piece[marks + 1:]))
             rem = rem[len(piece):]
         if not ok or rem:
             result.append(w)
