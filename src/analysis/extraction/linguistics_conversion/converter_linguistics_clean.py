@@ -34,6 +34,7 @@ from analysis.extraction.linguistics_conversion.schema import (
     PageArtifact,
     is_acronym,
     is_index,
+    ends_with_link,
     is_widow_func,
     is_bekart_func,
     is_szewc_func,
@@ -2353,12 +2354,14 @@ class PDFMapper:
     def _flag_bibliography_widows(self):
         """
         Bibliography entries are lists, so they never got the paragraph checks. A widow (a last line of 1-2 words)
-        is looked for in every entry; the result is stored on the entry (ListItem.is_widow).
+        is looked for in every entry, except a last line taken by a URL or DOI; the result is stored on the entry
+        (ListItem.is_widow).
         """
         for block in self.logical_blocks:
             if getattr(block, "is_bibliography", False) and hasattr(block, "items"):
                 for item in block.items:
-                    item.is_widow = is_widow_func(item.words) if item.words else 0
+                    widow = is_widow_func(item.words) if item.words else 0
+                    item.is_widow = 0 if widow and ends_with_link(item.words) else widow
 
     def _flag_lonely_citations(self):
         """
