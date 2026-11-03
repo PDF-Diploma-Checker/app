@@ -16,10 +16,10 @@ def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
         return []
 
     number_pattern = re.compile(
-        r"(?i)\b(?:rys(?:unek)?|fig(?:ure)?|wykres|fot(?:o)?|photo|image)\.?\s*(\d+(?:\.\d+)*)"
+        r"(?i)\b(rys(?:unek)?\.?|fig(?:ure)?\.?|wykres|fot(?:o)?\.?|photo|image)\s*(\d+(?:\.\d+)*)"
     )
 
-    raster_numbers: List[str] = []
+    raster_numbers: List[str] = []      # labels as printed: "Rysunek 1" and "Wykres 1" are different figures
     seen = set()
 
     for page in document_data.pages:
@@ -35,10 +35,10 @@ def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
             if not match:
                 continue
 
-            fig_number = match.group(1)
-            if fig_number not in seen:
-                seen.add(fig_number)
-                raster_numbers.append(fig_number)
+            label = f"{match.group(1)} {match.group(2)}"
+            if label.lower() not in seen:
+                seen.add(label.lower())
+                raster_numbers.append(label)
 
     return raster_numbers
 

@@ -35,6 +35,7 @@ VISION_REPO = "unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
 VISION_FILE = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
 VISION_MMPROJ_FILE = "mmproj-F16.gguf"
 VISION_SUBDIR = "qwen2_5_vl"
+REPLACED_MODEL_FILES = ("llava-v1.6-mistral-7b.Q4_K_M.gguf", "mmproj-model-f16.gguf")     # the old vision model
 
 
 def llm_runtime_available():
@@ -227,6 +228,15 @@ def ai_models_status():
     }
 
 
+def _remove_replaced_models():
+    """Free the 5 GB of the old vision model, once the new one is in place. Only these exact files are touched."""
+    for name in REPLACED_MODEL_FILES:
+        try:
+            (MODEL_DIR / name).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove the old model file %s", MODEL_DIR / name)
+
+
 def are_ai_models_downloaded():
     return all(ai_models_status().values())
 
@@ -314,6 +324,8 @@ def download_ai_models_with_progress(progress_callback=None):
             run_control.check_cancelled()
             report(70, "Pobieranie projektora Qwen2.5-VL...")
             hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+
+        _remove_replaced_models()
 
         if embedding_path() is None:
             run_control.check_cancelled()

@@ -34,6 +34,10 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl
                 logger.exception("Font consistency check inference failed")
                 bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
                 continue
+            if inconsistent is None:    # not checked is something else than checked and fine
+                logger.warning("No clear font answer for figure %s", img["id"])
+                bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+                continue
             if inconsistent:
                 bad_fonts_report.append({
                     "rysunek": img["id"],
