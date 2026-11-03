@@ -1,29 +1,58 @@
 import json
 import logging
 from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.figures import image_text
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
 
 _PROMPTS = {
-    "pl": """
-        Dane z obrazka: {image_data}
-        Akapit z pracy: {paragraph}
+    "pl": """Dane odczytane z rysunku:
+{image_data}
 
-        Przeanalizuj, czy dane w akapicie zgadzają się z obrazkiem.
-        Zwróć wynik w JSON. Klawisze: "poprawnosc_danych" (jako string "True" lub "False") oraz "bledy" (jako string "None" lub cytaty błędnych zdań).
-        Odpowiadaj po polsku.
-        """,
-    "en": """
-        Data from the image: {image_data}
-        Paragraph from the thesis: {paragraph}
+Akapit z pracy:
+{paragraph}
 
-        Check whether the data in the paragraph agrees with the image.
-        Return the result as JSON. Keys: "poprawnosc_danych" (the string "True" or "False") and "bledy" (the string "None" or quotes of the incorrect sentences).
-        Answer in English.
-        """,
+Sprawdź każdą wartość liczbową podaną w akapicie dla elementu, który występuje też w danych z rysunku.
+Niezgodność to tylko sytuacja, gdy ten sam element ma w akapicie inną wartość niż na rysunku.
+Nie jest niezgodnością: informacja, której nie ma na rysunku, wniosek, opis zależności, zaokrąglenie ani inna kolejność.
+Zwróć JSON z kluczem "niezgodnosci": lista obiektów {"element": nazwa, "w_tekscie": wartość z akapitu razem z jednostką, "na_rysunku": wartość z rysunku razem z jednostką}, pusta gdy wszystko się zgadza.""",
+    "en": """Data read from the figure:
+{image_data}
+
+Paragraph from the thesis:
+{paragraph}
+
+Check every numeric value the paragraph gives for an item that also appears in the data from the figure.
+A mismatch is only when the same item has a different value in the paragraph than in the figure.
+These are not mismatches: information missing from the figure, a conclusion, a description of a trend, rounding, a different order.
+Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_tekscie": value from the paragraph with its unit, "na_rysunku": value from the figure with its unit}, empty when everything agrees.""",
 }
+
+
+def _value(text):
+    """A value for comparing: no spaces, no case ('180 ms' and '180ms' are the same)."""
+    return "".join(str(text).split()).lower()
+
+
+def verdict_from_answer(answer, language="pl"):
+    """Turn the model's answer into {poprawnosc_danych, bledy}. The model also lists items whose two values are equal,
+    so the verdict is decided here from the values and not taken from the model."""
+    mismatches = answer.get("niezgodnosci") if isinstance(answer, dict) else None
+    if not isinstance(mismatches, list):
+        return {"poprawnosc_danych": "Error", "bledy": "None"}
+    real = [
+        m for m in mismatches
+        if isinstance(m, dict) and _value(m.get("w_tekscie", "")) != _value(m.get("na_rysunku", ""))
+    ]
+    if not real:
+        return {"poprawnosc_danych": "True", "bledy": "None"}
+    lines = [
+        image_text(language, "mismatch", element=m.get("element", "?"), text=m.get("w_tekscie", "?"), image=m.get("na_rysunku", "?"))
+        for m in real
+    ]
+    return {"poprawnosc_danych": "False", "bledy": "; ".join(lines)}
 
 
 class ConsistencyChecker:
@@ -41,6 +70,9 @@ class ConsistencyChecker:
         except Exception as e:
             logger.exception("Failed to load consistency-checker LLM from %s", model_path)
             raise RuntimeError(f"Failed to load consistency-checker LLM from {model_path}") from e
+
+    def close(self):
+        self.llm.close()
 
     def check(self, paragraph, image_data, language="pl"):
         template = _PROMPTS.get(language, _PROMPTS["pl"])
@@ -63,7 +95,7 @@ class ConsistencyChecker:
         result_text = response["choices"][0]["message"]["content"]
 
         try:
-            return json.loads(result_text)
+            return verdict_from_answer(json.loads(result_text), language)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
             return {"poprawnosc_danych": "Error", "bledy": "None"}

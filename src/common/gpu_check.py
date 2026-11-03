@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 MIN_DRIVER_CUDA = (12, 0)       # the GPU build is compiled with CUDA 12.x
 MIN_RAM_FOR_CPU_GB = 12.0       # Gemma 3 12B (Q4) needs about 8 GB for the weights plus working memory
-AI_MODELS_SIZE_GB = 13.0        # Gemma 3 12B + LLaVA + projector + embeddings
+AI_MODELS_SIZE_GB = 14.0        # Gemma 3 12B + Qwen2.5-VL + projector + embeddings
 NEEDED_FREE_GB = 15.0           # what the models folder should have free before downloading
 
 
@@ -191,7 +191,7 @@ def collect_facts(model_dir=None):
 def recommend_gpu_layers(vram_gb):
     """How many of Gemma's 48 layers to put on a card with this much memory (the rest stays on the CPU).
 
-    A rule of thumb: the layers, the context buffers and the LLaVA model have to fit together."""
+    A rule of thumb: the layers, the context buffers and the vision model have to fit together."""
     if vram_gb >= 16:
         return -1           # everything
     if vram_gb >= 10:
