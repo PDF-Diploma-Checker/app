@@ -42,6 +42,18 @@ hiddenimports += collect_submodules("common")
 hiddenimports += collect_submodules("app", filter=lambda n: n != "app.main")
 datas += collect_data_files("analysis")
 
+# _internal/VERSION.txt: the APP_VERSION this build was made from. tools/prepare_release_assets.py compares it with
+# the release tag, so a build of an old version cannot be published under a new tag.
+import re
+with open(os.path.join(SRC, "common", "version.py"), encoding="utf-8") as _f:
+    _version = re.search(r"^APP_VERSION\s*=\s*[\"']([^\"']+)[\"']", _f.read(), re.M).group(1)
+_version_file = os.path.join(workpath, "VERSION.txt")
+os.makedirs(workpath, exist_ok=True)
+with open(_version_file, "w", encoding="utf-8") as _f:
+    _f.write(_version + "\n")
+datas.append((_version_file, "."))
+print(f"[spec] building version {_version}")
+
 a = Analysis(
     ["src/app/main.py"],
     pathex=["src"],
