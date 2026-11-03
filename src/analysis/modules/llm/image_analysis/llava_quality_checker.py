@@ -1,5 +1,4 @@
 import sys
-import re
 import gc
 import base64
 import logging
@@ -10,50 +9,11 @@ current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
-
-def extract_images_for_quality(doc_obj, mapped_doc):
-    paragraphs = []
-    for block in mapped_doc.logical_blocks:
-        text = getattr(block, "content", "").strip()
-        if text: 
-            paragraphs.append(text)
-            
-    caption_pattern = re.compile(r"(?:^|\n)\s*rys(?:unek|\.)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
-    unique_images = {}
-    
-    for page in doc_obj.pages:
-        for img in getattr(page, "images", []):
-            desc = getattr(img, "description", "").strip()
-            if desc:
-                match = caption_pattern.search(desc)
-                if match:
-                    found_id = match.group(1)
-                    if found_id not in unique_images:
-                        unique_images[found_id] = {"desc": desc, "bytes": None}
-                        img_path = Path(getattr(img, "path", ""))
-                        if img_path.exists():
-                            try:
-                                with open(img_path, "rb") as f:
-                                    unique_images[found_id]["bytes"] = f.read()
-                            except OSError:
-                                logger.exception("Failed to read image file %s", img_path)
-                    else:
-                        old_desc = unique_images[found_id]["desc"]
-                        if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
-                            unique_images[found_id]["desc"] = desc
-                            img_path = Path(getattr(img, "path", ""))
-                            if img_path.exists():
-                                try:
-                                    with open(img_path, "rb") as f:
-                                        unique_images[found_id]["bytes"] = f.read()
-                                except OSError:
-                                    logger.exception("Failed to read image file %s", img_path)
-                                    
-    return [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
 
 class LlavaQualityEngine:
     def __init__(self, model_path=None, mmproj_path=None):
@@ -95,22 +55,22 @@ class LlavaQualityEngine:
                 max_tokens=15 
             )
             
-            result_text = response["choices"][0]["message"]["content"].strip().lower()
-            
-            if "yes" in result_text:
+            verdict = parse_yes_no(response["choices"][0]["message"]["content"])
+
+            if verdict is True:
                 return {"czytelny": True, "powod": "OK"}
-            elif "no" in result_text:
+            elif verdict is False:
                 return {"czytelny": False, "powod": "Model LLaVA uznał, że obraz jest niewyraźny lub rozmazany."}
             else:
             
                 return {"czytelny": True, "powod": "OK"}
                 
-        except Exception as e:
+        except Exception:
             logger.exception("Image quality assessment inference failed")
-            return {"czytelny": False, "powod": f"Błąd weryfikacji wizualnej AI: {str(e)}"}
+            return {"failed": True}
 
-def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
-    images = extract_images_for_quality(doc_obj, mapped_doc)
+def get_llava_quality_report(doc_obj, mapped_doc, verbose=False, language="pl"):
+    images = collect_figures(doc_obj)
     bad_images_report = []
     
     if not images: 
@@ -126,12 +86,16 @@ def get_llava_quality_report(doc_obj, mapped_doc, verbose=False):
             logger.info(f" -> LLaVA ocenia Rysunek {img['id']}...")
             
         assessment = llava.assess_quality(img["bytes"])
+        if assessment.get("failed"):
+            bad_images_report.append({"rysunek": img["id"], "analysis_failed": True})
+            continue
+
         czytelny = assessment.get("czytelny", True)
         
         if str(czytelny).lower() == "false":
             bad_images_report.append({
-                "rysunek": f"Rys. {img['id']}", 
-                "blad_llava": assessment.get("powod", "Obraz nieczytelny.")
+                "rysunek": img["id"], 
+                "blad_llava": image_text(language, "blurry")
             })
             
     if verbose: 

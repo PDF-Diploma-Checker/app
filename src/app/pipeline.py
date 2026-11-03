@@ -8,6 +8,7 @@ from analysis.extraction.service import ExtractionService
 from analysis.modules.linguistics.linguistics_service import LinguisticsService
 from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
+from common.timing import log_time
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,13 @@ class AnalysisPipeline:
         self.linguistics_service = LinguisticsService()
         self.llm_service = None
 
-    def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True, cancel_token=None):
+    def run(self, input_document, use_llm=True, **kwargs):
+        mode = "detailed" if use_llm else "fast"
+        name = os.path.basename(str(getattr(input_document, "pdf_path", "")))
+        with log_time(logger, f"Whole analysis of {name} ({mode} mode)"):
+            return self._run(input_document, use_llm=use_llm, **kwargs)
+
+    def _run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True, cancel_token=None):
         def report_progress(value, text):
             check_cancelled(cancel_token)
             if progress_callback:
@@ -37,7 +44,8 @@ class AnalysisPipeline:
         from analysis.extraction.main_extractor import extractPDF
         from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers
 
-        doc_obj = extractPDF(pdf_path)
+        with log_time(logger, "PDF extraction"):
+            doc_obj = extractPDF(pdf_path)
         check_cancelled(cancel_token)
         doc_dict = doc_obj._to_dict()
 
@@ -149,17 +157,22 @@ class AnalysisPipeline:
 
         report_progress(30, "Starting analyses...")
 
-        redaction_errors = task_redaction()
+        with log_time(logger, "Redaction check"):
+            redaction_errors = task_redaction()
 
         report_progress(50, "Redaction completed. Running remaining analyses...")
 
         workers_count = 2 if use_llm else 1
 
+        def timed(label, task):
+            with log_time(logger, label):
+                return task()
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers_count) as executor:
-            future_ling = executor.submit(task_linguistics)
+            future_ling = executor.submit(timed, "Linguistic analysis", task_linguistics)
 
             if use_llm:
-                future_llm = executor.submit(task_llm)
+                future_llm = executor.submit(timed, "LLM analysis", task_llm)
 
             ling_matches, ling_stats = future_ling.result()
 
