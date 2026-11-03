@@ -246,6 +246,27 @@ class PDFMapper:
                 regions.append((y0, y1))
         return regions
 
+    EQ_NUM_TAIL_RE = re.compile(r"\(\s*\d+(?:[.,]\s*\d+)*\s*\)\s*$")
+
+    def _carry_formula_period(self, math_text):
+        if not self.paragraph_buffer or self.list_buffer:
+            return
+        text = (math_text or "").strip()
+        m = self.EQ_NUM_TAIL_RE.search(text)
+        if not m:
+            return
+        formula = text[: m.start()].rstrip()
+        if not formula.endswith(".") or formula.endswith(".."):
+            return
+        last = self.paragraph_buffer[-1]
+        content = last["content"].rstrip()
+        if not content or content[-1] in ".,!?:;-" or self._ends_sentence(content):
+            return
+        words = last.get("words") or []
+        if not words or getattr(words[-1], "is_index", False):
+            return
+        last["formula_period"] = True
+
     def __init__(self):
         # Stan wewnętrzny
         self.logical_blocks = []
@@ -653,6 +674,10 @@ class PDFMapper:
                 )
 
             combined_content += separator + content
+            if data.get("formula_period") and data["words"]:
+                combined_content += "."
+                combined_words[-1].text += "."
+                combined_words[-1].end_char += 1
             current_offset = len(combined_content)
 
         block_type = "acronyms" if is_acronym_block else "paragraph"
@@ -1056,6 +1081,28 @@ class PDFMapper:
 
         return is_new_paragraph, debug_reason
 
+    @staticmethod
+    def _glue_combining(full_text, word, mark, span):
+        """Appends a combining mark to an already extracted word, keeping full_text and the word offsets in sync."""
+        merged = unicodedata.normalize("NFC", word.text + mark)
+        word.text = merged
+        word.end_char = word.start_char + len(merged)
+        if full_text.endswith(" "):
+            full_text = full_text[:-1]
+        full_text = full_text[: word.start_char] + merged + full_text[word.start_char + len(merged) :]
+        word.bbox[2] = max(word.bbox[2], span.bbox[2])
+        word.bbox[3] = max(word.bbox[3], span.bbox[3])
+        return full_text
+
+    @staticmethod
+    def _strip_trailing_mark(full_text, word, mark):
+        """Removes a combining mark from the end of an already extracted word."""
+        stripped = unicodedata.normalize("NFC", unicodedata.normalize("NFD", word.text)[: -len(mark)])
+        full_text = full_text[: word.start_char] + stripped + full_text[word.end_char :]
+        word.text = stripped
+        word.end_char = word.start_char + len(stripped)
+        return full_text
+
     def _extract_words_with_spacing(
         self, line, full_text, words_info, page_num, word_counter, line_x1
     ):
@@ -1086,6 +1133,7 @@ class PDFMapper:
         m_gap = statistics.median(line_gaps) if line_gaps else 3.0
         prev_span_x1 = None
         prev_span_text = ""
+        pending_mark = ""  # combining mark waiting for the next word (see the is_combining branch)
 
         span_sizes = [s.size for s in line.spans if s.text.strip()]
         line_base_size = statistics.mode(span_sizes) if span_sizes else getattr(self, "main_font_size", 12.0)
@@ -1103,14 +1151,15 @@ class PDFMapper:
             )
             if is_combining and words_info:
                 last_word = words_info[-1]
-                merged = unicodedata.normalize("NFC", last_word.text + word_text)
-                last_word.text = merged
-                last_word.end_char = last_word.start_char + len(merged)
-                if full_text.endswith(" "):
-                    full_text = full_text[:-1]
-                full_text = full_text[: last_word.start_char] + merged + full_text[last_word.start_char + len(merged) :]
-                last_word.bbox[2] = max(last_word.bbox[2], span.bbox[2])
-                last_word.bbox[3] = max(last_word.bbox[3], span.bbox[3])
+                already_glued = unicodedata.normalize("NFD", last_word.text).endswith(word_text)
+                if last_word.font == span.font:
+                    # accent typeset in the same font as the letter before it (e.g. LaTeX ogonek)
+                    if not already_glued:
+                        full_text = self._glue_combining(full_text, last_word, word_text, span)
+                else:
+                    if already_glued:  # the word text from PyMuPDF already carries it on the previous char
+                        full_text = self._strip_trailing_mark(full_text, last_word, word_text)
+                    pending_mark += word_text
                 prev_span_x1 = span.bbox[2]
                 continue
 
@@ -1146,6 +1195,9 @@ class PDFMapper:
             for i, sub_w in enumerate(sub_words):
                 if i > 0:
                     full_text += " "
+                if pending_mark and i == 0:
+                    sub_w = sub_w[:1] + pending_mark + sub_w[1:]
+                    pending_mark = ""
                 sub_w = unicodedata.normalize("NFC", sub_w)
                 start_char = len(full_text)
                 sub_w_width = (
@@ -1180,6 +1232,9 @@ class PDFMapper:
 
             prev_span_x1 = span.bbox[2]
             prev_span_text = word_text
+
+        if pending_mark and words_info:  # no word followed the mark in this line
+            full_text = self._glue_combining(full_text, words_info[-1], pending_mark, line.spans[-1])
 
         line_y0 = line.spans[0].bbox[1] if line.spans else line.bbox[1]
         if getattr(self, "_last_extracted_y0", None) is not None:
@@ -1725,6 +1780,7 @@ class PDFMapper:
                                     bbox=math_bbox,
                                 )
                             )
+                            self._carry_formula_period(full_text)
                         else:
                             prev_type, prev_marker = self._classify_block_content(
                                 full_text, current_marker
@@ -1807,6 +1863,7 @@ class PDFMapper:
                         bbox=math_bbox,
                     )
                 )
+                self._carry_formula_period(full_text)
                 continue
 
             is_hdr = self.is_header(words_info)

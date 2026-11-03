@@ -352,6 +352,8 @@ class RedactionValidator:
             "math", "cmmi", "cmsy", "symbol", "rntx", "mnsymbol", "txmi", "nimbusrom"
         )
 
+        CONJUCTIONS = {"i", "z", "o", "a", "w", "u"}
+
         most_common_size = self.document_data.get_most_common_font_size() or 10.0
 
         for page in self.document_data.pages:
@@ -378,7 +380,7 @@ class RedactionValidator:
                     if not text_clean.isalpha():
                         continue
 
-                    if len(text_clean) == 1:
+                    if len(text_clean) == 1 and text_clean.lower() in CONJUCTIONS:
                         font_lower = getattr(last_span, "font", "").lower()
                         if any(mf in font_lower for mf in MATH_FONTS):
                             continue

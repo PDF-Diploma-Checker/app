@@ -153,12 +153,13 @@ class PipelineWorker(QThread):
     finished_success = Signal(dict)
     finished_error = Signal(str)
 
-    def __init__(self, pdf_path, config_path, use_llm, language):
+    def __init__(self, pdf_path, config_path, use_llm, language, check_images=True):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.use_llm = use_llm
         self.language = language
+        self.check_images = check_images
         self.cancel_token = CancelToken()
 
     def cancel(self):
@@ -185,6 +186,7 @@ class PipelineWorker(QThread):
                 progress_callback=self._report_progress,
                 use_llm=self.use_llm,
                 language=self.language,
+                check_images=self.check_images,
                 cancel_token=self.cancel_token,
             )
 
@@ -799,6 +801,7 @@ class AnalysisDialog(QDialog):
             config_path=self.config_file_path,
             use_llm=is_detailed,
             language=chosen_lang,
+            check_images=self.cb_images.isChecked(),
         )
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)
