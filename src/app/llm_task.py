@@ -215,7 +215,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         check_cancelled(cancel_token)
 
         timer.next("embeddings")
-        content_res = get_content_grade(purpose, summaries)
+        content_res = get_content_grade(purpose, summaries, language)
 
         if isinstance(content_res, tuple) and len(content_res) == 2:
             content_grade_val, off_topic_headings = content_res

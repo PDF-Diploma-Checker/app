@@ -37,4 +37,6 @@ def log_embedding_results(purpose, items, threshold, average_similarity, grade):
         thesis = f", thesis {item['section_similarity']:.4f}" if "section_similarity" in item else ""
         lines.append(f"{number}. [{float(item.get('cosine_similarity', 0.0)):.4f}{thesis} {status}] {heading}")
         lines.append(f"   Summary: {item.get('summary') or '(none)'}")
+        if item.get("off_topic_reason"):
+            lines.append(f"   Off-topic because: {item['off_topic_reason']}")
     logger.info("\n".join(lines))

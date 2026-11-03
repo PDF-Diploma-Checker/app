@@ -17,6 +17,7 @@ from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_t
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_subtitles import get_subtitles
 from analysis.modules.llm.get_summary import get_summaries
+from analysis.modules.llm.section_relevance import review_sections
 from analysis.modules.llm.results_log import log_embedding_results, log_grade_calculation
 from analysis.modules.llm.similarity import compute_similarity_for_summaries
 from analysis.modules.llm.goal_realization import get_purpose_grade
@@ -27,13 +28,16 @@ logger = logging.getLogger(__name__)
 # Calibrated for paraphrase-multilingual-MiniLM-L12-v2 on real theses: sections of a thesis stay above 0.30 when compared
 # with the rest of that thesis, unrelated text stays below 0.20. A different embedding model needs its own value.
 threshold = 0.25
+# Between the two values the embeddings cannot tell: a section of a neighbouring subject scores like a real section of
+# the thesis, so the text model decides (see section_relevance.py). All tested neighbouring sections were below this one.
+REVIEW_THRESHOLD = 0.5
 
 SOTA_WEIGHT = 0.2
 PURPOSE_WEIGHT = 0.2
 EMBEDDING_WEIGHT = 0.6
 
 
-def calculate_embedding_grade(purpose, summaries):
+def calculate_embedding_grade(purpose, summaries, language="pl"):
     """Compute an embedding-based grade and per-section off-topic flags."""
 
     similarity_result = compute_similarity_for_summaries(
@@ -59,16 +63,23 @@ def calculate_embedding_grade(purpose, summaries):
             "items": [],
         }
 
-    off_topic_sections = 0
+    doubtful = []
 
     for item in items:
-        # off-topic only when the section fits neither the purpose nor the rest of the thesis
+        # off-topic for sure only when the section fits neither the purpose nor the rest of the thesis
         best_similarity = max(float(item.get("cosine_similarity", 0.0)), float(item.get("section_similarity", 0.0)))
-        below_threshold = best_similarity < threshold
-        item["below_threshold"] = below_threshold
+        item["below_threshold"] = best_similarity < threshold
+        if threshold <= best_similarity < REVIEW_THRESHOLD:
+            doubtful.append(item)
 
-        if below_threshold:
-            off_topic_sections += 1
+    if purpose and doubtful:
+        titles = [_section_title(item) for item in items]
+        for section in doubtful:
+            section["title"] = _section_title(section)
+        for section in review_sections(purpose, titles, doubtful, language):
+            section["below_threshold"] = True
+
+    off_topic_sections = sum(1 for item in items if item["below_threshold"])
 
     p_off = (off_topic_sections / total_sections) * 100.0
     s_emb = 100.0 - p_off
@@ -88,30 +99,31 @@ def calculate_embedding_grade(purpose, summaries):
     }
 
 
-def get_content_grade(purpose, summaries):
+def _section_title(item):
+    return str(item.get("display") or item.get("heading") or item.get("title") or item.get("subtitle") or "")
+
+
+def get_content_grade(purpose, summaries, language="pl"):
     """Return overall embedding grade and labels of off-topic sections."""
 
     embedding_result = calculate_embedding_grade(
         purpose=purpose,
-        summaries=summaries
+        summaries=summaries,
+        language=language,
     )
     
     grade = embedding_result.get("grade")
     items = embedding_result.get("items", [])
     
     # Extract off-topic heading labels (items below threshold)
-    off_topic_headings = [
-        (
-            item.get("display")
-            or item.get("heading")
-            or item.get("title")
-            or item.get("subtitle")
-            or f"Section {idx + 1}"
-        )
-        for idx, item in enumerate(items)
-        if item.get("below_threshold", False)
-    ]
-    
+    off_topic_headings = []
+    for idx, item in enumerate(items):
+        if not item.get("below_threshold", False):
+            continue
+        label = _section_title(item) or f"Section {idx + 1}"
+        reason = item.get("off_topic_reason")
+        off_topic_headings.append(f"{label}: {reason}" if reason else label)
+
     # Return (grade, off_topic_heading_labels)
     return (grade, off_topic_headings)
 
