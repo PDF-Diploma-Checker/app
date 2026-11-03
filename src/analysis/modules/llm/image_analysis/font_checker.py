@@ -1,6 +1,5 @@
 import sys
 import json
-import re
 import gc
 import base64
 import logging
@@ -12,47 +11,11 @@ sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
 from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
-
-def extract_images_for_fonts(doc_obj, mapped_doc):
-    """Extract real figure images and captions, filtering out text-only references."""
-    caption_pattern = re.compile(r"(?:^|\n)\s*rys(?:unek|\.)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
-    unique_images = {}
-    
-    for page in doc_obj.pages:
-        for img in getattr(page, "images", []):
-            desc = getattr(img, "description", "").strip()
-            if desc:
-                match = caption_pattern.search(desc)
-                if match:
-                    found_id = match.group(1)
-                    
-                    if found_id not in unique_images:
-                        unique_images[found_id] = {"desc": desc, "bytes": None}
-                        img_path = Path(getattr(img, "path", ""))
-                        if img_path.exists():
-                            try:
-                                with open(img_path, "rb") as f:
-                                    unique_images[found_id]["bytes"] = f.read()
-                            except OSError:
-                                logger.exception("Failed to read image file %s", img_path)
-                    else:
-                        old_desc = unique_images[found_id]["desc"]
-                        if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
-                            unique_images[found_id]["desc"] = desc
-                            img_path = Path(getattr(img, "path", ""))
-                            if img_path.exists():
-                                try:
-                                    with open(img_path, "rb") as f:
-                                        unique_images[found_id]["bytes"] = f.read()
-                                except OSError:
-                                    logger.exception("Failed to read image file %s", img_path)
-                        
-    images = [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
-    return images
 
 class LlavaFontEngine:
     """LLaVA-based engine for single-image font consistency checks."""
@@ -99,22 +62,23 @@ class LlavaFontEngine:
                 max_tokens=10 
             )
             
-            result_text = response["choices"][0]["message"]["content"].strip().lower()
-            
-            if "yes" in result_text or "true" in result_text:
+            result_text = response["choices"][0]["message"]["content"]
+            verdict = parse_yes_no(result_text)
+
+            if verdict is True:
                 return {"consistent": True, "reason": "OK"}
-            elif "no" in result_text or "false" in result_text:
+            elif verdict is False:
                 return {"consistent": False, "reason": "Model LLaVA wykrył niespójne rozmiary czcionek na obrazku."}
             else:
                 return {"consistent": True, "reason": f"Niejednoznaczna odpowiedź AI: {result_text}. Domyślnie zaakceptowano."}
                 
-        except Exception as e:
+        except Exception:
             logger.exception("Font consistency check inference failed")
-            return {"consistent": False, "reason": f"Błąd przetwarzania AI: {str(e)}"}
+            return {"failed": True}
 
-def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
+def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Return a report of figures with inconsistent font sizing."""
-    images = extract_images_for_fonts(doc_obj, mapped_doc)
+    images = collect_figures(doc_obj)
     bad_fonts_report = []
 
     if not images:
@@ -129,12 +93,15 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
         
         assessment = llava.check_font_consistency(img["bytes"])
         
+        if assessment.get("failed"):
+            bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+            continue
+
         is_consistent = assessment.get("consistent", True)
         if str(is_consistent).lower() == "false":
             bad_fonts_report.append({
-                "rysunek": f"Rys. {img['id']}",
-                "blad": "Niespójne wielkości czcionek na wykresie/obrazku.",
-                "szczegoly_ai": assessment.get("reason", "Model AI zauważył drastyczne różnice w wielkościach tekstu.")
+                "rysunek": img["id"],
+                "blad": image_text(language, "fonts_inconsistent"),
             })
             
     if verbose: logger.info(f"[AI] Zwalniam VRAM po analizie czcionek...")

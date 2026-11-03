@@ -152,13 +152,14 @@ class PipelineWorker(QThread):
     finished_success = Signal(dict)
     finished_error = Signal(str)
 
-    def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False):
+    def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False, check_images=True):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.use_llm = use_llm
         self.language = language
         self.download_models_flag = download_models_flag
+        self.check_images = check_images
         self.cancel_token = CancelToken()
 
     def cancel(self):
@@ -188,6 +189,7 @@ class PipelineWorker(QThread):
                 progress_callback=self._report_progress,
                 use_llm=self.use_llm,
                 language=self.language,
+                check_images=self.check_images,
                 cancel_token=self.cancel_token,
             )
 
@@ -242,12 +244,24 @@ class PipelineWorker(QThread):
                 if h <= 0:
                     h = 20.0
 
+                extra_rects = []
+                if isinstance(err_coord, list):
+                    for c in err_coord[1:]:
+                        bl = c.get("coordinates") if isinstance(c, dict) else None
+                        if bl and len(bl) >= 4 and c.get("page", -1) != -1:
+                            x1, y1, x2, y2 = (float(v) for v in bl[:4])
+                            extra_rects.append({
+                                "page": c["page"],
+                                "coords": {"x": x1, "y": y1, "w": max(x2 - x1, 1.0), "h": max(y2 - y1, 1.0)},
+                            })
+
                 ui_report.append({
                     "page": page_nr,
                     "category": str(category),
                     "found_text": str(text),
                     "comment": str(comment),
                     "coords": {"x": x, "y": y, "w": w, "h": h},
+                    "extra_rects": extra_rects,
                 })
 
             sota_data = getattr(final_report, "llm_result", None)
@@ -771,6 +785,7 @@ class AnalysisDialog(QDialog):
             use_llm=is_detailed,
             language=chosen_lang,
             download_models_flag=self.should_download_models,
+            check_images=self.cb_images.isChecked(),
         )
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)

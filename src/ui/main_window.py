@@ -547,6 +547,16 @@ class PDFReader(QMainWindow):
                             annot.set_colors(stroke=(0.85, 0.15, 0.15))
                             annot.set_info({"title": t("main.annot_verification")})
                             annot.update()
+
+                        for extra in err.get("extra_rects", []):
+                            ep = int(extra.get("page", page_num))
+                            c = extra.get("coords", {})
+                            if 0 <= ep < len(doc) and c.get("w", 0) > 0:
+                                r = fitz.Rect(c["x"], c["y"], c["x"] + c["w"], c["y"] + c["h"])
+                                h2 = doc[ep].add_highlight_annot(r)
+                                h2.set_colors(stroke=(0.95, 0.35, 0.35))
+                                h2.set_opacity(0.55)
+                                h2.update()
                 except Exception:
                     logger.exception("Error exporting an automatic error annotation")
 

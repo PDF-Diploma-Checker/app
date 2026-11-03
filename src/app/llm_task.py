@@ -88,40 +88,61 @@ def cleanup_text_llm_instances():
         pass
 
 
-def build_image_summary(raw_image_report):
+def split_failed_checks(entries):
+    """Separate thesis errors from figures the model could not check: returns (errors, whether any check failed)."""
+    errors = [entry for entry in entries if not entry.get("analysis_failed")]
+    return errors, len(errors) != len(entries)
+
+
+def build_image_summary(raw_image_report, language="pl"):
     """
     Build image_analysis dictionary in the same format as the old pipeline task_llm.
     """
     if raw_image_report is None:
         raw_image_report = []
 
-    total_images = len(raw_image_report)
-    bad_images_count = 0
+    from analysis.modules.llm.image_analysis.figures import image_text
+
+    # The report has one entry per paragraph that mentions a figure; the totals count figures.
+    worst_status = {}
+    failed = False
     image_details_lines = []
+    problem_lines = []
 
     for item in raw_image_report:
-        img_id = item.get("obrazek", item.get("id", "Nieznany"))
+        img_id = item.get("obrazek", item.get("id", image_text(language, "unknown")))
         is_correct = item.get("poprawnosc_danych", "True")
         errors = item.get("bledy", "None")
 
         if isinstance(errors, list):
             errors = " ".join(errors)
 
-        if is_correct == "False" or is_correct is False:
-            bad_images_count += 1
-            status_text = "Wykryto rozbieznosci"
+        if is_correct == "Error":
+            failed = True
+            worst_status.setdefault(img_id, "failed")
+            status = "failed"
+        elif is_correct == "False" or is_correct is False:
+            worst_status[img_id] = "bad"
+            status = "bad"
         else:
-            status_text = "Poprawny"
+            if worst_status.get(img_id) != "bad":
+                worst_status[img_id] = "good"
+            status = "good"
 
-        image_details_lines.append(
-            f"Rysunek {img_id}: {status_text} - Szczegoly: {errors}"
-        )
+        status_text = image_text(language, f"status_{status}")
+        line = f"{img_id}: {status_text} - {image_text(language, 'details')}: {errors}"
+        image_details_lines.append(line)
+        if status != "good":
+            problem_lines.append(line)
 
+    statuses = list(worst_status.values())
     return {
-        "total": total_images,
-        "bad_count": bad_images_count,
-        "good_count": total_images - bad_images_count,
+        "total": len(statuses),
+        "bad_count": statuses.count("bad"),
+        "good_count": statuses.count("good"),
         "details": image_details_lines,
+        "problem_details": problem_lines,
+        "analysis_failed": failed,
     }
 
 
@@ -210,50 +231,63 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         if check_images:
             timer.next("figures")
             _stage(language, "images", cancel_token)
-            from analysis.modules.llm.image_analysis.run_image import analyze_images
-            from analysis.modules.llm.image_analysis.image_quality_checker import (
-                get_full_image_quality_json,
-            )
-            from analysis.modules.llm.image_analysis.font_checker import (
-                get_font_consistency_report,
-            )
+            analysis_failed = False
 
             try:
-                raw_image_report = analyze_images(doc_obj, mapped_doc)
-            except Exception:
-                raw_image_report = []
+                from analysis.modules.llm.image_analysis.run_image import analyze_images
 
-            image_summary_data = build_image_summary(raw_image_report)
+                raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
+            except Exception:
+                logger.exception("Image consistency analysis failed")
+                raw_image_report = []
+                analysis_failed = True
+
+            image_summary_data = build_image_summary(raw_image_report, language)
             check_cancelled(cancel_token)
 
             cleanup_text_llm_instances()
 
             try:
+                from analysis.modules.llm.image_analysis.image_quality_checker import (
+                    get_full_image_quality_json,
+                )
+
                 quality_errors = get_full_image_quality_json(
                     doc_obj,
                     mapped_doc,
                     pdf_path,
                     verbose=False,
+                    language=language,
                 )
-                if quality_errors is None:
-                    quality_errors = []
+                quality_errors, failed = split_failed_checks(quality_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
+                logger.exception("Image quality analysis failed")
                 quality_errors = []
+                analysis_failed = True
 
             cleanup_text_llm_instances()
             check_cancelled(cancel_token)
 
             try:
+                from analysis.modules.llm.image_analysis.font_checker import (
+                    get_font_consistency_report,
+                )
+
                 font_errors = get_font_consistency_report(
                     doc_obj,
                     mapped_doc,
                     verbose=False,
+                    language=language,
                 )
-                if font_errors is None:
-                    font_errors = []
+                font_errors, failed = split_failed_checks(font_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
+                logger.exception("Image font analysis failed")
                 font_errors = []
+                analysis_failed = True
 
+            image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
             cleanup_text_llm_instances()
         else:
             image_summary_data = build_image_summary([])
