@@ -264,6 +264,9 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     paragraph_def_first_lower = re.compile(r'(?<![A-Za-z\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c])([a-z\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c][a-zA-Z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*\(([A-Z]{2,})\)(?=[,\s\.\)\;]|$)',re.UNICODE)
     paragraph_def_with_comma = re.compile(r'(?<![A-Za-z\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c])([a-zA-Z\u00d3\u00f3\u0104-\u017e][a-zA-Z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*\(([A-Z]{2,})[,\s]',re.UNICODE)
     paragraph_acr_first = re.compile(r'\(([A-Z]{2,})\)\s([A-Z\u00c0-\u017d][a-z\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c\w\s]+)')
+    paragraph_acr_in_paren_ang = re.compile(
+        r'\(\s*([A-Z]{2,10})\s*[,;]\s*(?:ang\.|pol\.|niem\.|fr\.|łac\.)\s+([^()]{3,}?)\s*\)',
+        re.UNICODE)
     paragraph_ang_pattern = re.compile(r'\b([A-Z]{2,})\s*\((?:ang\.|pol\.|fr\.|niem\.)\s+([^)]{3,}?)\s*\)', re.UNICODE)
     paragraph_ang_pol_pattern = re.compile(r'\b([A-Z]{2,10})\s*\(\s*(?:ang\.|pol\.|niem\.|fr\.|łac\.)?\s*([A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\s\-]{3,}?)\s*(?:,|;|\s{2,})', re.UNICODE)
     paragraph_acr_then_expansion = re.compile(r'\b([A-Z]{2,})\s*\(([A-Z][a-zA-ZÀ-Ž][a-zA-ZÀ-Žąćęłńóśźż\s\-]{2,})\)')
@@ -329,6 +332,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
             if '(' in block.content or ')' in block.content:
                 text = normalize_math_letters(block.content)
                 new_acronyms = paragraph_acr_first.findall(text)
+                new_acronyms.extend(paragraph_acr_in_paren_ang.findall(text))
                 new_acronyms.extend(paragraph_acr_then_expansion.findall(text))
                 new_acronyms.extend(paragraph_ang_pattern.findall(text))
                 new_acronyms.extend(paragraph_ang_pol_pattern.findall(text))
