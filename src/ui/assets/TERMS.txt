@@ -1,0 +1,45 @@
+LICENCJA I WARUNKI KORZYSTANIA - DiplomaChecker
+English version below.
+
+Copyright (C) 2026 Natalia Płocha, Maja Mogielnicka, Aleksandra Słomska, Dorian Neumann, Zofia Narloch
+
+1. Licencja
+DiplomaChecker jest wolnym oprogramowaniem. Możesz je używać, kopiować, zmieniać i rozpowszechniać na warunkach licencji GNU Affero General Public License w wersji 3 (AGPL-3.0). Pełny tekst licencji jest w pliku LICENSE dołączonym do aplikacji (w folderze _internal) oraz na https://www.gnu.org/licenses/agpl-3.0.html. Nic w tych warunkach nie ogranicza praw, które daje ta licencja.
+
+2. Kod źródłowy
+Kod źródłowy aplikacji jest dostępny bezpłatnie na https://github.com/PDF-Diploma-Checker/app.
+
+3. Składniki innych autorów
+Aplikacja zawiera składniki objęte własnymi licencjami, m.in. PyMuPDF (AGPL-3.0), language-tool-python i model pl_core_news_lg (GPL-3.0) oraz PySide6/Qt (LGPL). Wersja gpu zawiera biblioteki NVIDIA CUDA, objęte warunkami NVIDIA. Modele pobierane przez aplikację mają własne warunki: Gemma (Gemma Terms of Use) i Qwen2.5-VL (Apache 2.0).
+
+4. Wyniki analizy
+Aplikacja może popełniać błędy wynikające z ograniczeń wykorzystanych technologii, w tym modeli AI, i nie zastępuje analizy przeprowadzonej przez człowieka. Wyniki mają charakter pomocniczy i nie są wiążące dla uczelni ani promotora. Odpowiadasz za decyzje podjęte na ich podstawie.
+
+5. Dane
+Analiza pracy odbywa się na Twoim komputerze. Aplikacja łączy się z internetem, aby sprawdzić dostępność aktualizacji i pobrać aktualizacje (GitHub) oraz pobrać modele i składniki językowe. Zgłoszenie błędu jest wysyłane do autorów tylko wtedy, gdy sam je wyślesz; zawiera logi i dane o systemie, a pracę tylko wtedy, gdy ją dołączysz. Jeśli używasz opcji wyszukiwania zaznaczonego tekstu, tekst ten trafia do wyszukiwarki internetowej.
+
+6. Brak gwarancji
+Aplikacja jest udostępniana "tak jak jest", bez jakiejkolwiek gwarancji, w zakresie dozwolonym przez prawo. Szczegóły określają sekcje 15 i 16 licencji AGPL-3.0.
+
+
+LICENSE AND TERMS OF USE - DiplomaChecker
+
+Copyright (C) 2026 Natalia Płocha, Maja Mogielnicka, Aleksandra Słomska, Dorian Neumann, Zofia Narloch
+
+1. License
+DiplomaChecker is free software. You may use, copy, modify and distribute it under the terms of the GNU Affero General Public License, version 3 (AGPL-3.0). The full text of the license is in the LICENSE file included with the application (in the _internal folder) and at https://www.gnu.org/licenses/agpl-3.0.html. Nothing in these terms limits the rights this license gives.
+
+2. Source code
+The source code of the application is available free of charge at https://github.com/PDF-Diploma-Checker/app.
+
+3. Third-party components
+The application includes components under their own licenses, among others PyMuPDF (AGPL-3.0), language-tool-python and the pl_core_news_lg model (GPL-3.0) and PySide6/Qt (LGPL). The gpu version includes NVIDIA CUDA libraries under NVIDIA's terms. The models the application downloads have their own terms: Gemma (Gemma Terms of Use) and Qwen2.5-VL (Apache 2.0).
+
+4. Analysis results
+The application may make mistakes resulting from the limitations of the technologies used, including AI models, and does not replace analysis by a human. The results are for assistance only and do not bind a university or a supervisor. You are responsible for decisions made on their basis.
+
+5. Data
+A thesis is analysed on your computer. The application connects to the internet to check for and download updates (GitHub) and to download models and language components. A bug report is sent to the authors only when you send it yourself; it contains logs and system information, and the thesis only when you attach it. If you use the option to search for selected text, that text goes to a web search engine.
+
+6. No warranty
+The application is provided "as is", without any warranty, to the extent permitted by law. Sections 15 and 16 of the AGPL-3.0 give the details.

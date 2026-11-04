@@ -56,6 +56,7 @@ os.makedirs(workpath, exist_ok=True)
 with open(_version_file, "w", encoding="utf-8") as _f:
     _f.write(_version + "\n")
 datas.append((_version_file, "."))
+datas.append(("LICENSE", "."))
 print(f"[spec] building version {_version}")
 
 a = Analysis(

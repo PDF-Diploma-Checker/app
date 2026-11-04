@@ -1,8 +1,8 @@
 """UI phrase tables. Keys are nested and flattened to dotted paths, e.g. "start.title"; placeholders use str.format syntax: {name}."""
 
 PL = {
-    "eula": {
-        "title": "Umowa licencyjna (EULA)",
+    "license": {
+        "title": "Licencja i warunki korzystania",
         "accept": "Akceptuję",
         "decline": "Nie akceptuję",
         "close": "Zamknij",
@@ -223,7 +223,7 @@ PL = {
         "models_no_runtime": "Ta wersja aplikacji nie zawiera modułu AI (wersja base).",
         "download_models": "Pobierz modele",
         "version": "Wersja aplikacji: {version}",
-        "eula": "Licencja (EULA)",
+        "license": "Licencja",
         "device_desc": "Karta graficzna (cuda) jest dużo szybsza; procesor (cpu) działa na każdym komputerze.",
         "gpu_layers_desc": "Ile warstw modelu trafia na kartę graficzną. Zmniejsz, jeśli brakuje VRAM.",
         "default_language_desc": "Język, w którym domyślnie pisane są analizowane prace.",
@@ -395,8 +395,8 @@ PL = {
 }
 
 EN = {
-    "eula": {
-        "title": "License agreement (EULA)",
+    "license": {
+        "title": "License and terms of use",
         "accept": "I accept",
         "decline": "I do not accept",
         "close": "Close",
@@ -617,7 +617,7 @@ EN = {
         "models_no_runtime": "This version of the app has no AI module (base version).",
         "download_models": "Download models",
         "version": "App version: {version}",
-        "eula": "License (EULA)",
+        "license": "License",
         "device_desc": "A graphics card (cuda) is much faster; the processor (cpu) works on any computer.",
         "gpu_layers_desc": "How many model layers are placed on the graphics card. Lower it if you run out of VRAM.",
         "default_language_desc": "The language theses are assumed to be written in by default.",
