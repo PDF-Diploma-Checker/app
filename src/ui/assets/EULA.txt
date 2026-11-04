@@ -1,0 +1,53 @@
+UMOWA LICENCYJNA UŻYTKOWNIKA KOŃCOWEGO (EULA) - DiplomaChecker
+English version below.
+
+1. Licencja
+Autorzy projektu PDF-Diploma-Checker ("Autorzy") udzielają Ci bezpłatnej, niewyłącznej licencji na instalowanie i używanie aplikacji DiplomaChecker ("Aplikacja"). Instalując lub używając Aplikacji, akceptujesz tę umowę. Jeśli jej nie akceptujesz, nie używaj Aplikacji.
+
+2. Składniki innych autorów
+Aplikacja zawiera składniki objęte własnymi licencjami, m.in. PyMuPDF (AGPL-3.0 lub licencja komercyjna Artifex), language-tool-python (GPL-3.0) i PySide6/Qt (LGPL). Modele językowe pobierane przez Aplikację mają własne warunki, m.in. Gemma (Gemma Terms of Use) i Qwen2.5-VL (Apache 2.0). Te licencje mają pierwszeństwo przed tą umową w odniesieniu do tych składników, a ta umowa nie ogranicza praw, które dają.
+
+3. Prawa autorskie
+Prawa autorskie do Aplikacji należą do Autorów i autorów jej składników. Ta umowa nie przenosi tych praw.
+
+4. Wyniki analizy
+Aplikacja może popełniać błędy wynikające z ograniczeń wykorzystanych technologii, w tym modeli AI, i nie zastępuje analizy przeprowadzonej przez człowieka. Wyniki mają charakter pomocniczy. Odpowiadasz za decyzje podjęte na ich podstawie. Aplikacja nie ocenia pracy w sposób wiążący dla uczelni ani promotora.
+
+5. Dane
+Analiza pracy odbywa się na Twoim komputerze. Aplikacja łączy się z internetem, aby sprawdzić dostępność aktualizacji i pobrać aktualizacje (GitHub) oraz pobrać modele i składniki językowe. Zgłoszenie błędu jest wysyłane do Autorów tylko wtedy, gdy sam je wyślesz; zawiera logi i dane o systemie, a pracę tylko wtedy, gdy ją dołączysz. Jeśli używasz opcji wyszukiwania zaznaczonego tekstu, tekst ten trafia do wyszukiwarki internetowej.
+
+6. Brak gwarancji
+Aplikacja jest udostępniana "tak jak jest", bez jakiejkolwiek gwarancji, w tym przydatności do określonego celu i bezbłędnego działania.
+
+7. Ograniczenie odpowiedzialności
+W najszerszym zakresie dozwolonym przez prawo Autorzy nie odpowiadają za szkody wynikające z używania Aplikacji lub niemożności jej używania, w tym za utratę danych oraz skutki decyzji podjętych na podstawie wyników analizy. Nic w tej umowie nie wyłącza praw, których nie można wyłączyć zgodnie z prawem.
+
+8. Zmiany
+Nowe wersje Aplikacji mogą zawierać zmienioną treść tej umowy. Używanie nowej wersji oznacza akceptację umowy dołączonej do tej wersji.
+
+
+END USER LICENSE AGREEMENT (EULA) - DiplomaChecker
+
+1. License
+The authors of the PDF-Diploma-Checker project ("Authors") grant you a free, non-exclusive license to install and use the DiplomaChecker application ("Application"). By installing or using the Application you accept this agreement. If you do not accept it, do not use the Application.
+
+2. Third-party components
+The Application includes components under their own licenses, among others PyMuPDF (AGPL-3.0 or the Artifex commercial license), language-tool-python (GPL-3.0) and PySide6/Qt (LGPL). The language models the Application downloads have their own terms, among others Gemma (Gemma Terms of Use) and Qwen2.5-VL (Apache 2.0). For those components these licenses prevail over this agreement, and this agreement does not limit the rights they give.
+
+3. Copyright
+Copyright in the Application belongs to the Authors and to the authors of its components. This agreement does not transfer these rights.
+
+4. Analysis results
+The Application may make mistakes resulting from the limitations of the technologies used, including AI models, and does not replace analysis by a human. The results are for assistance only. You are responsible for decisions made on their basis. The Application does not assess a thesis in a way that binds a university or a supervisor.
+
+5. Data
+A thesis is analysed on your computer. The Application connects to the internet to check for and download updates (GitHub) and to download models and language components. A bug report is sent to the Authors only when you send it yourself; it contains logs and system information, and the thesis only when you attach it. If you use the option to search for selected text, that text goes to a web search engine.
+
+6. No warranty
+The Application is provided "as is", without any warranty, including fitness for a particular purpose and error-free operation.
+
+7. Limitation of liability
+To the fullest extent permitted by law, the Authors are not liable for damage resulting from using or being unable to use the Application, including loss of data and the consequences of decisions made on the basis of analysis results. Nothing in this agreement excludes rights that cannot be excluded by law.
+
+8. Changes
+New versions of the Application may contain a changed text of this agreement. Using a new version means accepting the agreement included with that version.
