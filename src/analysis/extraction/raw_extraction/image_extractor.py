@@ -296,6 +296,15 @@ def extract_vector_graphics(
                     ):
                         is_text_formatting = True
 
+                    # a highlight over a part of a line: joined with a nearby figure it would swallow the caption
+                    if (
+                        rect.height <= t_rect.height * 1.5
+                        and rect.x0 >= t_rect.x0 - 5
+                        and rect.x1 <= t_rect.x1 + 5
+                        and t_rect.y0 <= (rect.y0 + rect.y1) / 2 <= t_rect.y1
+                    ):
+                        is_text_formatting = True
+
         if lines_inside > 0:
             if is_pale_shape:
                 is_text_formatting = True
