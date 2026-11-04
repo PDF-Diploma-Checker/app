@@ -37,7 +37,7 @@ VISION_GB = 5.6                     # vision model + projector
 GEMMA_LAYERS = 48
 DEFAULT_LOAD_MB_S = 3000.0          # reading a model from disk, mostly from its cache; measured afterwards
 GEMMA_LOADS = 4                     # purpose, goal, summaries, SOTA each load the model again
-VISION_LOADS = 3                    # reading the figures, their quality, their fonts
+VISION_LOADS = 4                    # reading the figures, their quality, their fonts, their axes
 TOKENS_PER_CHAR = 0.3
 GOAL_FRAGMENT_CHARS = 9000          # how much of the end of the thesis the goal check reads
 # generated tokens of the stages, measured on real theses

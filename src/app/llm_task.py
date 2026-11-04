@@ -290,18 +290,34 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
                 font_errors = []
                 analysis_failed = True
 
+            cleanup_text_llm_instances()
+            check_cancelled(cancel_token)
+
+            try:
+                from analysis.modules.llm.image_analysis.axis_checker import get_axis_report
+
+                axis_errors = get_axis_report(doc_obj, mapped_doc, language=language)
+                axis_errors, failed = split_failed_checks(axis_errors or [])
+                analysis_failed = analysis_failed or failed
+            except Exception:
+                logger.exception("Chart axis analysis failed")
+                axis_errors = []
+                analysis_failed = True
+
             image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
             cleanup_text_llm_instances()
         else:
             image_summary_data = build_image_summary([])
             quality_errors = []
             font_errors = []
+            axis_errors = []
 
         log_results(
             "Figures",
             summary=image_summary_data,
             quality_errors=quality_errors,
             font_errors=font_errors,
+            axis_errors=axis_errors,
         )
         check_cancelled(cancel_token)
         timer.next("SOTA")
@@ -356,6 +372,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "image_analysis": image_summary_data,
             "jakosc_obrazkow": quality_errors,
             "czcionki_obrazkow": font_errors,
+            "osie_wykresow": axis_errors,
         }
 
         log_results("Final content grade", **content_grade_dict)

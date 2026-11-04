@@ -19,6 +19,7 @@ READ_PROMPT = (
 )
 READ_MAX_TOKENS = 512
 YES_NO_MAX_TOKENS = 6
+LIST_MAX_TOKENS = 60
 MIN_READABLE_PIXELS = 150       # a shorter side below this holds no readable text, whatever the model says about it
 
 
@@ -88,6 +89,10 @@ class VisionEngine:
     def ask_yes_no(self, image_bytes, question):
         """The raw answer to a yes/no question."""
         return self._ask(image_bytes, f"{question} Answer YES or NO.", YES_NO_MAX_TOKENS)
+
+    def list_numbers(self, image_bytes, prompt):
+        """The raw answer to a request for the numbers in an image."""
+        return self._ask(image_bytes, prompt, LIST_MAX_TOKENS)
 
     def is_blurry(self, image_bytes):
         """True/False, or None when the answer was neither."""
