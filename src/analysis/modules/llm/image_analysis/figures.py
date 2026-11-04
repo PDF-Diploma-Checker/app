@@ -12,14 +12,21 @@ logger = logging.getLogger(__name__)
 # Numbering series: "Rysunek 1" and "Wykres 1" are different figures when a thesis numbers them separately.
 # Stems cover the Polish cases as well: "na rysunku 2.1", "na wykresie 3".
 _FAMILIES = {
-    "rys": ("rys", "fig", "rycin", "ilustracj", "grafik", "image", "img"),
+    "rys": ("rys", "fig", "rycin", "ilustracj", "grafik", "obraz", "image", "img"),
     "wykres": ("wykres", "chart", "plot"),
     "fot": ("fot", "photo"),
     "schemat": ("schemat", "schema", "diagram"),
 }
+FIGURE_FAMILIES = tuple(_FAMILIES)
 _NUMBER = r"\d+(?:\.\d+)*"
 _ANY_STEM = "|".join(stem for stems in _FAMILIES.values() for stem in stems)
 _CAPTION = re.compile(rf"^\s*((?:{_ANY_STEM})[^\W\d]*\.?)\s*({_NUMBER})", re.IGNORECASE)
+_NUMBER_WORD = r"(?:(?:nr|numer|no)\.?\s*)?"
+_RANGE = re.compile(rf"(\d+(?:\.\d+)*)\s*(?:-|–|—|\bdo\b|\bto\b)\s*(\d+(?:\.\d+)*)(?!\d|\.\d)", re.IGNORECASE)
+# "Rysunek 2 przedstawia ..." opens a sentence about the figure, a caption goes on with the figure's title
+_DISCUSSING_VERB = re.compile(
+    r"(?:przedstawi(?:a|ają|ono)|pokaz(?:uje|ują|ano)|prezentuj[eą]|ilustruj[eą]|obrazuj[eą]|ukazuj[eą]|zawiera(?:ją)?"
+    r"|opisuj[eą]|wskazuj[eą]|(?:show|present|illustrate|depict|demonstrate|display|contain|describe)s?)\b", re.IGNORECASE)
 
 
 def _family_of(word):
@@ -30,22 +37,61 @@ def _family_of(word):
     return "rys"
 
 
+def _number_pattern(number):
+    """The number of a figure; text extraction can leave a space next to its dot: "3. 1"."""
+    return r"\s?\.\s?".join(re.escape(part) for part in str(number).split("."))
+
+
 def reference_pattern(number, family="rys"):
     """Regex matching a mention of this figure in text, in any grammatical case, also as a later number of an
-    enumeration: "rysunki 1 i 2", "rys. 1, 2 oraz 3", "Figures 1 and 2"."""
+    enumeration or a range: "rysunki 1 i 2", "rys. 1, 2 oraz 3", "Figures 1 and 2", "rysunki od 1 do 3"."""
     stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
-    earlier = rf"(?:{_NUMBER}\s*(?:,|i|oraz|lub|and|or|&)\s*)*"
+    earlier = rf"(?:{_NUMBER}\s*(?:,|i|oraz|lub|and|or|&|-|–|—|do|to)\s*)*"
     return re.compile(
-        rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*{earlier}{re.escape(str(number))}(?!\d|\.\d)", re.IGNORECASE)
+        rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*(?:od\s+|from\s+)?{_NUMBER_WORD}{earlier}{_number_pattern(number)}(?!\d|\.\d)",
+        re.IGNORECASE)
+
+
+def _in_mentioned_range(text, number, family):
+    """True for figure 2 in "rysunki 1-3": the number itself is not in the text. Only within one chapter: 2.9-3.1 says
+    nothing about how many figures chapter 2 has."""
+    stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
+    wanted = [int(part) for part in str(number).split(".")]
+    for match in re.finditer(rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*(?:od\s+|from\s+)?{_NUMBER_WORD}", text, re.IGNORECASE):
+        found = _RANGE.match(text, match.end())
+        if found:
+            first, last = ([int(part) for part in value.split(".")] for value in found.groups())
+            if len(first) == len(last) == len(wanted) and first[:-1] == last[:-1] == wanted[:-1] and first <= wanted <= last:
+                return True
+    return False
+
+
+def _bare_number_pattern(number):
+    """A reference that lost its word, typical of a LaTeX \\ref: "znajduje się na 2.2 [17]". Without the word a plain
+    number could be anything, so it counts only when dotted and closing a phrase ("na 2.2 GHz" does not)."""
+    return re.compile(rf"(?<!\w)na\s+{_number_pattern(number)}(?=\s*(?:\[|[.,;:)]|$))(?!\.\d)", re.IGNORECASE)
+
+
+def mentions_figure(text, number, family="rys"):
+    """True when the text refers to this figure in any of the forms a thesis uses."""
+    if reference_pattern(number, family).search(text) or _in_mentioned_range(text, number, family):
+        return True
+    return "." in str(number) and bool(_bare_number_pattern(number).search(text))
 
 
 def is_caption(paragraph, number, family="rys"):
     """True when the paragraph is the figure's own caption (or its entry in the list of figures)."""
     text = paragraph.strip()
-    match = reference_pattern(number, family).match(text)
+    pattern = reference_pattern(number, family)
+    match = pattern.match(text)
     if not match:
         return False
-    return len(text) < 50 or text[match.end():].lstrip()[:1] in (":", ".", "-", "–", "—")
+    if pattern.search(text, match.end()):   # a caption merged with the paragraph that discusses the figure
+        return False
+    rest = text[match.end():].lstrip()
+    if _DISCUSSING_VERB.match(rest.lstrip("-–— ")):
+        return False
+    return len(text) < 50 or rest[:1] in (":", ".", "-", "–", "—")
 
 
 def figure_sort_key(label):
