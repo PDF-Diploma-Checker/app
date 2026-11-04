@@ -1,9 +1,14 @@
 '''A highlight over a word of the caption must not make the figure swallow its caption.'''
 import os
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 import fitz
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from analysis.extraction.main_extractor import extractPDF
 
