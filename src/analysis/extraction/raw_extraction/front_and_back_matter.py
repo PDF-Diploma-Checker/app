@@ -14,6 +14,29 @@ from analysis.extraction.raw_extraction.bare_struct import (
 )
 
 
+LIST_TITLES = (
+    "spis rysunkow", "spis rysunków", "spis ilustracji", "spis wykresow", "spis wykresów", "wykaz rysunkow", "wykaz rysunków",
+    "list of figures", "table of figures", "table of graphs",
+    "spis tabel", "spis tablic", "wykaz tabel", "list of tables",
+)
+
+
+def _clean_title(text):
+    """A title for comparing: LaTeX fonts can leave an accent apart from its letter, "SPIS RYSUNK ´ OW"."""
+    return " ".join(re.sub(r"\s*[´`˙˛¸]\s*", "", text.lower()).split())
+
+
+def _opens_with_title(page, titles):
+    """True when the page starts with one of the titles (its top lines, a running header may come first)."""
+    top = [
+        " ".join(span.text.strip() for span in line.spans if span.text.strip())
+        for block in page.text_blocks
+        for line in block.lines
+        if line.bbox[1] < page.height * 0.15
+    ]
+    return any(_clean_title(text).startswith(titles) for text in top)
+
+
 class Extractor(ABC):
     """Base class for all extractors."""
 
@@ -36,6 +59,8 @@ class TableOfContentsExtractor(Extractor):
 
             for page_obj in pages[:15]:
                 if not is_detecting:
+                    break
+                if toc_pages and _opens_with_title(page_obj, LIST_TITLES):  # looks like more of the contents, but is not
                     break
 
                 y_groups = {}
@@ -204,7 +229,7 @@ class TableOfFiguresExtractor(Extractor):
                     else:
                         break
 
-                top_text_low = top_lines_text.lower()
+                top_text_low = _clean_title(top_lines_text)
                 if any(word in top_text_low for word in keywords):
                     has_keyword_on_top = True
                 if any(word in top_text_low for word in anti_keywords):
@@ -233,7 +258,7 @@ class TableOfFiguresExtractor(Extractor):
                         continue
 
                     line_full_text = " ".join(fragments)
-                    if line_full_text.lower() in keywords:
+                    if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
 
@@ -291,7 +316,7 @@ class TableOfFiguresExtractor(Extractor):
                         cut_title = base_title + sep + line_full_text
 
                 if is_detecting and page_entries:
-                    if len(tof_pages) == 0 and len(page_entries) < 2:
+                    if len(tof_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
                         is_detecting = False
                     else:
                         all_entries.extend(page_entries)
@@ -300,8 +325,10 @@ class TableOfFiguresExtractor(Extractor):
                 elif is_detecting and not page_entries:
                     is_detecting = False
 
-            if all_entries:
-                return TofData(page_nums=tof_pages, entries=all_entries, text="Spis Rysunków")
+            # a list with its title and nothing in it, for a thesis without such elements, is still there
+            title_pages = [page.number for page in pages if page.number not in toc_pages and _opens_with_title(page, tuple(keywords))]
+            if all_entries or title_pages:
+                return TofData(page_nums=tof_pages or title_pages, entries=all_entries, text="Spis Rysunków")
             return None
         except Exception as e:
             logging.error(f"Error extracting Table of Figures: {e}")
@@ -368,7 +395,7 @@ class TableOfTablesExtractor(Extractor):
                     else:
                         break
 
-                top_text_low = top_lines_text.lower()
+                top_text_low = _clean_title(top_lines_text)
                 if any(word in top_text_low for word in keywords):
                     has_keyword_on_top = True
                 if any(word in top_text_low for word in anti_keywords):
@@ -397,7 +424,7 @@ class TableOfTablesExtractor(Extractor):
                         continue
 
                     line_full_text = " ".join(fragments)
-                    if line_full_text.lower() in keywords:
+                    if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
 
@@ -455,7 +482,7 @@ class TableOfTablesExtractor(Extractor):
                         cut_title = base_title + sep + line_full_text
 
                 if is_detecting and page_entries:
-                    if len(tot_pages) == 0 and len(page_entries) < 2:
+                    if len(tot_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
                         is_detecting = False
                     else:
                         all_entries.extend(page_entries)
@@ -464,8 +491,10 @@ class TableOfTablesExtractor(Extractor):
                 elif is_detecting and not page_entries:
                     is_detecting = False
 
-            if all_entries:
-                return TotData(page_nums=tot_pages, entries=all_entries, text="Spis Tabel")
+            # a list with its title and nothing in it, for a thesis without such elements, is still there
+            title_pages = [page.number for page in pages if page.number not in toc_pages and _opens_with_title(page, tuple(keywords))]
+            if all_entries or title_pages:
+                return TotData(page_nums=tot_pages or title_pages, entries=all_entries, text="Spis Tabel")
             return None
         except Exception as e:
             logging.error(f"Error extracting Table of Tables: {e}")
