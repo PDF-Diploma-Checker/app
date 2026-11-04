@@ -355,6 +355,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "off_topic_sections": bad_sections,
             "p_off": round(p_off_val, 2),
             "off_topic_headings": off_topic_headings,
+            "purpose_score": purpose_score,
             "purpose_reason": purpose_reason,
         }
 

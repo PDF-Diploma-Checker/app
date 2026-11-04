@@ -27,6 +27,7 @@ STRINGS = {
         "rep_main_title": "Szczegółowy Raport Analizy Merytorycznej", "rep_doc_label": "Dokument:",
         "rep_eval_title": "Ogólna ocena merytoryczna", "rep_score_lbl": "Wynik punktowy:",
         "rep_off_topic_lbl": "Podrozdziały poza tematem:", "rep_off_topic_ident": "Zidentyfikowane sekcje niezgodne z celem pracy:",
+        "rep_purpose_lbl": "Realizacja celu pracy",
         "rep_theory_title": "Weryfikacja merytoryczna rozdziału teoretycznego", "rep_chapter_analyzed": "Analizowany rozdział:",
         "rep_completion_lvl": "Poziom realizacji wytycznych:", "rep_crit_1": "Analiza i ocena istniejących rozwiązań",
         "rep_crit_2": "Wskazanie luki badawczej lub problemu naukowego", "rep_crit_3": "Synteza i krytyczne porównanie metod",
@@ -61,6 +62,7 @@ STRINGS = {
         "rep_main_title": "Detailed Content Analysis Report", "rep_doc_label": "Document:",
         "rep_eval_title": "Overall Content Evaluation", "rep_score_lbl": "Score:",
         "rep_off_topic_lbl": "Off-topic subsections:", "rep_off_topic_ident": "Identified sections irrelevant to the thesis objective:",
+        "rep_purpose_lbl": "Thesis objective realization",
         "rep_theory_title": "Theoretical Chapter Verification", "rep_chapter_analyzed": "Analyzed chapter:",
         "rep_completion_lvl": "Guideline completion level:", "rep_crit_1": "Analysis and evaluation of existing solutions",
         "rep_crit_2": "Identification of research gap or problem", "rep_crit_3": "Synthesis and critical comparison of methods",
@@ -521,6 +523,11 @@ def _content(w, s, data):
         if off_topic > 0 and headings:
             rows += [w.r_gap(6), w.r_label(s["rep_off_topic_ident"], C["danger"], 10.5, 4)]
             rows += w.r_bullets(headings, 10, C["text"], C["danger_dot"])
+        reason = grade_info.get("purpose_reason") if isinstance(grade_info, dict) else None
+        if reason:
+            score = grade_info.get("purpose_score")
+            title = s["rep_purpose_lbl"] + (f": {_fmt(score)}%" if score is not None else "")
+            rows += [w.r_gap(6), w.r_label(title, C["text"], 10.5, 4), w.r_text(str(reason), 10, False, C["text"])]
         w.card(rows)
 
         # ---- theoretical chapter
