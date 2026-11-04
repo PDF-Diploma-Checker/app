@@ -17,6 +17,13 @@ import re
 
 logger = logging.getLogger(__name__)
 
+
+def _comparable_title(text):
+    """A title for comparing a list entry with the document: extracting an entry turns "1. Wstęp" into "1 Wstęp", so
+    the text it is looked for in has to go through the same cleaning (see front_and_back_matter)."""
+    return " ".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
+
+
 @dataclass
 class Configuration:
     interlinia: float
@@ -915,7 +922,7 @@ class RedactionValidator:
 
         for entry in self.document_data.toc.entries:
             expected_page = entry.page
-            expected_title = " ".join(entry.title.lower().strip().rstrip(".").split())
+            expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
@@ -926,7 +933,7 @@ class RedactionValidator:
                             line_text = " ".join([s.text for s in line.spans])
                             page_full_text += line_text + " "
 
-                    page_full_text = " ".join(page_full_text.lower().split())
+                    page_full_text = _comparable_title(page_full_text)
 
                     if expected_title in page_full_text:
                         correct_page = True
@@ -975,7 +982,7 @@ class RedactionValidator:
             return
 
         for entry in self.document_data.tot.entries:
-            expected_title = " ".join(entry.title.lower().strip().rstrip(".").split())
+            expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
@@ -983,7 +990,7 @@ class RedactionValidator:
                     for table in page.tables:
                         if not table.description:
                             continue
-                        table_desc = " ".join(table.description.lower().strip().split())
+                        table_desc = _comparable_title(table.description)
 
                         if expected_title in table_desc or table_desc in expected_title:
                             correct_page = True
@@ -1037,7 +1044,7 @@ class RedactionValidator:
             return None, is_toc
 
         for entry in self.document_data.tof.entries:
-            expected_title = " ".join(entry.title.lower().strip().rstrip(".").split())
+            expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
@@ -1046,7 +1053,7 @@ class RedactionValidator:
                         if not image.description:
                             continue
 
-                        image_desc = " ".join(image.description.lower().strip().split())
+                        image_desc = _comparable_title(image.description)
 
                         if expected_title in image_desc or image_desc in expected_title:
                             correct_page = True
