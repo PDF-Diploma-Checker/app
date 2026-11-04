@@ -40,6 +40,7 @@ def smoke_test():
     modules = list(SMOKE_MODULES)
     if llm_runtime_available():     # the base variant has no AI libraries
         modules += ["analysis.modules.llm.image_analysis.run_image", "analysis.modules.llm.image_analysis.font_checker",
+                    "analysis.modules.llm.image_analysis.axis_checker",
                     "analysis.modules.llm.image_analysis.image_quality_checker"]
     for name in modules:
         try:

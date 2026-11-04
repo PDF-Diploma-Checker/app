@@ -282,6 +282,58 @@ class ReportPdfFontsTest(unittest.TestCase):
         self.assertNotIn("{", text)
 
 
+class AxisRulesTest(unittest.TestCase):
+    def test_numbers_of_an_answer(self):
+        from analysis.modules.llm.image_analysis.figures import parse_axis_numbers as parse
+        self.assertEqual(parse("0%; 20%; 40%"), [0, 20, 40])
+        self.assertEqual(parse("0,5;1,5;100 s;-2"), [0.5, 1.5, 100, -2])
+        self.assertEqual(parse("NONE"), [])
+        self.assertEqual(parse("M1; M2"), [])
+
+    def test_good_scales(self):
+        from analysis.modules.llm.image_analysis.figures import scale_problem as problem
+        for ticks in ([0, 20, 40, 60], [0, 2000, 4000, 6000], [-10, -5, 0, 5, 10], [1, 10, 100, 1000],
+                      [1, 2, 5, 10, 20], [0.1, 0.2, 0.3, 0.4], [10, 20, 30, 40], [40, 30, 20, 10, 0]):
+            self.assertIsNone(problem(ticks, True), ticks)
+
+    def test_uneven_scale(self):
+        from analysis.modules.llm.image_analysis.figures import scale_problem as problem
+        for ticks in ([0, 10, 20, 50, 200], [0, 5, 10, 20, 50], [0, 10, 50, 200]):
+            self.assertEqual(problem(ticks, False), "uneven", ticks)
+
+    def test_bar_chart_not_starting_at_zero(self):
+        from analysis.modules.llm.image_analysis.figures import scale_problem as problem
+        self.assertEqual(problem([60, 62, 64, 66, 68], True), "truncated")
+        self.assertIsNone(problem([60, 62, 64, 66, 68], False))    # a line chart may start anywhere
+
+    def test_number_lost_by_the_model_is_not_an_uneven_scale(self):
+        from analysis.modules.llm.image_analysis.figures import scale_problem as problem
+        self.assertIsNone(problem([0, 100, 300, 400], True))
+        self.assertIsNone(problem([0, 10, 20, 50, 60], True))
+
+    def test_too_few_numbers_or_no_scale_at_all(self):
+        from analysis.modules.llm.image_analysis.figures import scale_problem as problem
+        self.assertIsNone(problem([0, 5, 60], True))
+        self.assertIsNone(problem([70, 75, 80, 85, 75], True))
+        self.assertIsNone(problem([], True))
+
+
+class ReportPdfAxesTest(unittest.TestCase):
+    def test_axis_problem_is_in_the_report(self):
+        from ui.report_pdf import build_report_pdf
+
+        data = {"content_grade": {"grade": 50, "max_grade": 100},
+                "image_analysis": {"total": 1, "bad_count": 0, "good_count": 1},
+                "osie_wykresow": [{"rysunek": "Figure 1", "blad": "The chart has no scale"}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp, "report.pdf"))
+            build_report_pdf(data, "t.pdf", "en", path)
+            with fitz.open(path) as doc:
+                text = " ".join(" ".join(page.get_text().split()) for page in doc)
+        self.assertIn("Chart Axes", text)
+        self.assertIn("The chart has no scale", text)
+
+
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

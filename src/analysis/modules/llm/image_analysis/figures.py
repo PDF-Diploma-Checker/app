@@ -67,6 +67,9 @@ _TEXTS = {
         "unreadable_figure": "Rysunek jest zbyt nieczytelny, by porównać go z tekstem.",
         "mismatch": "{element}: w tekście {text}, na rysunku {image}",
         "fonts_inconsistent": "Niespójne wielkości czcionek na wykresie/obrazku.",
+        "axis_no_scale": "Wykres nie ma skali ani wartości liczbowych.",
+        "axis_uneven": "Skala osi ma nierówne kroki: {ticks}.",
+        "axis_truncated": "Oś wartości wykresu słupkowego zaczyna się od {start}, a nie od zera, co wyolbrzymia różnice.",
         "low_dpi": "Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'.",
         "dpi_requirement": "Minimum {threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)",
         "unreadable_file": "Nie udało się zweryfikować pliku: {error}",
@@ -86,6 +89,9 @@ _TEXTS = {
         "unreadable_figure": "The figure is too unclear to compare it with the text.",
         "mismatch": "{element}: {text} in the text, {image} in the figure",
         "fonts_inconsistent": "Inconsistent font sizes in the chart/image.",
+        "axis_no_scale": "The chart has no scale and no numeric values.",
+        "axis_uneven": "The axis scale has uneven steps: {ticks}.",
+        "axis_truncated": "The value axis of the bar chart starts at {start} instead of zero, which exaggerates the differences.",
         "low_dpi": "The image was stretched too far, which caused visible pixelation.",
         "dpi_requirement": "At least {threshold} DPI (a standard screenshot has 96 DPI)",
         "unreadable_file": "The file could not be verified: {error}",
@@ -108,6 +114,56 @@ def parse_yes_no(answer):
         return True
     if words & {"no", "false"}:
         return False
+    return None
+
+
+_AXIS_NUMBER = re.compile(r"^(-?\d+(?:[.,]\d+)?)\s*[^\d\s]*$")
+_MIN_AXIS_TICKS = 4        # with fewer numbers read, one lost by the model already looks like an uneven scale
+_EVEN_STEPS = 1.5          # largest step against the smallest one; printed scales round their numbers
+_TRUNCATED_STEPS = 5       # the start of an axis in its steps; below that it can be a few lost numbers: 0.2, 0.3, 0.4
+
+
+def parse_axis_numbers(answer):
+    """The numbers from a model's answer such as '0%; 20%; 40%'. Anything else ('NONE', 'M1') is left out."""
+    numbers = []
+    for part in (answer or "").replace("\n", ";").split(";"):
+        match = _AXIS_NUMBER.match(part.strip())
+        if match:
+            numbers.append(float(match.group(1).replace(",", ".")))
+    return numbers
+
+
+def _is_scale(ticks):
+    return len(ticks) >= _MIN_AXIS_TICKS and all(a < b for a, b in zip(ticks, ticks[1:]))
+
+
+def _is_even(values):
+    return bool(values) and min(values) > 0 and max(values) / min(values) < _EVEN_STEPS
+
+
+def _is_logarithmic(ticks):
+    ratios = [b / a for a, b in zip(ticks, ticks[1:])] if ticks[0] > 0 else []
+    return _is_even(ratios) and min(ratios) >= _EVEN_STEPS
+
+
+def _lost_numbers(steps):
+    """True when all steps but one are equal and that one is a multiple of them, as after the model lost numbers from
+    a regular scale: 0, 100, 300, 400. Such a scale could be uneven too, but a false alarm is the worse mistake."""
+    smallest = min(steps)
+    others = [step for step in steps if step != smallest]
+    return len(others) == 1 and smallest > 0 and (others[0] / smallest).is_integer()
+
+
+def scale_problem(ticks, is_bar_chart):
+    """'uneven', 'truncated' or None for the numbers read from an axis. None also for what does not look like a scale."""
+    ticks = sorted(ticks) if ticks[:1] > ticks[-1:] else ticks      # also read from the top down
+    if not _is_scale(ticks) or _is_logarithmic(ticks):
+        return None
+    steps = [b - a for a, b in zip(ticks, ticks[1:])]
+    if not _is_even(steps) and not _lost_numbers(steps):
+        return "uneven"
+    if is_bar_chart and ticks[0] > _TRUNCATED_STEPS * min(steps):
+        return "truncated"
     return None
 
 

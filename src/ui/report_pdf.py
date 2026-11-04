@@ -38,6 +38,8 @@ STRINGS = {
         "rep_qual_err_1": "Wykryto problemy z jakością w", "rep_qual_err_2": "obrazach:", "rep_format_lbl": "Format:",
         "rep_fonts_title": "Spójność czcionek na obrazach", "rep_fonts_all_ok": "Brak wykrytych problemów ze spójnością czcionek na rysunkach.",
         "rep_fonts_err_1": "Wykryto problemy z czcionkami w", "rep_fonts_err_2": "elementach:",
+        "rep_axes_title": "Osie wykresów", "rep_axes_all_ok": "Brak wykrytych problemów z osiami wykresów.",
+        "rep_axes_err_1": "Wykryto problemy z osiami w", "rep_axes_err_2": "elementach:",
         "rep_img_failed": "Analiza rysunków nie powiodła się w całości: wyniki są niepełne. Szczegóły są w logu aplikacji.", "rep_img_skip_title": "Ocena jakości obrazów i czcionek", "rep_img_skip_desc": "Analiza została pominięta na życzenie użytkownika lub dokument nie zawiera grafik.",
         "rep_stats_title": "Analiza statystyczna struktury zdań", "rep_stats_desc": "Struktura gramatyczna i stylistyczna badanej pracy dyplomowej:",
         "rep_active_lbl": "Zdania w stronie czynnej", "rep_active_desc": "Zalecana forma wypowiedzi w tekstach naukowych podnosząca dynamikę wywodu.",
@@ -70,6 +72,8 @@ STRINGS = {
         "rep_qual_err_1": "Quality issues detected in", "rep_qual_err_2": "images:", "rep_format_lbl": "Format:",
         "rep_fonts_title": "Font Consistency in Images", "rep_fonts_all_ok": "No font consistency issues detected in figures.",
         "rep_fonts_err_1": "Font issues detected in", "rep_fonts_err_2": "elements:",
+        "rep_axes_title": "Chart Axes", "rep_axes_all_ok": "No chart axis issues detected.",
+        "rep_axes_err_1": "Axis issues detected in", "rep_axes_err_2": "elements:",
         "rep_img_failed": "The figure analysis did not fully succeed: the results are incomplete. See the application log for details.", "rep_img_skip_title": "Image Quality and Fonts Assessment", "rep_img_skip_desc": "Analysis skipped by user request or document contains no graphics.",
         "rep_stats_title": "Sentence Structure Statistical Analysis", "rep_stats_desc": "Grammatical and stylistic structure of the analyzed thesis:",
         "rep_active_lbl": "Active voice sentences", "rep_active_desc": "Recommended form of expression in academic texts, enhancing narrative dynamics.",
@@ -563,13 +567,14 @@ def _content(w, s, data):
                                    err.get("powody_odrzucenia", []) or [])
             w.card(rows)
 
-        w.heading(s["rep_fonts_title"])
-        fonts = data.get("czcionki_obrazkow") or []
-        if not fonts:
-            w.card([w.r_note(s["rep_fonts_all_ok"], "ok")])
-        else:
-            rows = [w.r_note(f"{s['rep_fonts_err_1']} {len(fonts)} {s['rep_fonts_err_2']}", "bad"), w.r_gap(8)]
-            for err in fonts:
+        for key, prefix in (("czcionki_obrazkow", "rep_fonts"), ("osie_wykresow", "rep_axes")):
+            w.heading(s[f"{prefix}_title"])
+            found = data.get(key) or []
+            if not found:
+                w.card([w.r_note(s[f"{prefix}_all_ok"], "ok")])
+                continue
+            rows = [w.r_note(f"{s[f'{prefix}_err_1']} {len(found)} {s[f'{prefix}_err_2']}", "bad"), w.r_gap(8)]
+            for err in found:
                 if isinstance(err, dict):
                     rows += w.r_figure(str(err.get("rysunek", s["unknown_fig"])), None,
                                        [str(b) for b in err.get("errors", err.get("powody_odrzucenia", [err.get("blad", str(err))]))])
