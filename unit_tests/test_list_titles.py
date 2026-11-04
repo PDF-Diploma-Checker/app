@@ -33,12 +33,15 @@ def _validator(pages, **lists):
 
 class ComparableTitleTest(unittest.TestCase):
     def test_entry_and_heading_become_the_same(self):
-        self.assertEqual(_comparable_title("1. Wstęp"), "1 wstęp")
-        self.assertEqual(_comparable_title("2.1. Metody  słownikowe."), "2.1 metody słownikowe")
-        self.assertEqual(_comparable_title("Cel - zakres"), "cel zakres")
+        self.assertEqual(_comparable_title("1. Wstęp"), "1wstęp")
+        self.assertEqual(_comparable_title("2.1. Metody  słownikowe."), "2.1metodysłownikowe")
+        self.assertEqual(_comparable_title("Cel - zakres"), "celzakres")
 
     def test_dots_inside_a_number_stay(self):
-        self.assertEqual(_comparable_title("2.1 Metody"), "2.1 metody")
+        self.assertEqual(_comparable_title("2.1 Metody"), "2.1metody")
+
+    def test_space_next_to_a_bracket_does_not_count(self):
+        self.assertEqual(_comparable_title("Diagramy (ang. backup diagrams )"), _comparable_title("Diagramy (ang backup diagrams)"))
 
 
 class ListTitlesTest(unittest.TestCase):

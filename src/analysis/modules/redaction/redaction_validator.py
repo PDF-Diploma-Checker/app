@@ -21,8 +21,9 @@ logger = logging.getLogger(__name__)
 
 def _comparable_title(text):
     """A title for comparing a list entry with the document: extracting an entry turns "1. Wstęp" into "1 Wstęp", so
-    the text it is looked for in has to go through the same cleaning (see front_and_back_matter)."""
-    return " ".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
+    the text it is looked for in has to go through the same cleaning (see front_and_back_matter). Spaces do not count:
+    extraction can add one next to a bracket or a math symbol."""
+    return "".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
 
 
 VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
