@@ -1,7 +1,7 @@
 import os
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLayout, QFrame, QListView, QStyledItemDelegate,
-    QPushButton, QLineEdit, QComboBox, QFileDialog, QPlainTextEdit,
+    QPushButton, QLineEdit, QComboBox, QFileDialog,
 )
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
@@ -11,9 +11,9 @@ from . import icons, styles
 from .i18n import t
 from .message_box import MessageBox
 from .ai_setup_dialog import AiSetupDialog
+from .eula_dialog import EulaDialog
 from .model_download_dialog import download_models
 from common import gpu_check
-from common.path import resource_path
 from common.version import APP_VERSION
 
 CONTROL_WIDTH = 150
@@ -274,24 +274,12 @@ class SettingsDialog(QDialog):
         btn_eula.setFixedHeight(42)
         btn_eula.setStyleSheet(styles.GRAY_BUTTON_STYLE)
         btn_eula.setCursor(Qt.PointingHandCursor)
-        btn_eula.clicked.connect(self.show_eula)
+        btn_eula.clicked.connect(lambda: EulaDialog(self).exec())
         btn_layout.addWidget(btn_eula, 0, Qt.AlignVCenter)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
         main_layout.addLayout(btn_layout)
-
-    def show_eula(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle(t("settings.eula"))
-        dialog.resize(640, 560)
-        layout = QVBoxLayout(dialog)
-        text = QPlainTextEdit()
-        text.setReadOnly(True)
-        with open(resource_path("ui/assets/EULA.txt"), encoding="utf-8") as f:
-            text.setPlainText(f.read())
-        layout.addWidget(text)
-        dialog.exec()
 
     def browse_directory(self):
         dir_path = QFileDialog.getExistingDirectory(self, t("settings.choose_model_dir"))

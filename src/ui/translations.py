@@ -1,6 +1,12 @@
 """UI phrase tables. Keys are nested and flattened to dotted paths, e.g. "start.title"; placeholders use str.format syntax: {name}."""
 
 PL = {
+    "eula": {
+        "title": "Umowa licencyjna (EULA)",
+        "accept": "Akceptuję",
+        "decline": "Nie akceptuję",
+        "close": "Zamknij",
+    },
     "common": {
         "cancel": "Anuluj",
         "error": "Błąd",
@@ -389,6 +395,12 @@ PL = {
 }
 
 EN = {
+    "eula": {
+        "title": "License agreement (EULA)",
+        "accept": "I accept",
+        "decline": "I do not accept",
+        "close": "Close",
+    },
     "common": {
         "cancel": "Cancel",
         "error": "Error",
