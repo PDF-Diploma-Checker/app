@@ -81,17 +81,23 @@ class PrintedPageNumbersTest(unittest.TestCase):
         RedactionValidator.check_toc(validator)
         self.assertEqual([e.category for e in errors], ["TOC_mismatch"])
 
-    def test_consistent_numbering_is_not_an_error(self):
-        for shift in (0, 1, 3):
+    def test_numbering_with_or_without_the_title_page_is_not_an_error(self):
+        for shift in (0, 1):
             validator, errors = self._shifted_document(shift)
             RedactionValidator.check_footers(validator)
             self.assertEqual(errors, [], shift)
 
+    def test_wrong_start_is_reported_once_and_the_lists_stay_checkable(self):
+        validator, errors = self._shifted_document(3)
+        RedactionValidator.check_footers(validator)
+        self.assertEqual([e.category for e in errors], ["Wrong_page_numbering_start"])
+        self.assertIn("Wykryto: 4, oczekiwano: 2", errors[0].comments)
+
     def test_one_page_out_of_line_is_reported_with_the_expected_number(self):
-        validator, errors = _validator([_page(n, f"Rozdział {n}", footer=99 if n == 4 else n + 2) for n in range(1, 8)])
+        validator, errors = _validator([_page(n, f"Rozdział {n}", footer=99 if n == 4 else n + 1) for n in range(1, 8)])
         RedactionValidator.check_footers(validator)
         self.assertEqual([e.category for e in errors], ["Wrong_page_number", "numeration_invalid"])
-        self.assertIn("Wykryto: 99, oczekiwano: 6", errors[0].comments)
+        self.assertIn("Wykryto: 99, oczekiwano: 5", errors[0].comments)
 
     def test_figures_and_tables_on_a_shifted_document(self):
         image = NS(description="Rysunek 1. Schemat systemu.")

@@ -25,6 +25,9 @@ def _comparable_title(text):
     return " ".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
 
 
+VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
+
+
 def _footer_number(page):
     """The page number printed in the footer of a page, None when there is none."""
     for block in page.text_blocks:
@@ -1285,6 +1288,28 @@ class RedactionValidator:
                     page_number=page_nr,
                     bounding_box=bbox,
                     text=raw_text,
+                    comments=comment,
+                )
+            )
+
+        # A thesis numbered from a wrong start is reported once. Its lists can still be checked: they use the same numbers.
+        # Errors on page 0 are dropped with the title page, so it is reported on the first page after it.
+        page = next((p for p in self.document_data.pages if p.number > 0 and _footer_number(p) is not None), None)
+        if offset not in VALID_PAGE_OFFSETS and page is not None:
+            printed, expected = _footer_number(page), page.number + 1
+            if lang == "en":
+                comment = f"The page numbering starts from a wrong number. Detected: {printed}, expected: {expected}."
+            else:
+                comment = f"Numeracja stron zaczyna się od złego numeru. Wykryto: {printed}, oczekiwano: {expected}."
+            footer = next(b for b in page.text_blocks if b.block_type == "footer")
+            self.errors.append(
+                Error(
+                    id=self._get_next_id(),
+                    module=self.module,
+                    category="Wrong_page_numbering_start",
+                    page_number=page.number,
+                    bounding_box=footer.bbox,
+                    text=str(printed),
                     comments=comment,
                 )
             )
