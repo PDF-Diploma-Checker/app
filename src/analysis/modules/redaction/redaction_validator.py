@@ -970,6 +970,8 @@ class RedactionValidator:
             comment = "Wykryto brak spisu tabel."
 
         if self.document_data.tot is None:
+            if not any(table.description for page in self.document_data.pages for table in page.tables):
+                return                  # no table to list
             error = Error(
                 id=self._get_next_id(),
                 module=self.module,
@@ -1031,6 +1033,8 @@ class RedactionValidator:
             comment = "Wykryto brak spisu rysunków."
 
         if self.document_data.tof is None:
+            if not any(image.description for page in self.document_data.pages for image in page.images):
+                return None, False      # no figure to list
             error = Error(
                 id=self._get_next_id(),
                 module=self.module,
