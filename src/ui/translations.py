@@ -101,6 +101,7 @@ PL = {
         "figures_analysis_failed": "Analiza rysunków nie powiodła się w całości: wyniki są niepełne. Szczegóły są w logu aplikacji.",
         "score_label": "Wynik punktowy",
         "off_topic_list": "Sekcje niezgodne z celem pracy:",
+        "purpose_realization": "Realizacja celu pracy",
         "figure_chip": "Rys. {num}",
     },
     "pdf_menu": {
@@ -488,6 +489,7 @@ EN = {
         "figures_analysis_failed": "The figure analysis did not fully succeed: the results are incomplete. See the application log for details.",
         "score_label": "Score",
         "off_topic_list": "Sections irrelevant to the thesis objective:",
+        "purpose_realization": "Thesis objective realization",
         "figure_chip": "Fig. {num}",
     },
     "pdf_menu": {

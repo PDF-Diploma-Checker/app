@@ -282,6 +282,31 @@ class ReportPdfFontsTest(unittest.TestCase):
         self.assertNotIn("{", text)
 
 
+class ReportPdfPurposeTest(unittest.TestCase):
+    def _text(self, grade):
+        from ui.report_pdf import build_report_pdf
+
+        data = {"content_grade": {"grade": 90, "max_grade": 100, **grade}, "image_analysis": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp, "report.pdf"))
+            build_report_pdf(data, "t.pdf", "pl", path)
+            with fitz.open(path) as doc:
+                return " ".join(" ".join(page.get_text().split()) for page in doc)
+
+    def test_reason_of_the_grade_is_in_the_report(self):
+        text = self._text({"purpose_score": 50, "purpose_reason": "Brakuje opisu implementacji."})
+        self.assertIn("Realizacja celu pracy: 50%", text)
+        self.assertIn("Brakuje opisu implementacji.", text)
+
+    def test_report_saved_before_this_change_has_no_score(self):
+        text = self._text({"purpose_reason": "Brakuje opisu implementacji."})
+        self.assertIn("Realizacja celu pracy", text)
+        self.assertNotIn("None", text)
+
+    def test_no_reason_no_section(self):
+        self.assertNotIn("Realizacja celu pracy", self._text({}))
+
+
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -308,6 +333,21 @@ class ReportPanelTest(unittest.TestCase):
         self.assertNotIn("Rys. 1:", text)
         for number in ("2", "1"):
             self.assertIn(number, text)
+
+    def test_panel_shows_the_reason_of_the_grade(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            from PySide6.QtWidgets import QApplication, QLabel
+        except ImportError as error:
+            self.skipTest(str(error))
+        from ui.report_panel import build_report_panel
+
+        QApplication.instance() or QApplication([])
+        grade = {"grade": 90, "max_grade": 100, "purpose_score": 50, "purpose_reason": "Brakuje opisu implementacji."}
+        content, _ = build_report_panel({"content_grade": grade, "image_analysis": {}}, lambda: None)
+        text = " | ".join(label.text() for label in content.findChildren(QLabel))
+        self.assertIn("50%", text)
+        self.assertIn("Brakuje opisu implementacji.", text)
 
     def test_report_saved_before_this_change_still_opens(self):
         text = self._texts({"total": 1, "bad_count": 0, "good_count": 1, "details": ["Rys. 1: Poprawny"]})
