@@ -673,3 +673,9 @@ If a CUDA out-of-memory error occurs, reduce the number of `n_gpu_layers`.
 - Using the detailed mode on non-NVIDIA graphics cards is not recommended.
 
 ---
+
+## Licencja / License
+
+Copyright (C) 2026 Natalia Płocha, Maja Mogielnicka, Aleksandra Słomska, Dorian Neumann, Zofia Narloch
+
+DiplomaChecker jest udostępniany na licencji [GNU AGPL-3.0](LICENSE). / DiplomaChecker is released under the [GNU AGPL-3.0](LICENSE).

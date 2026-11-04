@@ -13,7 +13,11 @@ from analysis.modules.llm.image_analysis.vision_engine import VisionEngine
 logger = logging.getLogger(__name__)
 
 
-FONT_QUESTION = "Is any text in this image much bigger or much smaller than the other labels?"
+# Asked about "any text", the model gave false alarms on plain charts
+FONT_QUESTION = (
+    "Look at the labels and values of this chart, not its title. "
+    "Is one of them printed at a clearly different font size than the others of its kind?"
+)
 
 
 def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl"):

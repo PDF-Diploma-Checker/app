@@ -24,6 +24,7 @@ from analysis.modules.llm.image_analysis.figures import (  # noqa: E402
     consistency_verdict,
     figure_sort_key,
     is_caption,
+    mentions_figure,
     parse_yes_no,
     reference_pattern,
 )
@@ -282,6 +283,31 @@ class ReportPdfFontsTest(unittest.TestCase):
         self.assertNotIn("{", text)
 
 
+class ReportPdfPurposeTest(unittest.TestCase):
+    def _text(self, grade):
+        from ui.report_pdf import build_report_pdf
+
+        data = {"content_grade": {"grade": 90, "max_grade": 100, **grade}, "image_analysis": {}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp, "report.pdf"))
+            build_report_pdf(data, "t.pdf", "pl", path)
+            with fitz.open(path) as doc:
+                return " ".join(" ".join(page.get_text().split()) for page in doc)
+
+    def test_reason_of_the_grade_is_in_the_report(self):
+        text = self._text({"purpose_score": 50, "purpose_reason": "Brakuje opisu implementacji."})
+        self.assertIn("Realizacja celu pracy: 50%", text)
+        self.assertIn("Brakuje opisu implementacji.", text)
+
+    def test_report_saved_before_this_change_has_no_score(self):
+        text = self._text({"purpose_reason": "Brakuje opisu implementacji."})
+        self.assertIn("Realizacja celu pracy", text)
+        self.assertNotIn("None", text)
+
+    def test_no_reason_no_section(self):
+        self.assertNotIn("Realizacja celu pracy", self._text({}))
+
+
 class ReportPanelTest(unittest.TestCase):
     def _texts(self, image_analysis):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -309,6 +335,21 @@ class ReportPanelTest(unittest.TestCase):
         for number in ("2", "1"):
             self.assertIn(number, text)
 
+    def test_panel_shows_the_reason_of_the_grade(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            from PySide6.QtWidgets import QApplication, QLabel
+        except ImportError as error:
+            self.skipTest(str(error))
+        from ui.report_panel import build_report_panel
+
+        QApplication.instance() or QApplication([])
+        grade = {"grade": 90, "max_grade": 100, "purpose_score": 50, "purpose_reason": "Brakuje opisu implementacji."}
+        content, _ = build_report_panel({"content_grade": grade, "image_analysis": {}}, lambda: None)
+        text = " | ".join(label.text() for label in content.findChildren(QLabel))
+        self.assertIn("50%", text)
+        self.assertIn("Brakuje opisu implementacji.", text)
+
     def test_report_saved_before_this_change_still_opens(self):
         text = self._texts({"total": 1, "bad_count": 0, "good_count": 1, "details": ["Rys. 1: Poprawny"]})
         self.assertNotIn("Rys. 1:", text)
@@ -318,6 +359,57 @@ class ReportPanelTest(unittest.TestCase):
 
         summary = build_image_summary([{"obrazek": "Rys. 1", "poprawnosc_danych": "True", "bledy": "None"}])
         self.assertEqual(summary["problem_details"], [])
+
+
+
+class FigureMentionFormsTest(unittest.TestCase):
+    def test_forms_a_thesis_uses(self):
+        for text in ("Jak widać na rysunku nr 3.1, dane rosną.", "Na rysunku numer 3.1 dane rosną.", "Na obrazie 3.1 widać dane.",
+                     "Na rysunku 3. 1 widać dane.", "Na rysunkach od 2.9 do 3.1 pokazano dane.", "Rysunki 2.9–3.1 pokazują dane."):
+            self.assertTrue(mentions_figure(text, "3.1"), text)
+
+    def test_number_inside_a_range(self):
+        self.assertTrue(mentions_figure("Rysunki 3.1-3.3 pokazują dane.", "3.2"))
+        self.assertTrue(mentions_figure("Rysunki 1-3 pokazują dane.", "2"))
+        self.assertFalse(mentions_figure("Rysunki 3.1-3.3 pokazują dane.", "3.4"))
+        self.assertFalse(mentions_figure("Rysunki 3.1-3.3 pokazują dane.", "2.2"))
+
+    def test_reference_that_lost_its_word(self):
+        self.assertTrue(mentions_figure("Architektura znajduje się na 2.2 [17].", "2.2"))
+        self.assertFalse(mentions_figure("Taktowanie zmieniono na 2.2 GHz.", "2.2"))
+        self.assertFalse(mentions_figure("Liczbę zmieniono na 2.", "2"))
+
+    def test_other_numbers_are_not_a_mention(self):
+        for text in ("Na rysunku 3.10 widać dane.", "Na rysunku 13.1 widać dane.", "Rozdział 3.1 opisuje dane."):
+            self.assertFalse(mentions_figure(text, "3.1"), text)
+
+    def test_short_sentence_about_a_figure_is_not_its_caption(self):
+        self.assertFalse(is_caption("Rysunek 3.1 przedstawia schemat.", "3.1"))
+        self.assertFalse(is_caption("Rys. 3.1 pokazuje wynik.", "3.1"))
+        self.assertFalse(is_caption("Rysunek 3.1 - przedstawia schemat układu, który działa w opisany dalej sposób.", "3.1"))
+        self.assertFalse(is_caption("Figure 3.1 shows the result.", "3.1"))
+
+    def test_caption_merged_with_the_paragraph_about_the_figure(self):
+        self.assertFalse(is_caption("Rysunek 3.1: Schemat układu. Na rysunku 3.1 widać dane opisane wyżej.", "3.1"))
+
+    def test_captions_stay_captions(self):
+        for text in ("Rysunek 3.1: Przedstawienie procesu", "Rysunek 3.1. Schemat procesu.", "Rysunek 3.1 Schemat procesu", "Rys. 3.1 Schemat",
+                     "Rysunek 3.1: Schemat procesu zbierania danych o nieruchomościach wykonany w programie [12]"):
+            self.assertTrue(is_caption(text, "3.1"), text)
+
+
+class ReferencesAcrossSeriesTest(unittest.TestCase):
+    def references(self, paragraphs, img, images):
+        return ReferenceMatcher().references_to(paragraphs, img, images)
+
+    def test_figure_called_by_another_word_in_the_text(self):
+        img = {"number": "3.1", "family": "rys"}
+        self.assertEqual(self.references(["Na schemacie 3.1 widać dane."], img, [img]), ["Na schemacie 3.1 widać dane."])
+
+    def test_word_of_another_series_with_the_same_number_is_that_figure(self):
+        figure, chart = {"number": "1", "family": "rys"}, {"number": "1", "family": "wykres"}
+        self.assertEqual(self.references(["Na wykresie 1 widać dane."], figure, [figure, chart]), [])
+
 
 
 if __name__ == "__main__":

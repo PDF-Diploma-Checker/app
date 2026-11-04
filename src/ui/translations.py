@@ -1,6 +1,12 @@
 """UI phrase tables. Keys are nested and flattened to dotted paths, e.g. "start.title"; placeholders use str.format syntax: {name}."""
 
 PL = {
+    "license": {
+        "title": "Licencja i warunki korzystania",
+        "accept": "Akceptuję",
+        "decline": "Nie akceptuję",
+        "close": "Zamknij",
+    },
     "common": {
         "cancel": "Anuluj",
         "error": "Błąd",
@@ -101,6 +107,7 @@ PL = {
         "figures_analysis_failed": "Analiza rysunków nie powiodła się w całości: wyniki są niepełne. Szczegóły są w logu aplikacji.",
         "score_label": "Wynik punktowy",
         "off_topic_list": "Sekcje niezgodne z celem pracy:",
+        "purpose_realization": "Realizacja celu pracy",
         "figure_chip": "Rys. {num}",
     },
     "pdf_menu": {
@@ -217,6 +224,7 @@ PL = {
         "models_no_runtime": "Ta wersja aplikacji nie zawiera modułu AI (wersja base).",
         "download_models": "Pobierz modele",
         "version": "Wersja aplikacji: {version}",
+        "license": "Licencja",
         "device_desc": "Karta graficzna (cuda) jest dużo szybsza; procesor (cpu) działa na każdym komputerze.",
         "gpu_layers_desc": "Ile warstw modelu trafia na kartę graficzną. Zmniejsz, jeśli brakuje VRAM.",
         "default_language_desc": "Język, w którym domyślnie pisane są analizowane prace.",
@@ -388,6 +396,12 @@ PL = {
 }
 
 EN = {
+    "license": {
+        "title": "License and terms of use",
+        "accept": "I accept",
+        "decline": "I do not accept",
+        "close": "Close",
+    },
     "common": {
         "cancel": "Cancel",
         "error": "Error",
@@ -488,6 +502,7 @@ EN = {
         "figures_analysis_failed": "The figure analysis did not fully succeed: the results are incomplete. See the application log for details.",
         "score_label": "Score",
         "off_topic_list": "Sections irrelevant to the thesis objective:",
+        "purpose_realization": "Thesis objective realization",
         "figure_chip": "Fig. {num}",
     },
     "pdf_menu": {
@@ -604,6 +619,7 @@ EN = {
         "models_no_runtime": "This version of the app has no AI module (base version).",
         "download_models": "Download models",
         "version": "App version: {version}",
+        "license": "License",
         "device_desc": "A graphics card (cuda) is much faster; the processor (cpu) works on any computer.",
         "gpu_layers_desc": "How many model layers are placed on the graphics card. Lower it if you run out of VRAM.",
         "default_language_desc": "The language theses are assumed to be written in by default.",

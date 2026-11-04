@@ -2,7 +2,7 @@ import json
 import logging
 
 from analysis.modules.llm import config
-from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, image_text, is_caption
+from analysis.modules.llm.image_analysis.figures import collect_figures, consistency_verdict, image_text
 from analysis.modules.llm.image_analysis.vision_engine import VisionEngine, too_small_to_read
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
@@ -41,8 +41,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     final_report = []
 
     for img in images:
-        raw_refs = matcher.find_references(paragraphs, img["number"], img["family"])
-        refs = [r for r in raw_refs if not is_caption(r, img["number"], img["family"])]
+        refs = matcher.references_to(paragraphs, img, images)
 
         if not refs:
             final_report.append({

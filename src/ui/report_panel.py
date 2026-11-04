@@ -253,6 +253,12 @@ def build_report_panel(report_data, on_download):
         if off_topic > 0 and headings:
             lay.addWidget(_label(t("main.off_topic_list"), f"font-size: 13px; font-weight: 700; color: {styles.DANGER}; {TRANSPARENT}"))
             lay.addWidget(_bullets(headings, styles.DANGER_DOT))
+        reason = grade_info.get("purpose_reason") if isinstance(grade_info, dict) else None
+        if reason:
+            score = grade_info.get("purpose_score")
+            lay.addWidget(_label(t("main.purpose_realization") + (f": {_fmt(score)}%" if score is not None else ""),
+                                 f"font-size: 13px; font-weight: 700; color: {styles.TEXT}; {TRANSPARENT}"))
+            lay.addWidget(_label(reason, f"font-size: 13px; color: {styles.TEXT_2}; {TRANSPARENT}"))
     root.addWidget(card)
 
     # ---- figures
