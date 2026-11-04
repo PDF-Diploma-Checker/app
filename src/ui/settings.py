@@ -11,7 +11,7 @@ from . import icons, styles
 from .i18n import t
 from .message_box import MessageBox
 from .ai_setup_dialog import AiSetupDialog
-from .eula_dialog import EulaDialog
+from .license_dialog import LicenseDialog
 from .model_download_dialog import download_models
 from common import gpu_check
 from common.version import APP_VERSION
@@ -270,12 +270,12 @@ class SettingsDialog(QDialog):
         version_label.setStyleSheet(styles.HINT_STYLE)
         version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         btn_layout.addWidget(version_label, 0, Qt.AlignVCenter)
-        btn_eula = QPushButton(t("settings.eula"))
-        btn_eula.setFixedHeight(42)
-        btn_eula.setStyleSheet(styles.GRAY_BUTTON_STYLE)
-        btn_eula.setCursor(Qt.PointingHandCursor)
-        btn_eula.clicked.connect(lambda: EulaDialog(self).exec())
-        btn_layout.addWidget(btn_eula, 0, Qt.AlignVCenter)
+        btn_license = QPushButton(t("settings.license"))
+        btn_license.setFixedHeight(42)
+        btn_license.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        btn_license.setCursor(Qt.PointingHandCursor)
+        btn_license.clicked.connect(lambda: LicenseDialog(self).exec())
+        btn_layout.addWidget(btn_license, 0, Qt.AlignVCenter)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)

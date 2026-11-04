@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 from PySide6.QtWidgets import QApplication, QMessageBox
 from analysis.modules.llm.config import check_and_download_requirements, java_available, llm_runtime_available
 from ui import styles
-from ui.eula_dialog import ensure_accepted
+from ui.license_dialog import ensure_accepted
 from ui.main_window import PDFReader
 
 SMOKE_MODULES = [
