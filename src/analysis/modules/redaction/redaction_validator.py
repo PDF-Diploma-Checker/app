@@ -9,6 +9,7 @@ from analysis.extraction.raw_extraction.bare_struct import DocumentData
 from analysis.extraction.linguistics_conversion.schema import FinalDocument
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper, get_acronym_pages
 from common.errors.error_struct import Error, FileError, Module
+from collections import Counter
 from dataclasses import dataclass
 from typing import List
 import json
@@ -23,6 +24,31 @@ def _comparable_title(text):
     the text it is looked for in has to go through the same cleaning (see front_and_back_matter). Spaces do not count:
     extraction can add one next to a bracket or a math symbol."""
     return "".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
+
+
+VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
+
+
+def _footer_number(page):
+    """The page number printed in the footer of a page, None when there is none."""
+    for block in page.text_blocks:
+        if block.block_type == "footer":
+            text = " ".join(span.text for line in block.lines for span in line.spans)
+            match = re.search(r"\d+", text)
+            if match:
+                return int(match.group())
+    return None
+
+
+def _printed_page_offset(document_data):
+    """How much the numbers printed on the pages differ from page.number. Theses leave out different front pages from
+    the numbering, so what counts as a page's number is what most of the document prints."""
+    differences = Counter(
+        number - page.number
+        for page in document_data.pages
+        if (number := _footer_number(page)) is not None
+    )
+    return differences.most_common(1)[0][0] if differences else 0
 
 
 @dataclass
@@ -921,8 +947,9 @@ class RedactionValidator:
             is_toc = False
             return None, is_toc
 
+        offset = _printed_page_offset(self.document_data)
         for entry in self.document_data.toc.entries:
-            expected_page = entry.page
+            expected_page = entry.page - offset
             expected_title = _comparable_title(entry.title)
             correct_page = False
 
@@ -984,12 +1011,13 @@ class RedactionValidator:
             self.errors.append(error)
             return
 
+        offset = _printed_page_offset(self.document_data)
         for entry in self.document_data.tot.entries:
             expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
-                if page.number == entry.page:
+                if page.number + offset == entry.page:
                     for table in page.tables:
                         if not table.description:
                             continue
@@ -1048,12 +1076,13 @@ class RedactionValidator:
             is_toc = False
             return None, is_toc
 
+        offset = _printed_page_offset(self.document_data)
         for entry in self.document_data.tof.entries:
             expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
-                if page.number == entry.page:
+                if page.number + offset == entry.page:
                     for image in page.images:
                         if not image.description:
                             continue
@@ -1089,6 +1118,7 @@ class RedactionValidator:
     def check_footers(self):
         first_chapter_page = None
         lang = getattr(self, "language", "pl")
+        offset = _printed_page_offset(self.document_data)
         keywords = [
             "streszczenie",
             "abstract",
@@ -1172,7 +1202,7 @@ class RedactionValidator:
             and self.document_data.toc
             and self.document_data.toc.entries
         ):
-            first_chapter_page = self.document_data.toc.entries[0].page
+            first_chapter_page = self.document_data.toc.entries[0].page - offset
 
         wrong_pages = []
         for page in self.document_data.pages:
@@ -1236,7 +1266,7 @@ class RedactionValidator:
 
                     if match:
                         detected_num = int(match.group(1))
-                        if detected_num != page.number:
+                        if detected_num != page.number + offset:
                             wrong_pages.append(
                                 (page.number, detected_num, footer_block.bbox, raw_text)
                             )
@@ -1247,11 +1277,11 @@ class RedactionValidator:
             page_nr, detected_num, bbox, raw_text = wrong_pages[0]
             other_pages = ", ".join(str(p[0]) for p in wrong_pages[1:])
             if lang == "en":
-                comment = f"Invalid page number. Detected: {detected_num}, expected: {page_nr}."
+                comment = f"Invalid page number. Detected: {detected_num}, expected: {page_nr + offset}."
                 if other_pages:
                     comment += f" Check the following pages as well - incorrect numbering also detected on pages: {other_pages}."
             else:
-                comment = f"Błędny numer strony. Wykryto: {detected_num}, oczekiwano: {page_nr}."
+                comment = f"Błędny numer strony. Wykryto: {detected_num}, oczekiwano: {page_nr + offset}."
                 if other_pages:
                     comment += f" Sprawdź również kolejne strony - błędną numerację wykryto także na stronach: {other_pages}."
 
@@ -1263,6 +1293,28 @@ class RedactionValidator:
                     page_number=page_nr,
                     bounding_box=bbox,
                     text=raw_text,
+                    comments=comment,
+                )
+            )
+
+        # A thesis numbered from a wrong start is reported once. Its lists can still be checked: they use the same numbers.
+        # Errors on page 0 are dropped with the title page, so it is reported on the first page after it.
+        page = next((p for p in self.document_data.pages if p.number > 0 and _footer_number(p) is not None), None)
+        if offset not in VALID_PAGE_OFFSETS and page is not None:
+            printed, expected = _footer_number(page), page.number + 1
+            if lang == "en":
+                comment = f"The page numbering starts from a wrong number. Detected: {printed}, expected: {expected}."
+            else:
+                comment = f"Numeracja stron zaczyna się od złego numeru. Wykryto: {printed}, oczekiwano: {expected}."
+            footer = next(b for b in page.text_blocks if b.block_type == "footer")
+            self.errors.append(
+                Error(
+                    id=self._get_next_id(),
+                    module=self.module,
+                    category="Wrong_page_numbering_start",
+                    page_number=page.number,
+                    bounding_box=footer.bbox,
+                    text=str(printed),
                     comments=comment,
                 )
             )

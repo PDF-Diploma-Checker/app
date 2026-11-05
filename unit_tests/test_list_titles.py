@@ -12,8 +12,11 @@ def _line(text):
     return NS(spans=[NS(text=text)])
 
 
-def _page(number, *lines, images=(), tables=()):
-    return NS(number=number, text_blocks=[NS(lines=[_line(t) for t in lines])], images=list(images), tables=list(tables))
+def _page(number, *lines, images=(), tables=(), footer=None):
+    blocks = [NS(lines=[_line(t) for t in lines], block_type="text")]
+    if footer is not None:
+        blocks.append(NS(lines=[_line(str(footer))], block_type="footer", bbox=(290, 800, 300, 810)))
+    return NS(number=number, text_blocks=blocks, images=list(images), tables=list(tables), width=595, height=842)
 
 
 def _entry(title, page):
@@ -59,6 +62,51 @@ class ListTitlesTest(unittest.TestCase):
         table = NS(description="Tabela 1. Wyniki - zestawienie.")
         validator, errors = _validator([_page(5, images=[image], tables=[table])],
                                        tof=[_entry("Schemat widok ogólny", 5)], tot=[_entry("Wyniki zestawienie", 5)])
+        RedactionValidator.check_tof(validator)
+        RedactionValidator.check_tot(validator)
+        self.assertEqual(errors, [])
+
+
+class PrintedPageNumbersTest(unittest.TestCase):
+    """Page 0 is the title page, and theses leave different front pages out of the numbering."""
+
+    def _shifted_document(self, shift, **lists):
+        return _validator([_page(n, f"Rozdział {n}", footer=n + shift) for n in range(1, 8)], **lists)
+
+    def test_lists_use_the_numbers_printed_on_the_pages(self):
+        for shift in (0, 1, 2, 3):
+            validator, errors = self._shifted_document(shift, toc=[_entry("Rozdział 4", 4 + shift)])
+            RedactionValidator.check_toc(validator)
+            self.assertEqual(errors, [], shift)
+
+    def test_wrong_page_in_a_list_is_still_reported(self):
+        validator, errors = self._shifted_document(2, toc=[_entry("Rozdział 4", 5)])
+        RedactionValidator.check_toc(validator)
+        self.assertEqual([e.category for e in errors], ["TOC_mismatch"])
+
+    def test_numbering_with_or_without_the_title_page_is_not_an_error(self):
+        for shift in (0, 1):
+            validator, errors = self._shifted_document(shift)
+            RedactionValidator.check_footers(validator)
+            self.assertEqual(errors, [], shift)
+
+    def test_wrong_start_is_reported_once_and_the_lists_stay_checkable(self):
+        validator, errors = self._shifted_document(3)
+        RedactionValidator.check_footers(validator)
+        self.assertEqual([e.category for e in errors], ["Wrong_page_numbering_start"])
+        self.assertIn("Wykryto: 4, oczekiwano: 2", errors[0].comments)
+
+    def test_one_page_out_of_line_is_reported_with_the_expected_number(self):
+        validator, errors = _validator([_page(n, f"Rozdział {n}", footer=99 if n == 4 else n + 1) for n in range(1, 8)])
+        RedactionValidator.check_footers(validator)
+        self.assertEqual([e.category for e in errors], ["Wrong_page_number", "numeration_invalid"])
+        self.assertIn("Wykryto: 99, oczekiwano: 5", errors[0].comments)
+
+    def test_figures_and_tables_on_a_shifted_document(self):
+        image = NS(description="Rysunek 1. Schemat systemu.")
+        table = NS(description="Tabela 1. Wyniki badań.")
+        pages = [_page(1, footer=3), _page(2, footer=4, images=[image], tables=[table]), _page(3, footer=5)]
+        validator, errors = _validator(pages, tof=[_entry("Schemat systemu", 4)], tot=[_entry("Wyniki badań", 4)])
         RedactionValidator.check_tof(validator)
         RedactionValidator.check_tot(validator)
         self.assertEqual(errors, [])
