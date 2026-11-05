@@ -39,7 +39,7 @@ for pkg in ("llama_cpp", "sentence_transformers"):
 hiddenimports += collect_submodules("analysis")
 hiddenimports += collect_submodules("ui")
 hiddenimports += collect_submodules("common")
-hiddenimports += collect_submodules("app", filter=lambda n: n != "app.main")
+hiddenimports += collect_submodules("app", filter=lambda n: n != "app.launcher")
 # only what the app reads at run time: test data and saved results (with the text of real theses) stay out of the build
 datas += collect_data_files("analysis", excludes=[
     "**/wyniki/**", "**/evaluation/**", "**/redaction_debug/**", "**/example_img/**", "**/support_scripts/**",
@@ -60,7 +60,7 @@ datas.append(("LICENSE", "."))
 print(f"[spec] building version {_version}")
 
 a = Analysis(
-    ["src/app/main.py"],
+    ["src/app/launcher.py"],
     pathex=["src"],
     binaries=binaries,
     datas=datas,
@@ -71,6 +71,9 @@ a = Analysis(
     excludes=[],
     noarchive=False,
     optimize=0,
+    # plain files next to the executable: a change in our code touches them and not the executable, so an update
+    # downloads kilobytes and tools/patch_code.py can change a finished build. Only the libraries stay inside.
+    module_collection_mode={"ui": "py", "common": "py", "analysis": "py", "app": "py"},
 )
 pyz = PYZ(a.pure)
 

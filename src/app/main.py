@@ -2,12 +2,7 @@ import logging
 import os
 import sys
 
-if getattr(sys, "frozen", False):
-    # Windowed build has no console: stdout/stderr are None and break tqdm & co.
-    for _name in ("stdout", "stderr"):
-        if getattr(sys, _name) is None:
-            setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
-else:
+if not getattr(sys, "frozen", False):        # in a build app/launcher.py starts this file
     _SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if _SRC not in sys.path:
         sys.path.insert(0, _SRC)
@@ -19,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from analysis.modules.llm.config import check_and_download_requirements, java_available, llm_runtime_available
-from ui import styles
+from common import crash_log
+from ui import error_dialog, styles
 from ui.license_dialog import ensure_accepted
 from ui.main_window import PDFReader
 
@@ -40,7 +36,9 @@ def smoke_test():
 
     modules = list(SMOKE_MODULES)
     if llm_runtime_available():     # the base variant has no AI libraries
-        modules += ["analysis.modules.llm.image_analysis.run_image", "analysis.modules.llm.image_analysis.font_checker",
+        # similarity pulls in sentence_transformers, sklearn and scipy, which can fail to import only when frozen
+        modules += ["analysis.modules.llm.similarity", "analysis.modules.llm.get_grade",
+                    "analysis.modules.llm.image_analysis.run_image", "analysis.modules.llm.image_analysis.font_checker",
                     "analysis.modules.llm.image_analysis.axis_checker",
                     "analysis.modules.llm.image_analysis.image_quality_checker"]
     for name in modules:
@@ -74,9 +72,9 @@ def analysis_test(pdf_path):
 
     result = getattr(run_analysis_for_pdf(pdf_path, use_llm=True), "llm_result", None)
     images = (result or {}).get("image_analysis") or {}
-    ok = bool(result) and not images.get("analysis_failed")
+    ok = bool(result) and not images.get("analysis_failed") and not result.get("analysis_error")
     with open("analysis_test.log", "w", encoding="utf-8") as f:
-        f.write(("ANALYSIS OK " if ok else "ANALYSIS FAILED ") + repr(images) + "\n")
+        f.write(("ANALYSIS OK " if ok else "ANALYSIS FAILED ") + repr((result or {}).get("analysis_error") or images) + "\n")
     return 0 if ok else 1
 
 
@@ -102,6 +100,8 @@ def _show_update_result(result):
 def main():
     app = QApplication(sys.argv)
     styles.apply_global_style(app)
+    crash_log.enable()
+    error_dialog.install()
     if not ensure_accepted():
         sys.exit(0)
     check_and_download_requirements()
@@ -114,12 +114,15 @@ def main():
     update_result = _finish_pending_update()
     window = PDFReader()
     window.show()
+    if crash_log.previous_analysis_crashed():
+        from ui.i18n import t
+        QMessageBox.warning(window, t("analysis.crashed_title"), t("analysis.crashed_text"))
     if update_result:
         _show_update_result(update_result)
     sys.exit(app.exec())
 
 
-if __name__ == "__main__":
+def run():
     if "--smoke-test" in sys.argv:
         sys.exit(smoke_test())
     if "--analysis-test" in sys.argv:
@@ -129,3 +132,7 @@ if __name__ == "__main__":
     except Exception:
         logger.exception("Unhandled exception, application terminating")
         raise
+
+
+if __name__ == "__main__":
+    run()

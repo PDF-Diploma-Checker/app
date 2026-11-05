@@ -18,6 +18,7 @@ from analysis.modules.llm.config import (
 
 from common import eta, gpu_check, run_control
 from common.resource_monitor import ResourceMonitor
+from common import crash_log
 from common.cancellation import AnalysisCancelled, CancelToken
 
 from . import icons, styles
@@ -173,6 +174,7 @@ class PipelineWorker(QThread):
     def run(self):
         # code deep in the analysis (the AI models) reports its status and checks for a cancel through run_control
         run_control.bind(self.cancel_token, self._report_progress)
+        crash_log.analysis_started(self.pdf_path)
         try:
             self._report_progress(5, t("analysis.checking_language"))
             download_specific_language(self.language)
@@ -276,6 +278,7 @@ class PipelineWorker(QThread):
             logger.exception("Analysis pipeline failed")
             self.finished_error.emit(str(e))
         finally:
+            crash_log.analysis_finished()
             run_control.unbind()
 
 
@@ -299,6 +302,7 @@ class AnalysisDialog(QDialog):
         self.ai_available = llm_runtime_available()
         self.models_available = are_ai_models_downloaded() if self.ai_available else False
         self._close_after_cancel = False
+        self._cancel_started = None
         self.monitor = None
         self._eta_doc = None
         self._eta_hw = None
@@ -327,6 +331,16 @@ class AnalysisDialog(QDialog):
             return (t("analysis.device_line_gpu", layers="max" if layers < 0 else layers),
                     styles.SUCCESS, styles.SUCCESS_BG)
         return t("analysis.device_line_cpu"), styles.WARNING, styles.WARNING_BG
+
+    def _update_gpu_warning(self):
+        """Warn about a card too small for the models. The hardware facts arrive later than the choice of the mode."""
+        hw = self._eta_hw or {}
+        vram = hw.get("vram_gb", 0.0)
+        weak = self.btn_dokladny.isChecked() and gpu_check.is_weak_gpu(vram)
+        if weak:
+            self.gpu_warning_label.setText(t("analysis.weak_gpu", name=hw.get("gpu_name", "GPU"), vram=f"{vram:.1f}",
+                                             needed=f"{gpu_check.GOOD_VRAM_GB:.0f}"))
+        self.gpu_warning_label.setVisible(weak)
 
     def _update_device_line(self):
         text, color, bg = self._device_line()
@@ -362,12 +376,14 @@ class AnalysisDialog(QDialog):
         self.btn_dokladny.setChecked(False)
         self.cb_images.setVisible(False)
         self.gpu_info_label.setVisible(False)
+        self.gpu_warning_label.setVisible(False)
         self.setup_link.setVisible(False)
         self.mode_hint_label.setVisible(True)
 
     # ------------------------------------------------------------ time estimate
     def _on_eta_inputs(self, doc, hw):
         self._eta_doc, self._eta_hw, self._eta_ready = doc, hw, True
+        self._update_gpu_warning()
         self._update_eta()
 
     def _current_estimate(self):
@@ -558,6 +574,14 @@ class AnalysisDialog(QDialog):
         self.gpu_info_label.setWordWrap(True)
         self.gpu_info_label.setVisible(False)
 
+        self.gpu_warning_label = QLabel()
+        self.gpu_warning_label.setWordWrap(True)
+        self.gpu_warning_label.setVisible(False)
+        self.gpu_warning_label.setStyleSheet(
+            f"font-size: 13px; color: {styles.WARNING}; background-color: {styles.WARNING_BG}; "
+            "border: none; border-radius: 8px; padding: 8px 10px;"
+        )
+
         self.setup_link = QPushButton(t("analysis.check_system"))
         self.setup_link.setCursor(Qt.PointingHandCursor)
         self.setup_link.setStyleSheet(styles.LINK_BUTTON_STYLE)
@@ -569,6 +593,7 @@ class AnalysisDialog(QDialog):
         mode_section.addWidget(self.mode_hint_label)
         mode_section.addWidget(self.cb_images)
         mode_section.addWidget(self.gpu_info_label)
+        mode_section.addWidget(self.gpu_warning_label)
         mode_section.addWidget(self.setup_link, alignment=Qt.AlignLeft)
 
         self.eta_label = QLabel(t("analysis.eta_calc"))
@@ -601,6 +626,7 @@ class AnalysisDialog(QDialog):
             self._update_device_line()
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
+            self._update_gpu_warning()
             self.setup_link.setVisible(True)
             self.mode_hint_label.setVisible(False)
             self._update_eta()
@@ -626,6 +652,7 @@ class AnalysisDialog(QDialog):
             f"font-size: 24px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
         )
         self.eta_detail_label = QLabel()
+        self.eta_detail_label.setWordWrap(True)
         self.eta_detail_label.setStyleSheet(styles.HINT_STYLE)
 
         # current step + percent above the bar
@@ -899,12 +926,22 @@ class AnalysisDialog(QDialog):
         self.worker.progress_update.disconnect(self.update_progress)
         self.worker.finished.connect(self._on_worker_cancelled)
         self.cancel_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        logger.info("Cancel requested by the user")
+        self._cancel_started = time.monotonic()
         self.progress_label.setText(t("analysis.cancelling"))
+        self.eta_left_label.setText(t("analysis.cancelling_title"))
+        self.eta_detail_label.setText(t("analysis.cancelling_note"))
+        self.pbar.setRange(0, 0)        # keeps moving: the window is not frozen, it waits for the current step
         if self.worker.isFinished():
             # The thread ended before the connection was made.
             self._on_worker_cancelled()
 
     def _on_worker_cancelled(self):
+        if self._cancel_started is not None:
+            logger.info("The analysis stopped %.1f s after the cancel request", time.monotonic() - self._cancel_started)
+            self._cancel_started = None
+        self.pbar.setRange(0, 100)
         self.cancel_btn.setEnabled(True)
         if self._close_after_cancel:
             self._close_after_cancel = False
