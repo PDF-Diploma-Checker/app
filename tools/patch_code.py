@@ -30,7 +30,9 @@ VERSION_ONLY = ("pyproject.toml", "uv.lock")
 
 
 def git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    # utf-8: the sources hold Polish letters, and on Windows text mode would read them in the local code page
+    return subprocess.run(["git", *args], cwd=ROOT, check=True, capture_output=True, encoding="utf-8",
+                          errors="replace").stdout
 
 
 def changed_files(since):
@@ -119,7 +121,10 @@ def main(argv=None):
     parser.add_argument("--dist", type=Path, default=ROOT / "dist")
     args = parser.parse_args(argv)
 
-    changes = changed_files(args.since)
+    try:
+        changes = changed_files(args.since)
+    except subprocess.CalledProcessError as e:
+        sys.exit(f"git does not know {args.since}. Run: git fetch origin --tags\n{e.stderr}")
     blocked = needs_full_build(args.since, changes)
     if blocked:
         sys.exit("These changes need a full build:\n  " + "\n  ".join(blocked))
