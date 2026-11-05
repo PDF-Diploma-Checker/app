@@ -3,6 +3,7 @@ import re
 from .helpers import lemmatization, font_family
 from .proper_check import check_if_proper
 from .typos_final_filter import refine_typos
+from .decision_log import dropped_match
 import string
 import logging
 
@@ -27,32 +28,42 @@ def check_exeptions(matches, blocks, proper_names, main_font):
                 word = match.content
                 word_clean = word.strip(string.punctuation + string.whitespace)
                 if word_clean in {p[0] for p in proper_names}:
+                    dropped_match("proper name", match, block)
                     continue
                 elif word_clean.lower() in {p[1] for p in proper_names}:
+                    dropped_match("proper name", match, block)
                     continue
                 potential_exeption = False
                 inside_quotes = check_quotes(match.offset, match.offset + match.error_length, text)
                 if not inside_quotes:
                     if remove_errors_different_font(match, block, main_font):
+                        dropped_match("font other than the main one", match, block)
                         continue
                     if match.category in {"TYPOS", "SPELLING" ,"COMPOUNDING", "SYNTAX"}:
                         try:
                             if any(letter == '-' for letter in match.content):
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                             elif match.offset > 0 and text[match.offset - 1] == '-':
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                             elif match.offset + len(match.content) < len(text) and text[match.offset + len(match.content)] == '-':
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                         except Exception:
                             logger.exception("Failed to check adjacent characters for dash")
                         lemma = lemmatization(word, block.language)
                         if check_if_proper(block.block, match, proper_names, lemma):
+                            dropped_match("proper name in this block", match, block)
                             continue
                         potential_exeptions[lemma].append(match)
                         potential_exeption = True
                     if match.category == "CASING" and match.offset == 0:
+                        dropped_match("casing at the start of a block", match, block)
                         continue
-                if not inside_quotes and not potential_exeption:
+                if inside_quotes:
+                    dropped_match("inside quotes", match, block)
+                elif not potential_exeption:
                     valid_errors.append(match)
     exeptions = []  
     before_typo_refine = len(valid_errors)

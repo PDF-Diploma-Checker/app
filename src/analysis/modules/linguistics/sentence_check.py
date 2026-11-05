@@ -2,6 +2,7 @@ from analysis.extraction.linguistics_conversion.schema import *
 from .exeptions_check import check_quotes
 from .helpers import get_match_info, morf, nlp_pl, nlp_en
 from .linguistics_types import Error_type, Analisys_type
+from .decision_log import dropped_match
 from .proper_check import check_if_proper
 import re
 import logging
@@ -30,6 +31,11 @@ FUNCTION_TAGS = {"prep", "conj", "comp", "adv", "part", "qub", "fin", "praet", "
 NAME_INTRO = {",", "i", "oraz", "a", "przez", "według", "zdaniem", "pisze", "piszą", "pisał", "wskazuje", "również",
               "sam", "prace", "pracach", "pracę", "praca", "pracami", "publikacje", "definicji", "badania", "rozważania",
               "autorstwa", "dorobku", "wobec", "kolei"}
+
+def _token_summary(sentence):
+    '''How the language model read a sentence: word/part of speech/role, enough to judge a missing verb or subject.'''
+    return " ".join(f"{t.text}/{t.pos_}/{t.dep_}" for t in list(sentence)[:40])
+
 
 def morfeusz_pos(word):
     '''
@@ -178,10 +184,14 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                                 page_start = start_page,
                                 page_end = end_page,
                                 word_idxs = word_idxs,
-                                error_coordinate= error_coordinate
-                                )   
+                                error_coordinate= error_coordinate,
+                                rule="first_person",
+                                why=f"{token.text}: lemma={token.lemma_} morph={token.morph}",
+                                )
                                 if not check_quotes(match.offset, match.offset + match.error_length, text) and not check_if_proper(block.block, match, is_diff = True):
                                     checked_matches.append(match)
+                                else:
+                                    dropped_match("quote or proper name", match, block)
                     if token.dep_ in {'nsubj', 'nsubj:pass', 'nsubjpass', 'attr'}:
                         is_subject = True
                     if token.pos_ in {'VERB', 'AUX'}:
@@ -249,11 +259,15 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
                     page_start = start_page,
                     page_end = end_page,
                     word_idxs = word_idxs,
-                    error_coordinate= error_coordinate
+                    error_coordinate= error_coordinate,
+                    rule="sentence_parts",
+                    why=f"subject found={is_subject}, verb found={is_verb}; tokens: {_token_summary(sentence)}",
                     )
                     #sprawdzanie czy zdanie jest cytatem, aby nie uwzględniać ich jako błędów.
                     if not check_quotes(match.offset, match.offset + match.error_length, text) and not check_if_proper(block.block, match, is_diff=True) and not definicion(block.block, word_idxs, sentence.text):
                         checked_matches.append(match)
+                    else:
+                        dropped_match("quote, proper name or definition", match, block)
                 if passive:
                     passive_count += 1
                 elif not is_verb:

@@ -6,6 +6,7 @@ import language_tool_python
 from .linguistics_types import Error_type
 from analysis.extraction.linguistics_conversion.schema import *
 from .helpers import get_match_info, morf, spell
+from .decision_log import dropped
 import string
 import logging
 from collections import Counter
@@ -143,12 +144,15 @@ def language_tool_analisys(blocks):
             for match in matches:
                 if (match.category == 'TYPOGRAPHY' or match.category == 'PUNCTUATION'):
                     if block.block.type != "paragraph":
+                        dropped("punctuation outside a paragraph", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif not any(letter.isalpha() for letter in match.matched_text):
+                        dropped("no letters in the match", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                 if match.category in {"TYPOS", "SPELLING", "COMPOUNDING", "SYNTAX"}:
                     word = contents[match.offset:match.offset + match.error_length].strip(string.punctuation + string.whitespace)
                     if typo_check(word):
+                        dropped("word known to the dictionaries", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif text_language == 'pl':
                         en_matches = tool_en.check(word)
@@ -157,6 +161,8 @@ def language_tool_analisys(blocks):
                             en_match.offset += match.offset
                             en_match.message = match.message
                         new_matches.extend(en_matches)
+                        if not en_matches:
+                            dropped("correct in English", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     else:
                         pl_matches = tool_pl.check(word)
@@ -165,6 +171,8 @@ def language_tool_analisys(blocks):
                             pl_match.offset += match.offset
                             pl_match.message = match.message
                         new_matches.extend(pl_matches)
+                        if not pl_matches:
+                            dropped("correct in Polish", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                 new_matches.append(match)
 
@@ -183,8 +191,9 @@ def language_tool_analisys(blocks):
                         message = m.message
 
                 if has_index:
+                    dropped("index entry", m.category, m.rule_id, contents, m.offset, m.error_length, block)
                     continue
-            
+
                 errors.append(Error_type(
                     content=contents[m.offset:m.offset + m.error_length],
                     category=m.category,
@@ -196,6 +205,8 @@ def language_tool_analisys(blocks):
                     page_end=end_page,
                     word_idxs=word_idxs,
                     error_coordinate=error_coordinate,
+                    rule=m.rule_id,
+                    why=f"LanguageTool {text_language}: {m.message}; suggestions: {m.replacements[:3]}",
                 ))
 
     category_counts = Counter(e.category for e in errors)

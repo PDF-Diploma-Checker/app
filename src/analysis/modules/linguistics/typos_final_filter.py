@@ -1,5 +1,6 @@
 import re
 from .language_error_extractor import typo_check
+from .decision_log import dropped
 import logging
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ def refine_typos(errors, blocks):
                 "language": lang
             }
             typos_report["resolved_typos"].append(resolved_info)
+            dropped(f"correct when joined: {resolved_word}", err.category, err.rule, contents, err.offset, err.error_length)
             logger.debug("Resolved typo: '%s' -> '%s' (Context: %s)", typo_text, resolved_word, resolved_info["context"])
         else:
             final_errors.append(err)

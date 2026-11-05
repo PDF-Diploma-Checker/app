@@ -19,6 +19,8 @@ class Error_type:
     page_end: int
     word_idxs: list[int]
     error_coordinate: list[dict]
+    rule: str = ""      # the rule of the check that found it, for the log
+    why: str = ""       # what the check saw, for the log
 
 @dataclass
 class Analisys_type:
