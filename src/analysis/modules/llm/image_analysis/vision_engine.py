@@ -19,6 +19,8 @@ READ_PROMPT = (
 )
 READ_MAX_TOKENS = 512
 YES_NO_MAX_TOKENS = 6
+ALL_NUMBERS_PROMPT = "List all numbers printed anywhere in this image, separated by semicolons. If there are none, answer NONE."
+PRINTED_MAX_TOKENS = 120
 LIST_MAX_TOKENS = 60
 MIN_READABLE_PIXELS = 150       # a shorter side below this holds no readable text, whatever the model says about it
 
@@ -93,6 +95,12 @@ class VisionEngine:
     def list_numbers(self, image_bytes, prompt):
         """The raw answer to a request for the numbers in an image."""
         return self._ask(image_bytes, prompt, LIST_MAX_TOKENS)
+
+    def printed_numbers(self, image_bytes):
+        """The numbers really printed in the image, as floats."""
+        from analysis.modules.llm.image_analysis.figures import parse_axis_numbers
+
+        return parse_axis_numbers(self._ask(image_bytes, ALL_NUMBERS_PROMPT, PRINTED_MAX_TOKENS))
 
     def is_blurry(self, image_bytes):
         """True/False, or None when the answer was neither."""

@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from analysis.modules.llm import config
 from analysis.modules.llm.image_analysis.figures import image_text
 from analysis.modules.llm.llama_factory import make_llama
@@ -36,16 +37,38 @@ def _value(text):
     return "".join(str(text).split()).lower()
 
 
-def verdict_from_answer(answer, language="pl"):
+def _same_value(in_text, in_image):
+    """A chart often prints a bare number and has its unit elsewhere: "200 errors" in the text agrees with "200"."""
+    a, b = _value(in_text), _value(in_image)
+    if a == b:
+        return True
+    number = re.fullmatch(r"\d+(?:[.,]\d+)?", b)
+    return bool(number) and re.match(rf"{re.escape(b)}(?![\d.,])", a) is not None
+
+
+def _is_printed(value, printed):
+    """True when a number of this value is really in the image. Nothing can be said when no list could be made."""
+    if printed is None:
+        return True
+    numbers = {float(number.replace(",", ".")) for number in re.findall(r"\d+(?:[.,]\d+)?", str(value))}
+    return bool(numbers & {abs(number) for number in printed})
+
+
+def verdict_from_answer(answer, language="pl", printed=None):
     """Turn the model's answer into {poprawnosc_danych, bledy}. The model also lists items whose two values are equal,
-    so the verdict is decided here from the values and not taken from the model."""
+    so the verdict is decided here from the values and not taken from the model. `printed` holds the numbers printed
+    in the image: a chart without values gets values made up when it is read, and those prove nothing against the text."""
     mismatches = answer.get("niezgodnosci") if isinstance(answer, dict) else None
     if not isinstance(mismatches, list):
         return {"poprawnosc_danych": "Error", "bledy": "None"}
     real = [
         m for m in mismatches
-        if isinstance(m, dict) and _value(m.get("w_tekscie", "")) != _value(m.get("na_rysunku", ""))
+        if isinstance(m, dict) and not _same_value(m.get("w_tekscie", ""), m.get("na_rysunku", ""))
     ]
+    guessed = [m for m in real if not _is_printed(m.get("na_rysunku", ""), printed)]
+    if guessed:
+        logger.info("Dropped mismatches with values not printed in the figure: %r", guessed)
+    real = [m for m in real if m not in guessed]
     if not real:
         return {"poprawnosc_danych": "True", "bledy": "None"}
     lines = [
@@ -74,7 +97,7 @@ class ConsistencyChecker:
     def close(self):
         self.llm.close()
 
-    def check(self, paragraph, image_data, language="pl"):
+    def check(self, paragraph, image_data, language="pl", printed=None):
         template = _PROMPTS.get(language, _PROMPTS["pl"])
         prompt = template.replace("{image_data}", str(image_data)).replace("{paragraph}", str(paragraph))
 
@@ -95,7 +118,7 @@ class ConsistencyChecker:
         result_text = response["choices"][0]["message"]["content"]
 
         try:
-            return verdict_from_answer(json.loads(result_text), language)
+            return verdict_from_answer(json.loads(result_text), language, printed)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
             return {"poprawnosc_danych": "Error", "bledy": "None"}

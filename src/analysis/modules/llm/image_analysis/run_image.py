@@ -58,6 +58,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
 
     logger.info("Loading the vision model for image analysis (%d images)", len(images_with_refs))
     extracted_image_data = {}
+    printed_numbers = {}
 
     with VisionEngine("Analiza obrazów") as engine:
         for idx, img in enumerate(images_with_refs, 1):
@@ -72,6 +73,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                 if not image_data:
                     raise ValueError("The vision model returned no data")
                 extracted_image_data[img["id"]] = image_data
+                printed_numbers[img["id"]] = engine.printed_numbers(img["bytes"])
             except Exception:
                 # one unreadable figure must not cost the results of all the others
                 logger.exception("Could not read figure %s", img["id"])
@@ -94,7 +96,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                     logger.info(" -> Ocena akapitu dla rysunku %s...", img["id"])
 
                 try:
-                    verification = checker.check(ref_para, img_data_text, language)
+                    verification = checker.check(ref_para, img_data_text, language, printed_numbers.get(img["id"]))
                 except Exception:
                     logger.exception("Consistency check failed for figure %s", img["id"])
                     final_report.append(_failed_entry(img["id"], language))
