@@ -12,14 +12,13 @@ from analysis.modules.llm.image_analysis.figures import (
     parse_yes_no,
     scale_problem,
 )
-from analysis.modules.llm.image_analysis.vision_engine import VisionEngine, too_small_to_read
+from analysis.modules.llm.image_analysis.vision_engine import ALL_NUMBERS_PROMPT, VisionEngine, too_small_to_read
 
 logger = logging.getLogger(__name__)
 
 BAR_QUESTION = "Is this a bar chart?"
 LINE_QUESTION = "Is this a line chart?"
 AXIS_PROMPT = "List the numbers printed in this image, from bottom to top, separated by semicolons. If there are none, answer NONE."
-ALL_NUMBERS_PROMPT = "List all numbers printed anywhere in this image, separated by semicolons. If there are none, answer NONE."
 AXIS_WIDTH = 0.16       # the part of the image with the vertical axis
 MIN_AXIS_PIXELS = 60
 
