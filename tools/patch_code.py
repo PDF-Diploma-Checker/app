@@ -7,7 +7,7 @@ Usage (run it on every platform, with the builds of that platform in dist/):
     3. python tools/publish_release.py --tag v0.4.2
 
 --since is the commit the builds in dist/ were made from. The script stops when a change needs a full build: other
-libraries, a new import of a module that may not be in the package, new data files, the launcher or the build files.
+libraries, an import of a module that is not in the package, new data files, the launcher or the build files.
 Users get the new files in kilobytes through the differential update, but publishing still packs and uploads whole
 packages.
 """
@@ -50,9 +50,23 @@ def external_imports(source):
     return {name for name in names if name.split(".")[0] not in OWN_PACKAGES}
 
 
+def bundled_modules(since):
+    """Modules our code imported at `since`: PyInstaller put them into the build."""
+    names = set()
+    for path in git("ls-tree", "-r", "--name-only", since, "src").splitlines():
+        if path.endswith(".py"):
+            try:
+                names |= external_imports(git("show", f"{since}:{path}"))
+            except SyntaxError:
+                continue
+    return names
+
+
 def needs_full_build(since, changes):
-    """Why these changes cannot be patched into a build (a new library would only fail on the user's computer)."""
+    """Why these changes cannot be patched into a build (a module that is not in it would only fail on the user's
+    computer)."""
     reasons = []
+    bundled = None
     for status, path in changes:
         if path.startswith(IGNORED):
             continue
@@ -64,8 +78,9 @@ def needs_full_build(since, changes):
         elif not path.startswith("src/") or path == LAUNCHER or not path.endswith(".py"):
             reasons.append(path)
         elif status != "D":
-            old = git("show", f"{since}:{path}") if status != "A" else ""
-            new = external_imports((ROOT / path).read_text(encoding="utf-8")) - external_imports(old)
+            if bundled is None:
+                bundled = bundled_modules(since)
+            new = external_imports((ROOT / path).read_text(encoding="utf-8")) - bundled
             if new:
                 reasons.append(f"{path}: new imports {', '.join(sorted(new))}")
     return reasons
