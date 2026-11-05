@@ -380,13 +380,18 @@ PL = {
             "• logi aplikacji,\n"
             "• dane systemowe: wersję systemu i dystrybucji, model karty graficznej, "
             "wersję sterowników i CUDA, wersje bibliotek,\n"
-            "• plik pracy dyplomowej (PDF),\n"
-            "• Twój opis problemu (jeśli go dodasz)."
+                        "• Twój opis problemu (jeśli go dodasz)."
         ),
-        "consent": (
-            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, "
-            "logów, pracy dyplomowej oraz opisu problemu, w celu "
-            "diagnozowania błędów i rozwijania aplikacji."
+        "scope_label": "Co wysłać:",
+        "scope_logs": "Tylko logi i dane systemowe",
+        "scope_thesis": "Logi, dane systemowe i cała praca (PDF)",
+        "consent_logs": (
+            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, logów (mogą zawierać "
+            "fragmenty tekstu pracy) oraz opisu problemu, w celu diagnozowania błędów i rozwijania aplikacji."
+        ),
+        "consent_thesis": (
+            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, logów, całej pracy "
+            "dyplomowej oraz opisu problemu, w celu diagnozowania błędów i rozwijania aplikacji."
         ),
         "send": "Wyślij",
         "sending": "Wysyłanie...",
@@ -786,11 +791,17 @@ EN = {
             "• application logs,\n"
             "• system data: OS and distribution version, graphics card model, "
             "driver and CUDA versions, library versions,\n"
-            "• the thesis file (PDF),\n"
             "• your description of the problem (if you add one)."
         ),
-        "consent": (
-            "I agree to share my system data, logs, thesis and problem description with the "
+        "scope_label": "What to send:",
+        "scope_logs": "Only the logs and system data",
+        "scope_thesis": "The logs, system data and the whole thesis (PDF)",
+        "consent_logs": (
+            "I agree to share my system data, logs (they can contain fragments of the thesis text) and problem "
+            "description with the application developers for the purpose of diagnosing errors and improving the application."
+        ),
+        "consent_thesis": (
+            "I agree to share my system data, logs, whole thesis and problem description with the "
             "application developers for the purpose of diagnosing errors and improving the application."
         ),
         "send": "Send",
