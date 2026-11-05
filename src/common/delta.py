@@ -65,8 +65,9 @@ def manifest_name(platform, variant):
 class _PartWriter:
     """One logical byte stream written into  base.001, base.002, ...  of at most `part_size` bytes each."""
 
-    def __init__(self, directory, base, part_size):
+    def __init__(self, directory, base, part_size, first_number=1):
         self.directory, self.base, self.part_size = Path(directory), base, part_size
+        self.first_number = first_number
         self.parts = []
         self.offset = 0
         self._file = None
@@ -85,7 +86,7 @@ class _PartWriter:
 
     def _next(self):
         self._finish_part()
-        name = f"{self.base}.{len(self.parts) + 1:03d}"
+        name = f"{self.base}.{len(self.parts) + self.first_number:03d}"
         self._file = open(self.directory / name, "wb")
         self._in_part = 0
         self.parts.append({"name": name, "size": 0})
@@ -107,6 +108,14 @@ def _compressible(head):
     return not head or len(zlib.compress(head, 1)) < 0.9 * len(head)
 
 
+def _sha256_of(path):
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(HASH_CHUNK):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
 def _write_file(writer, path):
     sha, raw = hashlib.sha256(), 0
     with open(path, "rb") as f:
@@ -123,12 +132,8 @@ def _write_file(writer, path):
     return method, raw, sha.hexdigest()
 
 
-def build_pack(package_dir, out_dir, platform, variant, version, part_size=PART_SIZE, log=print):
-    """Write the pack parts and the manifest of the build in `package_dir` into `out_dir`. Returns the manifest."""
-    package_dir, out_dir = Path(package_dir), Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    writer = _PartWriter(out_dir, pack_name(platform, variant), part_size)
-    files, links = [], []
+def _package_files(package_dir):
+    """(relative path, path, is a symlink) of everything that belongs to a build, in a stable order."""
     for current, dirs, names in os.walk(package_dir, followlinks=False):
         current = Path(current)
         dirs.sort()
@@ -137,23 +142,73 @@ def build_pack(package_dir, out_dir, platform, variant, version, part_size=PART_
             names = [n for n in names if n not in PRESERVE]
         for name in sorted(names) + [d for d in dirs if (current / d).is_symlink()]:
             path = current / name
-            rel = path.relative_to(package_dir).as_posix()
-            if path.is_symlink():
-                links.append({"p": rel, "t": os.readlink(path)})
-                continue
-            start = writer.offset
-            method, size, digest = _write_file(writer, path)
-            mode = 0o755 if path.stat().st_mode & 0o111 else 0o644
-            files.append({"p": rel, "s": size, "h": digest, "m": mode, "o": start,
-                          "c": writer.offset - start, "z": method})
+            yield path.relative_to(package_dir).as_posix(), path, path.is_symlink()
         dirs[:] = [d for d in dirs if not (current / d).is_symlink()]
-    parts = writer.close()
+
+
+def _file_mode(path):
+    return 0o755 if path.stat().st_mode & 0o111 else 0o644
+
+
+def _write_manifest(out_dir, platform, variant, version, parts, total, files, links):
     manifest = {"format": FORMAT, "version": str(version), "platform": platform, "variant": variant,
-                "parts": parts, "total": writer.offset, "files": files, "links": links}
+                "parts": parts, "total": total, "files": files, "links": links}
     (out_dir / manifest_name(platform, variant)).write_text(
         json.dumps(manifest, separators=(",", ":")), encoding="utf-8")
+    return manifest
+
+
+def build_pack(package_dir, out_dir, platform, variant, version, part_size=PART_SIZE, log=print):
+    """Write the pack parts and the manifest of the build in `package_dir` into `out_dir`. Returns the manifest."""
+    package_dir, out_dir = Path(package_dir), Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    writer = _PartWriter(out_dir, pack_name(platform, variant), part_size)
+    files, links = [], []
+    for rel, path, is_link in _package_files(package_dir):
+        if is_link:
+            links.append({"p": rel, "t": os.readlink(path)})
+            continue
+        start = writer.offset
+        method, size, digest = _write_file(writer, path)
+        files.append({"p": rel, "s": size, "h": digest, "m": _file_mode(path), "o": start,
+                      "c": writer.offset - start, "z": method})
+    parts = writer.close()
+    manifest = _write_manifest(out_dir, platform, variant, version, parts, writer.offset, files, links)
     log(f"Pack: {len(files)} files, {len(links)} links, {writer.offset / 1024 / 1024:.1f} MiB in {len(parts)} part(s)")
     return manifest
+
+
+def build_patch_pack(package_dir, out_dir, platform, variant, version, base_manifest, base_tag,
+                     part_size=PART_SIZE, log=print):
+    """A release with only the files that changed since `base_manifest`, the manifest of release `base_tag`: the
+    other files stay in the pack parts of the releases that hold them. Returns (manifest, the changed paths).
+    Those parts have to stay published, and an app older than this mechanism cannot use such a release."""
+    package_dir, out_dir = Path(package_dir), Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    known = {entry["p"]: entry for entry in base_manifest["files"]}
+    parts = [{**part, "release": part.get("release") or base_tag} for part in base_manifest["parts"]]
+    writer = _PartWriter(out_dir, pack_name(platform, variant), part_size, first_number=len(parts) + 1)
+    base_total = int(base_manifest["total"])
+    files, links, changed = [], [], []
+    for rel, path, is_link in _package_files(package_dir):
+        if is_link:
+            links.append({"p": rel, "t": os.readlink(path)})
+            continue
+        old = known.get(rel)
+        if old and old["s"] == path.stat().st_size and old["m"] == _file_mode(path) and old["h"] == _sha256_of(path):
+            files.append(old)
+            continue
+        start = writer.offset
+        method, size, digest = _write_file(writer, path)
+        files.append({"p": rel, "s": size, "h": digest, "m": _file_mode(path), "o": base_total + start,
+                      "c": writer.offset - start, "z": method})
+        changed.append(rel)
+    new_parts = writer.close() if writer.offset else []
+    manifest = _write_manifest(out_dir, platform, variant, version, parts + new_parts, base_total + writer.offset,
+                               files, links)
+    log(f"Patch: {len(changed)} of {len(files)} files changed, {writer.offset / 1024 / 1024:.1f} MiB in "
+        f"{len(new_parts)} new part(s)")
+    return manifest, changed
 
 
 # =========================================================================== manifest
