@@ -71,6 +71,9 @@ a = Analysis(
     excludes=[],
     noarchive=False,
     optimize=0,
+    # plain files next to the executable: a change in the UI touches them and not the executable, so an update
+    # downloads kilobytes. common.version comes along because a release has to be able to change its number.
+    module_collection_mode={"ui": "py", "common.version": "py"},
 )
 pyz = PYZ(a.pure)
 
