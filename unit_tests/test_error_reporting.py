@@ -44,7 +44,7 @@ class LlmFailureTest(unittest.TestCase):
             result, score, _ = run_task_llm(mock.Mock(), "thesis.pdf")
         self.assertIsNone(score)
         self.assertEqual(result["analysis_error"]["stage"], "preparing the text")
-        self.assertIn("NameError", result["analysis_error"]["error"])
+        self.assertRegex(result["analysis_error"]["error"], r"^(NameError|ModuleNotFoundError): ")     # no AI libraries on CI
 
 
 class ReportShowsFailureTest(unittest.TestCase):
