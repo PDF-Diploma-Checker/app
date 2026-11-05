@@ -208,6 +208,18 @@ def _bullets(items, color):
     return lbl
 
 
+def _figure_problems(items):
+    """Which figures a check found problems in: 'Rysunek 4.9: ...' for each item of a report list."""
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            lines.append(str(item))
+            continue
+        reasons = item.get("powody_odrzucenia") or [item.get("blad", "")]
+        lines.append(f"{item.get('rysunek', '?')}: {' '.join(str(reason) for reason in reasons)}".rstrip(": "))
+    return lines
+
+
 def _escape(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -279,11 +291,17 @@ def build_report_panel(report_data, on_download):
         quality, fonts = data.get("jakosc_obrazkow") or [], data.get("czcionki_obrazkow") or []
         lay.addWidget(_note(t("main.image_quality_errors", count=len(quality)) if quality else t("main.image_quality_ok"),
                             "bad" if quality else "ok"))
+        if quality:
+            lay.addWidget(_bullets(_figure_problems(quality), styles.DANGER_DOT))
         lay.addWidget(_note(t("main.font_consistency_errors", count=len(fonts)) if fonts else t("main.font_consistency_ok"),
                             "bad" if fonts else "ok"))
+        if fonts:
+            lay.addWidget(_bullets(_figure_problems(fonts), styles.DANGER_DOT))
         axes = data.get("osie_wykresow") or []
         lay.addWidget(_note(t("main.chart_axes_errors", count=len(axes)) if axes else t("main.chart_axes_ok"),
                             "bad" if axes else "ok"))
+        if axes:
+            lay.addWidget(_bullets(_figure_problems(axes), styles.DANGER_DOT))
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked"), "off"))
     raster = img.get("image_raster", []) or []

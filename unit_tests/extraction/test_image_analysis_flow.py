@@ -402,6 +402,26 @@ class ReportPanelTest(unittest.TestCase):
         self.assertIn("50%", text)
         self.assertIn("Brakuje opisu implementacji.", text)
 
+    def test_panel_names_the_figures_with_problems(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        try:
+            from PySide6.QtWidgets import QApplication, QLabel
+        except ImportError as error:
+            self.skipTest(str(error))
+        from ui.report_panel import build_report_panel
+
+        QApplication.instance() or QApplication([])
+        data = {"content_grade": {"grade": 50, "max_grade": 100},
+                "image_analysis": {"total": 2, "good_count": 2, "bad_count": 0},
+                "jakosc_obrazkow": [{"rysunek": "Rysunek 4.6", "powody_odrzucenia": ["[DPI]: Rozciagniety"]}],
+                "czcionki_obrazkow": [{"rysunek": "Rysunek 4.9", "blad": "Niespojne czcionki"}],
+                "osie_wykresow": [{"rysunek": "Rysunek 4.15", "blad": "Os nie od zera"}]}
+        content, _ = build_report_panel(data, lambda: None)
+        text = " | ".join(label.text() for label in content.findChildren(QLabel))
+        self.assertIn("Rysunek 4.6: [DPI]: Rozciagniety", text)
+        self.assertIn("Rysunek 4.9: Niespojne czcionki", text)
+        self.assertIn("Rysunek 4.15: Os nie od zera", text)
+
     def test_report_saved_before_this_change_still_opens(self):
         text = self._texts({"total": 1, "bad_count": 0, "good_count": 1, "details": ["Rys. 1: Poprawny"]})
         self.assertNotIn("Rys. 1:", text)
