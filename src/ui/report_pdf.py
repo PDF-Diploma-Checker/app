@@ -41,6 +41,7 @@ STRINGS = {
         "rep_fonts_err_1": "Wykryto problemy z czcionkami w", "rep_fonts_err_2": "elementach:",
         "rep_axes_title": "Osie wykresów", "rep_axes_all_ok": "Brak wykrytych problemów z osiami wykresów.",
         "rep_axes_err_1": "Wykryto problemy z osiami w", "rep_axes_err_2": "elementach:",
+        "rep_content_failed": "Analiza merytoryczna nie powiodła się, więc tej oceny nie ma. Szczegóły są w logu aplikacji.",
         "rep_img_failed": "Analiza rysunków nie powiodła się w całości: wyniki są niepełne. Szczegóły są w logu aplikacji.", "rep_img_skip_title": "Ocena jakości obrazów i czcionek", "rep_img_skip_desc": "Analiza została pominięta na życzenie użytkownika lub dokument nie zawiera grafik.",
         "rep_stats_title": "Analiza statystyczna struktury zdań", "rep_stats_desc": "Struktura gramatyczna i stylistyczna badanej pracy dyplomowej:",
         "rep_active_lbl": "Zdania w stronie czynnej", "rep_active_desc": "Zalecana forma wypowiedzi w tekstach naukowych podnosząca dynamikę wywodu.",
@@ -76,6 +77,7 @@ STRINGS = {
         "rep_fonts_err_1": "Font issues detected in", "rep_fonts_err_2": "elements:",
         "rep_axes_title": "Chart Axes", "rep_axes_all_ok": "No chart axis issues detected.",
         "rep_axes_err_1": "Axis issues detected in", "rep_axes_err_2": "elements:",
+        "rep_content_failed": "The content analysis failed, so there is no such grade. See the application log for details.",
         "rep_img_failed": "The figure analysis did not fully succeed: the results are incomplete. See the application log for details.", "rep_img_skip_title": "Image Quality and Fonts Assessment", "rep_img_skip_desc": "Analysis skipped by user request or document contains no graphics.",
         "rep_stats_title": "Sentence Structure Statistical Analysis", "rep_stats_desc": "Grammatical and stylistic structure of the analyzed thesis:",
         "rep_active_lbl": "Active voice sentences", "rep_active_desc": "Recommended form of expression in academic texts, enhancing narrative dynamics.",
@@ -514,9 +516,11 @@ def _content(w, s, data):
 
     # ---- overall evaluation
     w.heading(s["rep_eval_title"] if grade_info is not None else s["rep_ai_eval_title"])
-    if grade_info is None:
+    if data.get("analysis_error"):
+        w.card([w.r_note(s["rep_content_failed"], "bad")])
+    elif grade_info is None:
         w.card([w.r_note(s["rep_skipped_fast"], "off")])
-    else:
+    if grade_info is not None:
         rows = [w.r_bar(s["rep_score_lbl"].rstrip(":"), f"{_fmt(grade)} / {_fmt(max_g)} {s['panel_pts']}", grade / max_g),
                 w.r_gap(4),
                 w.r_text(f"{s['rep_off_topic_lbl']} {off_topic} ({_fmt(p_off)}%)", 10.5, False, C["text3"])]
