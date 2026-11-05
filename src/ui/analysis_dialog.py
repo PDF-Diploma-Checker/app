@@ -332,6 +332,16 @@ class AnalysisDialog(QDialog):
                     styles.SUCCESS, styles.SUCCESS_BG)
         return t("analysis.device_line_cpu"), styles.WARNING, styles.WARNING_BG
 
+    def _update_gpu_warning(self):
+        """Warn about a card too small for the models. The hardware facts arrive later than the choice of the mode."""
+        hw = self._eta_hw or {}
+        vram = hw.get("vram_gb", 0.0)
+        weak = self.btn_dokladny.isChecked() and gpu_check.is_weak_gpu(vram)
+        if weak:
+            self.gpu_warning_label.setText(t("analysis.weak_gpu", name=hw.get("gpu_name", "GPU"), vram=f"{vram:.1f}",
+                                             needed=f"{gpu_check.GOOD_VRAM_GB:.0f}"))
+        self.gpu_warning_label.setVisible(weak)
+
     def _update_device_line(self):
         text, color, bg = self._device_line()
         self.gpu_info_label.setText(text)
@@ -366,12 +376,14 @@ class AnalysisDialog(QDialog):
         self.btn_dokladny.setChecked(False)
         self.cb_images.setVisible(False)
         self.gpu_info_label.setVisible(False)
+        self.gpu_warning_label.setVisible(False)
         self.setup_link.setVisible(False)
         self.mode_hint_label.setVisible(True)
 
     # ------------------------------------------------------------ time estimate
     def _on_eta_inputs(self, doc, hw):
         self._eta_doc, self._eta_hw, self._eta_ready = doc, hw, True
+        self._update_gpu_warning()
         self._update_eta()
 
     def _current_estimate(self):
@@ -562,6 +574,14 @@ class AnalysisDialog(QDialog):
         self.gpu_info_label.setWordWrap(True)
         self.gpu_info_label.setVisible(False)
 
+        self.gpu_warning_label = QLabel()
+        self.gpu_warning_label.setWordWrap(True)
+        self.gpu_warning_label.setVisible(False)
+        self.gpu_warning_label.setStyleSheet(
+            f"font-size: 13px; color: {styles.WARNING}; background-color: {styles.WARNING_BG}; "
+            "border: none; border-radius: 8px; padding: 8px 10px;"
+        )
+
         self.setup_link = QPushButton(t("analysis.check_system"))
         self.setup_link.setCursor(Qt.PointingHandCursor)
         self.setup_link.setStyleSheet(styles.LINK_BUTTON_STYLE)
@@ -573,6 +593,7 @@ class AnalysisDialog(QDialog):
         mode_section.addWidget(self.mode_hint_label)
         mode_section.addWidget(self.cb_images)
         mode_section.addWidget(self.gpu_info_label)
+        mode_section.addWidget(self.gpu_warning_label)
         mode_section.addWidget(self.setup_link, alignment=Qt.AlignLeft)
 
         self.eta_label = QLabel(t("analysis.eta_calc"))
@@ -605,6 +626,7 @@ class AnalysisDialog(QDialog):
             self._update_device_line()
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
+            self._update_gpu_warning()
             self.setup_link.setVisible(True)
             self.mode_hint_label.setVisible(False)
             self._update_eta()
