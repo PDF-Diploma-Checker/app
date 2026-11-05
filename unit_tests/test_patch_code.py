@@ -48,6 +48,8 @@ class PatchBuildTest(unittest.TestCase):
 class NeedsFullBuildTest(unittest.TestCase):
     def reasons(self, changes, old="", new="", diff=""):
         def git(*args):
+            if args[0] == "ls-tree":
+                return "src/old.py\n"
             return diff if args[0] == "diff" else old
 
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(patch_code, "git", git), \
@@ -67,6 +69,9 @@ class NeedsFullBuildTest(unittest.TestCase):
     def test_new_outside_import_needs_a_build(self):
         reasons = self.reasons([("M", "src/analysis/a.py")], "import os\n", "import os\ndef f():\n    import lxml.etree\n")
         self.assertIn("lxml.etree", reasons[0])
+
+    def test_module_our_code_already_used_can_be_patched(self):
+        self.assertEqual(self.reasons([("M", "src/ui/a.py")], "import collections\n", "import collections\n"), [])
 
     def test_build_and_data_files_need_a_build(self):
         changes = [("M", "DiplomaChecker.spec"), ("M", patch_code.LAUNCHER), ("A", "src/ui/assets/logo.png")]
