@@ -2,12 +2,7 @@ import logging
 import os
 import sys
 
-if getattr(sys, "frozen", False):
-    # Windowed build has no console: stdout/stderr are None and break tqdm & co.
-    for _name in ("stdout", "stderr"):
-        if getattr(sys, _name) is None:
-            setattr(sys, _name, open(os.devnull, "w", encoding="utf-8"))
-else:
+if not getattr(sys, "frozen", False):        # in a build app/launcher.py starts this file
     _SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     if _SRC not in sys.path:
         sys.path.insert(0, _SRC)
@@ -119,7 +114,7 @@ def main():
     sys.exit(app.exec())
 
 
-if __name__ == "__main__":
+def run():
     if "--smoke-test" in sys.argv:
         sys.exit(smoke_test())
     if "--analysis-test" in sys.argv:
@@ -129,3 +124,7 @@ if __name__ == "__main__":
     except Exception:
         logger.exception("Unhandled exception, application terminating")
         raise
+
+
+if __name__ == "__main__":
+    run()
