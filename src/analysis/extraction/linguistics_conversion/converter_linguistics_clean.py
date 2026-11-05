@@ -400,7 +400,7 @@ class PDFMapper:
         else:
             result = True
 
-        logger.info(
+        logger.debug(
             "CONT? line=%r x0=%.1f prev_end_early=%s justified=%s -> %s",
             line_text[:40],
             geom.x0,
@@ -787,7 +787,7 @@ class PDFMapper:
             return
 
         if getattr(self, "in_bibliography_section", False):
-            logger.info(
+            logger.debug(
                 "EMPTY_LIST_BUFFER in bib: reason=%r, count=%d, first_item=%r",
                 reason,
                 len(self.list_buffer),
@@ -1409,7 +1409,7 @@ class PDFMapper:
             is_valid_list_cont = False
             fl_pitch = None
             if raw_block_text_for_check.isdigit():
-                logger.info(
+                logger.debug(
                     "DIGIT BLOCK %r y0=%.1f y1=%.1f bottom_thresh=%.1f page_h=%.1f",
                     raw_block_text_for_check,
                     y0,
@@ -1487,7 +1487,7 @@ class PDFMapper:
                                 is_valid_list_cont = False
 
                     if getattr(self, "in_bibliography_section", False):
-                        logger.info(
+                        logger.debug(
                             "BIB CONT (legacy): line=%r x0=%.1f last_x0=%.1f -> %s",
                             raw_block_text_for_check[:40],
                             x0,
@@ -1514,7 +1514,7 @@ class PDFMapper:
                 y0r <= (y0 + y1) / 2 <= y1r for y0r, y1r in formula_regions
             ):
                 if self.list_buffer:
-                    logger.info(
+                    logger.debug(
                         "INTERRUPT formula inside list %r: block_id=%s, text=%r",
                         self.list_buffer[0]["item"].text[:30],
                         block.block_id,

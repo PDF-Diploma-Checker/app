@@ -26,15 +26,23 @@ _VRAM_TAKEN_MB = 300                  # at least this much new video memory mean
 
 
 class _CancellableLlama(Llama):
-    """A Llama whose chat completions stop when the analysis is cancelled."""
+    """A Llama whose completions stop when the analysis is cancelled. Both ways of asking the model go through here:
+    chat completions, and plain `llm(prompt)` calls such as the section summaries."""
 
     def create_chat_completion(self, *args, **kwargs):
+        return self._cancellable(super().create_chat_completion, args, kwargs)
+
+    def create_completion(self, *args, **kwargs):
+        return self._cancellable(super().create_completion, args, kwargs)
+
+    def _cancellable(self, generate, args, kwargs):
         run_control.check_cancelled()
         processors = kwargs.get("logits_processor")
         processors = LogitsProcessorList(list(processors) if processors else [])
-        processors.append(self._cancel_processor)
+        if self._cancel_processor not in processors:    # a chat completion ends up in create_completion too
+            processors.append(self._cancel_processor)
         kwargs["logits_processor"] = processors
-        result = super().create_chat_completion(*args, **kwargs)
+        result = generate(*args, **kwargs)
         run_control.check_cancelled()       # a cancelled generation returns a cut-off answer: do not use it
         return result
 

@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 MIN_DRIVER_CUDA = (12, 0)       # the GPU build is compiled with CUDA 12.x
 MIN_RAM_FOR_CPU_GB = 12.0       # Gemma 3 12B (Q4) needs about 8 GB for the weights plus working memory
+GOOD_VRAM_GB = 8.0                  # the largest model fits whole on the card from here on
 AI_MODELS_SIZE_GB = 14.0        # Gemma 3 12B + Qwen2.5-VL + projector + embeddings
 NEEDED_FREE_GB = 15.0           # what the models folder should have free before downloading
 
@@ -188,6 +189,11 @@ def collect_facts(model_dir=None):
 
 # --------------------------------------------------------------------------- advice
 
+def is_weak_gpu(vram_gb):
+    """A card that was found, but cannot hold the whole model: part of the work stays on the processor."""
+    return 0 < vram_gb < GOOD_VRAM_GB
+
+
 def recommend_gpu_layers(vram_gb):
     """How many of Gemma's 48 layers to put on a card with this much memory (the rest stays on the CPU).
 
@@ -238,7 +244,7 @@ def diagnose(facts):
             {"driver": nvidia["driver"], "cuda": cuda_text or "?", "needed": "%d.%d" % MIN_DRIVER_CUDA},
         ))
         vram = free_vram                    # what other programs have not taken is what the model can use
-        if vram < 8.0:
+        if vram < GOOD_VRAM_GB:
             checks.append(Check("vram", "warn", {"vram": f"{vram:.1f}", "layers": recommend_gpu_layers(vram)}))
     elif facts.get("other_gpus"):
         checks.append(Check("gpu_other", "warn", {"name": "; ".join(facts["other_gpus"])}))

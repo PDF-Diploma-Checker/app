@@ -385,6 +385,11 @@ class PDFReader(QMainWindow):
             else:
                 self.load_ai_analysis()
 
+            failure = report_data.get("analysis_error")
+            if failure:
+                MessageBox.warning(self, t("analysis.ai_failed_title"),
+                                   t("analysis.ai_failed_text", error=failure.get("error", "?")))
+
     def generate_thumbnails(self):
         """Clears out old thumbnails and renders a preview for each page of the loaded PDF."""
         for btn in self.thumb_buttons:

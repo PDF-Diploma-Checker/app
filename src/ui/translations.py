@@ -74,6 +74,7 @@ PL = {
         "findings_page": "str. {page} ({count})",
         "findings_none": "Brak uwag w tekście",
         "no_content_analysis": "Brak danych analizy merytorycznej",
+        "content_analysis_failed": "Analiza merytoryczna nie powiodła się, więc tej oceny nie ma. Szczegóły są w logach aplikacji.",
         "graphics_header": "Weryfikacja rysunków i grafik",
         "image_quality_ok": "Jakość obrazów (rozdzielczość/czytelność)",
         "image_quality_errors": "Jakość obrazów (Błędy: {count})",
@@ -129,6 +130,8 @@ PL = {
         "title": "Przeanalizuj dokument",
         "analyzing": "Analizowanie...",
         "cancelling": "Anulowanie analizy...",
+        "cancelling_title": "Kończenie analizy...",
+        "cancelling_note": "Czekam na zakończenie bieżącego kroku. Może to potrwać do kilkudziesięciu sekund, nie zamykaj aplikacji.",
         "config_info": "Plik konfiguracyjny JSON",
         "config_last": "Ostatnio używany plik",
         "delete": "usuń",
@@ -141,6 +144,7 @@ PL = {
         "mode_fast": "Tryb szybki",
         "mode_detailed": "Tryb dokładny",
         "images_checkbox": "Analiza obrazów i grafik (wymaga dużo VRAM)",
+        "weak_gpu": "Karta {name} ma {vram} GB pamięci, a modele AI potrzebują co najmniej {needed} GB. Część obliczeń będzie na procesorze, więc analiza może być znacznie wolniejsza.",
         "gpu_ok": "Wykryto GPU: <b>{name}</b> ({vram} GB VRAM).<br>Tryb dokładny (AI) powinien działać płynnie.",
         "gpu_low": "Wykryto GPU: <b>{name}</b> ({vram} GB VRAM).<br><b>Uwaga:</b> Zalecane minimum to 8 GB VRAM. Tryb dokładny może działać powoli.",
         "gpu_none": "<b>Brak wspieranego GPU (NVIDIA).</b><br>Tryb dokładny użyje procesora (CPU) i analiza będzie trwała bardzo długo.",
@@ -157,6 +161,12 @@ PL = {
         "ai_unavailable_hint": "Tryb dokładny jest niedostępny: ta wersja aplikacji nie zawiera modułu AI.",
         "error_title": "Błąd analizy",
         "unknown_error": "Nieznany błąd. Szczegóły są w logach aplikacji.",
+        "ai_failed_title": "Analiza AI się nie powiodła",
+        "ai_failed_text": "Nie udało się wykonać analizy merytorycznej, więc nie ma jej oceny. Wyniki sprawdzania tekstu i formatowania są dostępne.\n\nBłąd: {error}\n\nUżyj przycisku „Zgłoś problem”, abyśmy mogli to naprawić.",
+        "unexpected_title": "Coś poszło nie tak",
+        "unexpected_text": "W aplikacji wystąpił nieoczekiwany błąd. Możesz pracować dalej, ale wyniki mogą być niepełne.\n\nBłąd: {error}\n\nUżyj przycisku „Zgłoś problem”, abyśmy mogli to naprawić.",
+        "crashed_title": "Poprzednia analiza się nie zakończyła",
+        "crashed_text": "Poprzednia analiza została przerwana przez awarię aplikacji. Użyj przycisku „Zgłoś problem”, abyśmy mogli to naprawić.",
         "models_still_missing": "Modele AI nie zostały jeszcze pobrane, dlatego pozostaje tryb szybki. Wybierz tryb dokładny ponownie, aby je pobrać.",
         "cancelled": "Analiza została przerwana.",
         "stats_gpu": "GPU {util}% · VRAM {used}/{total} GB · {temp}°C · CPU {cpu}%",
@@ -381,13 +391,18 @@ PL = {
             "• logi aplikacji,\n"
             "• dane systemowe: wersję systemu i dystrybucji, model karty graficznej, "
             "wersję sterowników i CUDA, wersje bibliotek,\n"
-            "• plik pracy dyplomowej (PDF),\n"
-            "• Twój opis problemu (jeśli go dodasz)."
+                        "• Twój opis problemu (jeśli go dodasz)."
         ),
-        "consent": (
-            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, "
-            "logów, pracy dyplomowej oraz opisu problemu, w celu "
-            "diagnozowania błędów i rozwijania aplikacji."
+        "scope_label": "Co wysłać:",
+        "scope_logs": "Tylko logi i dane systemowe",
+        "scope_thesis": "Logi, dane systemowe i cała praca (PDF)",
+        "consent_logs": (
+            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, logów (mogą zawierać "
+            "fragmenty tekstu pracy) oraz opisu problemu, w celu diagnozowania błędów i rozwijania aplikacji."
+        ),
+        "consent_thesis": (
+            "Wyrażam zgodę na przekazanie twórcom aplikacji moich danych systemowych, logów, całej pracy "
+            "dyplomowej oraz opisu problemu, w celu diagnozowania błędów i rozwijania aplikacji."
         ),
         "send": "Wyślij",
         "sending": "Wysyłanie...",
@@ -481,6 +496,7 @@ EN = {
         "findings_page": "p. {page} ({count})",
         "findings_none": "No findings in the text",
         "no_content_analysis": "No content analysis data",
+        "content_analysis_failed": "The content analysis failed, so there is no such grade. See the application logs for details.",
         "graphics_header": "Figures and graphics verification",
         "image_quality_ok": "Image quality (resolution/legibility)",
         "image_quality_errors": "Image quality (Errors: {count})",
@@ -536,6 +552,8 @@ EN = {
         "title": "Analyze document",
         "analyzing": "Analyzing...",
         "cancelling": "Cancelling analysis...",
+        "cancelling_title": "Stopping the analysis...",
+        "cancelling_note": "Waiting for the current step to finish. This can take up to a few dozen seconds, please do not close the app.",
         "config_info": "JSON configuration file",
         "config_last": "Last used file",
         "delete": "delete",
@@ -548,6 +566,7 @@ EN = {
         "mode_fast": "Fast mode",
         "mode_detailed": "Detailed mode",
         "images_checkbox": "Image and graphics analysis (requires a lot of VRAM)",
+        "weak_gpu": "The {name} card has {vram} GB of memory, and the AI models need at least {needed} GB. Part of the work will stay on the processor, so the analysis can be much slower.",
         "gpu_ok": "GPU detected: <b>{name}</b> ({vram} GB VRAM).<br>Detailed mode (AI) should run smoothly.",
         "gpu_low": "GPU detected: <b>{name}</b> ({vram} GB VRAM).<br><b>Warning:</b> 8 GB VRAM is the recommended minimum. Detailed mode may run slowly.",
         "gpu_none": "<b>No supported GPU (NVIDIA).</b><br>Detailed mode will use the processor (CPU) and the analysis will take a very long time.",
@@ -564,6 +583,12 @@ EN = {
         "ai_unavailable_hint": "Accurate mode is unavailable: this build has no AI module.",
         "error_title": "Analysis error",
         "unknown_error": "Unknown error. See the application logs for details.",
+        "ai_failed_title": "The AI analysis failed",
+        "ai_failed_text": "The content analysis could not be done, so there is no grade for it. The results of the text and formatting checks are available.\n\nError: {error}\n\nPlease use the \"Report a problem\" button so we can fix it.",
+        "unexpected_title": "Something went wrong",
+        "unexpected_text": "An unexpected error occurred in the application. You can keep working, but the results may be incomplete.\n\nError: {error}\n\nPlease use the \"Report a problem\" button so we can fix it.",
+        "crashed_title": "The previous analysis did not finish",
+        "crashed_text": "The previous analysis was stopped by an application crash. Please use the \"Report a problem\" button so we can fix it.",
         "models_still_missing": "The AI models have not been downloaded yet, so the fast mode stays selected. Choose the detailed mode again to download them.",
         "cancelled": "The analysis was cancelled.",
         "stats_gpu": "GPU {util}% · VRAM {used}/{total} GB · {temp}°C · CPU {cpu}%",
@@ -788,11 +813,17 @@ EN = {
             "• application logs,\n"
             "• system data: OS and distribution version, graphics card model, "
             "driver and CUDA versions, library versions,\n"
-            "• the thesis file (PDF),\n"
             "• your description of the problem (if you add one)."
         ),
-        "consent": (
-            "I agree to share my system data, logs, thesis and problem description with the "
+        "scope_label": "What to send:",
+        "scope_logs": "Only the logs and system data",
+        "scope_thesis": "The logs, system data and the whole thesis (PDF)",
+        "consent_logs": (
+            "I agree to share my system data, logs (they can contain fragments of the thesis text) and problem "
+            "description with the application developers for the purpose of diagnosing errors and improving the application."
+        ),
+        "consent_thesis": (
+            "I agree to share my system data, logs, whole thesis and problem description with the "
             "application developers for the purpose of diagnosing errors and improving the application."
         ),
         "send": "Send",

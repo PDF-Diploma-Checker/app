@@ -23,6 +23,14 @@ class VerdictTest(unittest.TestCase):
     def test_no_mismatches(self):
         self.assertEqual(verdict_from_answer({"niezgodnosci": []})["poprawnosc_danych"], "True")
 
+    def test_bare_number_in_the_figure_agrees_with_the_text(self):
+        answer = {"niezgodnosci": [{"element": "S3", "w_tekscie": "200 błędów", "na_rysunku": "200"}]}
+        self.assertEqual(verdict_from_answer(answer)["poprawnosc_danych"], "True")
+
+    def test_different_units_stay_a_mismatch(self):
+        answer = {"niezgodnosci": [{"element": "kopia", "w_tekscie": "300 ms", "na_rysunku": "300 s"}]}
+        self.assertEqual(verdict_from_answer(answer)["poprawnosc_danych"], "False")
+
     def test_items_with_equal_values_are_not_mismatches(self):
         answer = {"niezgodnosci": [{"element": "gzip", "w_tekscie": "180 ms", "na_rysunku": "180ms"}]}
         self.assertEqual(verdict_from_answer(answer)["poprawnosc_danych"], "True")
@@ -39,6 +47,23 @@ class VerdictTest(unittest.TestCase):
     def test_mismatch_in_english(self):
         answer = {"niezgodnosci": [{"element": "zstd", "w_tekscie": "75%", "na_rysunku": "68%"}]}
         self.assertEqual(verdict_from_answer(answer, "en")["bledy"], "zstd: 75% in the text, 68% in the figure")
+
+    def test_value_not_printed_in_the_figure_is_no_mismatch(self):
+        """A chart without values: the model made up 100 when reading it, and the text gives 40 GB."""
+        answer = {"niezgodnosci": [{"element": "A", "w_tekscie": "40 GB", "na_rysunku": "100"}]}
+        self.assertEqual(verdict_from_answer(answer, printed=[])["poprawnosc_danych"], "True")
+
+    def test_printed_value_stays_a_mismatch(self):
+        answer = {"niezgodnosci": [{"element": "tekst", "w_tekscie": "40%", "na_rysunku": "70%"},
+                                   {"element": "S1", "w_tekscie": "10", "na_rysunku": "2"}]}
+        result = verdict_from_answer(answer, printed=[70, 20, 10])
+        self.assertEqual(result["poprawnosc_danych"], "False")
+        self.assertIn("tekst", result["bledy"])
+        self.assertNotIn("S1", result["bledy"])
+
+    def test_no_list_of_numbers_decides_nothing(self):
+        answer = {"niezgodnosci": [{"element": "A", "w_tekscie": "40", "na_rysunku": "100"}]}
+        self.assertEqual(verdict_from_answer(answer, printed=None)["poprawnosc_danych"], "False")
 
     def test_answer_without_the_list_is_an_error(self):
         self.assertEqual(verdict_from_answer({"cos": 1})["poprawnosc_danych"], "Error")

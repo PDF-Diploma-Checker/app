@@ -195,6 +195,18 @@ def _bullets(items, color):
     return lbl
 
 
+def _figure_problems(items):
+    """Which figures a check found problems in: 'Rysunek 4.9: ...' for each item of a report list."""
+    lines = []
+    for item in items:
+        if not isinstance(item, dict):
+            lines.append(str(item))
+            continue
+        reasons = item.get("powody_odrzucenia") or [item.get("blad", "")]
+        lines.append(f"{item.get('rysunek', '?')}: {' '.join(str(reason) for reason in reasons)}".rstrip(": "))
+    return lines
+
+
 def _escape(text):
     return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -266,9 +278,11 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
     card, lay = _card()
-    if grade_info is None:
+    if data.get("analysis_error"):
+        lay.addWidget(_note(t("main.content_analysis_failed"), "bad"))
+    elif grade_info is None:
         lay.addWidget(_note(t("main.detailed_only"), "off"))
-    else:
+    if grade_info is not None:
         lay.addWidget(_bar(t("main.score_label"), f"{_fmt(grade)} / {_fmt(max_g)} {t('main.points')}", grade / max_g))
         lay.addWidget(_label(t("main.off_topic", count=off_topic, percent=p_off),
                              f"font-size: 13px; color: {styles.TEXT_3}; {TRANSPARENT}"))
@@ -299,11 +313,17 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         quality, fonts = data.get("jakosc_obrazkow") or [], data.get("czcionki_obrazkow") or []
         lay.addWidget(_note(t("main.image_quality_errors", count=len(quality)) if quality else t("main.image_quality_ok"),
                             "bad" if quality else "ok"))
+        if quality:
+            lay.addWidget(_bullets(_figure_problems(quality), styles.DANGER_DOT))
         lay.addWidget(_note(t("main.font_consistency_errors", count=len(fonts)) if fonts else t("main.font_consistency_ok"),
                             "bad" if fonts else "ok"))
+        if fonts:
+            lay.addWidget(_bullets(_figure_problems(fonts), styles.DANGER_DOT))
         axes = data.get("osie_wykresow") or []
         lay.addWidget(_note(t("main.chart_axes_errors", count=len(axes)) if axes else t("main.chart_axes_ok"),
                             "bad" if axes else "ok"))
+        if axes:
+            lay.addWidget(_bullets(_figure_problems(axes), styles.DANGER_DOT))
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked") if grade_info is not None else t("main.detailed_only"), "off"))
     raster = img.get("image_raster", []) or []
