@@ -23,7 +23,8 @@ Release files (see tools/prepare_release_assets.py)
     (they are joined again here) and may come with  <archive>.sha256  holding the SHA-256 of the whole archive.
     Differential update (common/delta.py): DiplomaChecker-<platform>-<variant>.manifest.json + .pack.001, .002, ...
     With them only the files that changed are downloaded (a few MB instead of GB); the full archive stays as the
-    fallback and for first installs.
+    fallback and for first installs. A release may publish only its new pack parts: a part with a "release" field
+    in the manifest is fetched from that older release, then the full archive may be missing too.
 
 No Qt in this module, so it can be tested on its own.
 """
@@ -159,6 +160,14 @@ def _find_parts(assets, name):
     return [a for _, a in numbered]
 
 
+def _older_release_url(manifest_url, part):
+    """Address of a pack part kept in an older release: the address of the manifest with the other tag."""
+    url, replaced = re.subn(r"/download/[^/]+/[^/]+$", f"/download/{part['release']}/{part['name']}", manifest_url)
+    if not replaced:
+        raise UpdateError("invalid")
+    return url
+
+
 def _find_manifest(info, assets, platform, variant):
     """(manifest, pack parts) of the differential update, or (None, []) when the release has none or it is unusable."""
     asset = assets.get(delta.manifest_name(platform, variant))
@@ -172,6 +181,10 @@ def _find_manifest(info, assets, platform, variant):
             raise UpdateError("invalid")
         pack = []
         for part in manifest["parts"]:
+            if part.get("release"):
+                pack.append({"name": part["name"], "size": int(part["size"]),
+                             "url": _older_release_url(asset["url"], part)})
+                continue
             found = assets.get(part["name"])
             if not found or not found.get("url") or int(found.get("size", part["size"])) != int(part["size"]):
                 raise UpdateError("no_asset", name=part["name"])
