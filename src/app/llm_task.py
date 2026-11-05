@@ -1,5 +1,6 @@
 import gc
 import logging
+import os
 import traceback
 
 from common import run_control
@@ -379,10 +380,13 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         return result, score, "Analiza LLM zakończona pomyślnie."
 
-    except Exception:
-        logger.exception("LLM analysis failed")
+    except Exception as error:
+        stage = timer.label or "?"
+        logger.exception("LLM analysis failed at the stage %r of %s", stage, os.path.basename(str(pdf_path)))
         traceback.print_exc()
-        return None, None, "Błąd analizy SOTA/LLM."
+        # the user has to learn about it: without this the analysis just "finishes" with no content grade
+        failure = {"stage": stage, "error": f"{type(error).__name__}: {error}"}
+        return {"analysis_error": failure}, None, "Błąd analizy SOTA/LLM."
     finally:
         timer.finish()
         cleanup_text_llm_instances()        # free RAM/VRAM also after an error or a cancelled analysis

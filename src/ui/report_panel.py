@@ -244,9 +244,11 @@ def build_report_panel(report_data, on_download):
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
     card, lay = _card()
-    if grade_info is None:
+    if data.get("analysis_error"):
+        lay.addWidget(_note(t("main.content_analysis_failed"), "bad"))
+    elif grade_info is None:
         lay.addWidget(_note(t("main.no_content_analysis"), "off"))
-    else:
+    if grade_info is not None:
         lay.addWidget(_bar(t("main.score_label"), f"{_fmt(grade)} / {_fmt(max_g)} {t('main.points')}", grade / max_g))
         lay.addWidget(_label(t("main.off_topic", count=off_topic, percent=p_off),
                              f"font-size: 13px; color: {styles.TEXT_3}; {TRANSPARENT}"))
