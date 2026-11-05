@@ -5,7 +5,7 @@ import time
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from analysis.modules.llm.config import (
@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # key in the user's app_config.json: the requirements file (JSON) used last, offered again next time
 LAST_CONFIG_KEY = "last_config_file"
 
+
+
+SCREEN_MARGIN = 40
 
 
 class FileBadge(QFrame):
@@ -294,7 +297,7 @@ class AnalysisDialog(QDialog):
         self.pdf_path = pdf_path
         self.setObjectName("AnalysisDialog")
         self.setWindowTitle(t("analysis.title"))
-        self.setFixedSize(*self.CONFIG_SIZE)
+        self.setFixedSize(*self._fit_to_screen(self.CONFIG_SIZE))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setStyleSheet(styles.DIALOG_STYLE)
 
@@ -476,6 +479,18 @@ class AnalysisDialog(QDialog):
         header.addWidget(self.close_btn, alignment=Qt.AlignTop)
         self.main_layout.addLayout(header)
 
+        # everything between the header and the buttons scrolls: on a small screen the buttons stay reachable
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(body)
+
         self.config_widget = QWidget()
         self.config_widget.setStyleSheet("background: transparent;")
         config_layout = QVBoxLayout(self.config_widget)
@@ -636,7 +651,7 @@ class AnalysisDialog(QDialog):
 
         config_layout.addLayout(mode_section)
         config_layout.addStretch(1)
-        self.main_layout.addWidget(self.config_widget, 1)
+        body_layout.addWidget(self.config_widget, 1)
 
         # --- progress view ----------------------------------------------------------
         self.progress_widget = QWidget()
@@ -700,7 +715,8 @@ class AnalysisDialog(QDialog):
         progress_layout.addWidget(self.resource_panel)
         progress_layout.addStretch()
         progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
-        self.main_layout.addWidget(self.progress_widget, 1)
+        body_layout.addWidget(self.progress_widget, 1)
+        self.main_layout.addWidget(scroll, 1)
 
         # --- footer -------------------------------------------------------------------
         self.footer = QWidget()
@@ -781,8 +797,13 @@ class AnalysisDialog(QDialog):
         self._clear_badge()
         self.json_frame.setVisible(True)
 
+    def _fit_to_screen(self, size):
+        """The size of the dialog, not higher than the screen (it has no frame to move it by)."""
+        return size[0], min(size[1], self.screen().availableGeometry().height() - SCREEN_MARGIN)
+
     def _resize_keep_center(self, size):
         """Resize the fixed-size dialog around its current centre."""
+        size = self._fit_to_screen(size)
         centre = self.geometry().center()
         self.setFixedSize(*size)
         self.move(centre.x() - size[0] // 2, centre.y() - size[1] // 2)

@@ -36,7 +36,8 @@ class PDFReader(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(t("main.window_title"))
-        self.resize(1440, 860)
+        available = self.screen().availableGeometry()
+        self.resize(min(1440, available.width()), min(860, available.height()))
         self.manager = SavingFiles()
         self.own_comments = []
         self.current_pdf_path = None
@@ -482,8 +483,14 @@ class PDFReader(QMainWindow):
 
     def update_report_panel(self, report_data):
         """Rebuilds the verification panel (look shared with the detailed PDF report, see ui/report_panel.py)."""
-        content, self.raport_btn = report_panel.build_report_panel(report_data, self.generate_detailed_report)
+        errors = self.manager.get_errors(self.current_pdf_path) if self.current_pdf_path else None
+        content, self.raport_btn = report_panel.build_report_panel(report_data, self.generate_detailed_report,
+                                                                   errors, self._go_to_page)
         self.report_scroll.setWidget(content)
+
+    def _go_to_page(self, index):
+        """Shows the page (counted from 0, as in the findings) in the viewer."""
+        self.pdf_view.pageNavigator().jump(index, QPointF(0, 0), self.pdf_view.zoomFactor())
 
     def zoom_in(self):
         """Increases the zoom of the document viewport."""

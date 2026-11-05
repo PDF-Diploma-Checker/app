@@ -1,7 +1,6 @@
 import os
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLayout, QFrame, QListView, QStyledItemDelegate,
-    QPushButton, QLineEdit, QComboBox, QFileDialog,
+    QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QPushButton, QScrollArea, QWidget, QStyledItemDelegate, QVBoxLayout,
 )
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
@@ -17,6 +16,8 @@ from common import gpu_check
 from common.version import APP_VERSION
 
 CONTROL_WIDTH = 150
+COMBO_WIDTH = 230
+SCREEN_MARGIN = 40
 CONTROL_HEIGHT = 40
 
 
@@ -110,7 +111,8 @@ class SettingsDialog(QDialog):
         self.setup_ui()
         self.load_config()
         # height follows the content (wrapped descriptions differ per language)
-        self.setFixedHeight(self.layout().totalHeightForWidth(self.width()))
+        needed = self.body.layout().totalHeightForWidth(self.width()) + self.footer.sizeHint().height() + 1
+        self.setFixedHeight(min(needed, self.screen().availableGeometry().height() - SCREEN_MARGIN))
 
     # ------------------------------------------------------------ building
     def _row(self, title, description, control, stacked=False):
@@ -147,8 +149,15 @@ class SettingsDialog(QDialog):
         return box
 
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(32, 28, 32, 24)
+        # the settings scroll and the buttons stay: the dialog is never higher than the screen
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.body = QWidget()
+        self.body.setObjectName("SettingsBody")
+        self.body.setStyleSheet(f"QWidget#SettingsBody {{ background-color: {styles.SURFACE}; }}")
+        main_layout = QVBoxLayout(self.body)
+        main_layout.setContentsMargins(32, 28, 32, 16)
         main_layout.setSpacing(0)
 
         title_label = QLabel(t("settings.header"))
@@ -199,22 +208,25 @@ class SettingsDialog(QDialog):
         main_layout.addSpacing(24)
 
         self.combo_device = DropdownCombo()
-        self.combo_device.addItems(["cuda", "cpu"])
-        self.combo_device.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.combo_device.addItem(t("settings.device_gpu"), "cuda")
+        self.combo_device.addItem(t("settings.device_cpu"), "cpu")
+        self.combo_device.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
+        self.combo_device.currentIndexChanged.connect(self._update_gpu_layers)
         main_layout.addLayout(self._row(t("settings.device"), t("settings.device_desc"), self.combo_device))
         main_layout.addSpacing(24)
 
         self.input_gpu_layers = QLineEdit()
         self.input_gpu_layers.setPlaceholderText(t("settings.gpu_layers_placeholder"))
-        self.input_gpu_layers.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.input_gpu_layers.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
         main_layout.addLayout(
             self._row(t("settings.gpu_layers"), t("settings.gpu_layers_desc"), self.input_gpu_layers)
         )
         main_layout.addSpacing(24)
 
         self.combo_language = DropdownCombo()
-        self.combo_language.addItems(["pl", "en"])
-        self.combo_language.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.combo_language.addItem("Polski", "pl")
+        self.combo_language.addItem("English", "en")
+        self.combo_language.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
         main_layout.addLayout(
             self._row(t("settings.default_language"), t("settings.default_language_desc"), self.combo_language)
         )
@@ -247,11 +259,18 @@ class SettingsDialog(QDialog):
         models_row.addWidget(self.btn_download, 0, Qt.AlignVCenter)
         main_layout.addLayout(self._row(t("settings.models"), t("settings.models_desc"), models_row, stacked=True))
 
-        main_layout.addSpacing(24)
-        main_layout.addWidget(_separator())
-        main_layout.addSpacing(20)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"QScrollArea {{ background-color: {styles.SURFACE}; border: none; }}")
+        scroll.setWidget(self.body)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(_separator())
 
-        btn_layout = QHBoxLayout()
+        self.footer = QWidget()
+        btn_layout = QHBoxLayout(self.footer)
+        btn_layout.setContentsMargins(32, 16, 32, 24)
         btn_layout.setSpacing(10)
         btn_save = QPushButton(t("settings.save"))
         btn_save.setFixedHeight(42)
@@ -279,7 +298,11 @@ class SettingsDialog(QDialog):
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
-        main_layout.addLayout(btn_layout)
+        outer.addWidget(self.footer)
+
+    def _update_gpu_layers(self):
+        """The layers on the graphics card mean nothing when the processor does the work."""
+        self.input_gpu_layers.setEnabled(self.combo_device.currentData() == "cuda")
 
     def browse_directory(self):
         dir_path = QFileDialog.getExistingDirectory(self, t("settings.choose_model_dir"))
@@ -316,11 +339,11 @@ class SettingsDialog(QDialog):
         self.input_model_dir.setText(data.get("model_dir", ""))
         self.effective_dir_label.setText(t("settings.effective_model_dir", path=app_config.MODEL_DIR))
         self._update_models_status()
-        idx = self.combo_device.findText(data.get("device", "cpu"))
+        idx = self.combo_device.findData(data.get("device", "cpu"))
         if idx >= 0:
             self.combo_device.setCurrentIndex(idx)
         self.input_gpu_layers.setText(str(data.get("n_gpu_layers", 0)))
-        idx = self.combo_language.findText(data.get("language", "pl"))
+        idx = self.combo_language.findData(data.get("language", "pl"))
         if idx >= 0:
             self.combo_language.setCurrentIndex(idx)
 
@@ -328,15 +351,19 @@ class SettingsDialog(QDialog):
     def save_config(self):
         try:
             gpu_layers = int(self.input_gpu_layers.text().strip())
+            if gpu_layers < 0:
+                raise ValueError
         except ValueError:
-            gpu_layers = 25
+            MessageBox.warning(self, t("common.error"), t("settings.invalid_gpu_layers"))
+            self.input_gpu_layers.setFocus()
+            return
 
         data = app_config.load_config()
         data.update({
-            "device": self.combo_device.currentText(),
+            "device": self.combo_device.currentData(),
             "n_gpu_layers": gpu_layers,
             "model_dir": self.input_model_dir.text().strip(),
-            "language": self.combo_language.currentText(),
+            "language": self.combo_language.currentData(),
         })
         try:
             app_config.save_config(data)
