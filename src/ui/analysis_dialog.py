@@ -299,6 +299,7 @@ class AnalysisDialog(QDialog):
         self.ai_available = llm_runtime_available()
         self.models_available = are_ai_models_downloaded() if self.ai_available else False
         self._close_after_cancel = False
+        self._cancel_started = None
         self.monitor = None
         self._eta_doc = None
         self._eta_hw = None
@@ -626,6 +627,7 @@ class AnalysisDialog(QDialog):
             f"font-size: 24px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
         )
         self.eta_detail_label = QLabel()
+        self.eta_detail_label.setWordWrap(True)
         self.eta_detail_label.setStyleSheet(styles.HINT_STYLE)
 
         # current step + percent above the bar
@@ -899,12 +901,22 @@ class AnalysisDialog(QDialog):
         self.worker.progress_update.disconnect(self.update_progress)
         self.worker.finished.connect(self._on_worker_cancelled)
         self.cancel_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        logger.info("Cancel requested by the user")
+        self._cancel_started = time.monotonic()
         self.progress_label.setText(t("analysis.cancelling"))
+        self.eta_left_label.setText(t("analysis.cancelling_title"))
+        self.eta_detail_label.setText(t("analysis.cancelling_note"))
+        self.pbar.setRange(0, 0)        # keeps moving: the window is not frozen, it waits for the current step
         if self.worker.isFinished():
             # The thread ended before the connection was made.
             self._on_worker_cancelled()
 
     def _on_worker_cancelled(self):
+        if self._cancel_started is not None:
+            logger.info("The analysis stopped %.1f s after the cancel request", time.monotonic() - self._cancel_started)
+            self._cancel_started = None
+        self.pbar.setRange(0, 100)
         self.cancel_btn.setEnabled(True)
         if self._close_after_cancel:
             self._close_after_cancel = False
