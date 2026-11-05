@@ -55,7 +55,7 @@ jobs:
             --add-data "${pl_path};pl_core_news_lg" `
             --add-data "${en_path};en_core_web_lg" `
             @extra `
-            src/app/main.py
+            src/app/launcher.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
