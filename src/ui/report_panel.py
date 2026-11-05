@@ -279,6 +279,9 @@ def build_report_panel(report_data, on_download):
                             "bad" if quality else "ok"))
         lay.addWidget(_note(t("main.font_consistency_errors", count=len(fonts)) if fonts else t("main.font_consistency_ok"),
                             "bad" if fonts else "ok"))
+        axes = data.get("osie_wykresow") or []
+        lay.addWidget(_note(t("main.chart_axes_errors", count=len(axes)) if axes else t("main.chart_axes_ok"),
+                            "bad" if axes else "ok"))
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked"), "off"))
     raster = img.get("image_raster", []) or []
