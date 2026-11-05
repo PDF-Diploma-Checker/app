@@ -179,6 +179,8 @@ def validate_manifest(manifest):
         for p in parts:
             if not re.fullmatch(r"[\w.\-]+", str(p["name"])):
                 raise UpdateError("invalid")
+            if p.get("release") and not re.fullmatch(r"v?\d[\w.\-]*", str(p["release"])):
+                raise UpdateError("invalid")
         seen = set()
         for e in manifest["files"]:
             if not _safe_rel(e["p"]):
