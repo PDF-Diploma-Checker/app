@@ -2,6 +2,8 @@ import concurrent.futures
 import importlib
 import logging
 import os
+import platform
+import sys
 import threading
 
 from analysis.extraction.service import ExtractionService
@@ -9,8 +11,14 @@ from analysis.modules.linguistics.linguistics_service import LinguisticsService
 from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
 from common.timing import log_time
+from common.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+def kwargs_summary(kwargs):
+    """The analysis options for the log, without callbacks."""
+    return {key: value for key, value in kwargs.items() if isinstance(value, (bool, str, int, type(None)))}
 
 
 class AnalysisPipeline:
@@ -22,6 +30,9 @@ class AnalysisPipeline:
     def run(self, input_document, use_llm=True, **kwargs):
         mode = "detailed" if use_llm else "fast"
         name = os.path.basename(str(getattr(input_document, "pdf_path", "")))
+        logger.info("Analysis of %s: app %s, Python %s, %s %s, %s mode, frozen=%s, options=%s", name, APP_VERSION,
+                    platform.python_version(), platform.system(), platform.release(), mode,
+                    getattr(sys, "frozen", False), kwargs_summary(kwargs))
         with log_time(logger, f"Whole analysis of {name} ({mode} mode)"):
             return self._run(input_document, use_llm=use_llm, **kwargs)
 

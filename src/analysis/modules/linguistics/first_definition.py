@@ -245,7 +245,7 @@ def check_italic_def(content, block, offset, length, block_language):
     if block_language == "en":
         message = "Definition in a foreign language should be written in italic."
     matched_words = [w for w in block.words if w.word_index in word_idxs]
-    logger.info("check_italic_def: word_idxs=%s, matched words: %s", word_idxs,
+    logger.debug("check_italic_def: word_idxs=%s, matched words: %s", word_idxs,
                 [(w.word_index, w.text, w.italic) for w in matched_words])
     if matched_words and not all(w.italic for w in matched_words):
         return add_match(content, block.block_id, start_page, end_page, word_idxs, error_coordinate, category = "STYLE", message = message)

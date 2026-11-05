@@ -18,6 +18,7 @@ from analysis.modules.llm.config import (
 
 from common import eta, gpu_check, run_control
 from common.resource_monitor import ResourceMonitor
+from common import crash_log
 from common.cancellation import AnalysisCancelled, CancelToken
 
 from . import icons, styles
@@ -173,6 +174,7 @@ class PipelineWorker(QThread):
     def run(self):
         # code deep in the analysis (the AI models) reports its status and checks for a cancel through run_control
         run_control.bind(self.cancel_token, self._report_progress)
+        crash_log.analysis_started(self.pdf_path)
         try:
             self._report_progress(5, t("analysis.checking_language"))
             download_specific_language(self.language)
@@ -276,6 +278,7 @@ class PipelineWorker(QThread):
             logger.exception("Analysis pipeline failed")
             self.finished_error.emit(str(e))
         finally:
+            crash_log.analysis_finished()
             run_control.unbind()
 
 
