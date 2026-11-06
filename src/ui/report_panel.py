@@ -7,6 +7,8 @@ the rest is in the detailed report.
 `report_data` is the AI result stored for the document. The texts come from the app language (t()).
 """
 
+from collections import Counter
+
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
@@ -180,21 +182,6 @@ def _note(text, kind):
     return frame
 
 
-def _chips(labels):
-    box = QWidget()
-    box.setStyleSheet("background: transparent;")
-    flow = _FlowLayout(box, spacing=6)
-    for text in labels:
-        chip = QLabel(text)
-        chip.setStyleSheet(
-            f"background-color: {styles.PRIMARY_50}; color: {styles.PRIMARY_PRESSED}; border: 1px solid {styles.PRIMARY_200}; "
-            "border-radius: 10px; padding: 3px 10px; font-size: 12px; font-weight: 700;"
-        )
-        flow.addWidget(chip)
-    box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-    return box
-
-
 def _bullets(items, color):
     lines = "".join(
         f"<tr><td style='color:{color}; padding-right:6px;' valign='top'>&#9679;</td>"
@@ -225,8 +212,41 @@ def _escape(text):
 
 
 # ----------------------------------------------------------------------------- the panel
-def build_report_panel(report_data, on_download):
-    """Returns (scrollable content widget, the "download report" button)."""
+def _page_buttons(pages, on_page):
+    """One button per page with findings: {page index: count}. A click shows the page."""
+    box = QWidget()
+    box.setStyleSheet("background: transparent;")
+    flow = _FlowLayout(box, spacing=6)
+    for page, count in sorted(pages.items()):
+        button = QPushButton(t("main.findings_page", page=page + 1, count=count))
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(
+            f"QPushButton {{ background-color: {styles.PRIMARY_50}; color: {styles.PRIMARY_PRESSED}; "
+            "border: none; border-radius: 10px; padding: 3px 10px; font-size: 12px; font-weight: 700; }"
+        )
+        button.clicked.connect(lambda _checked=False, target=page: on_page(target))
+        flow.addWidget(button)
+    box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+    return box
+
+
+def _findings_section(root, errors, on_page):
+    """How many findings the text has and where: the markers on the pages alone do not tell it."""
+    root.addWidget(_section(t("main.findings_header")))
+    card, lay = _card()
+    pages = Counter(int(error.get("page", 0)) for error in errors if isinstance(error, dict))
+    if pages:
+        lay.addWidget(_note(t("main.findings_count", count=sum(pages.values()), pages=len(pages)), "bad"))
+        lay.addWidget(_label(t("main.findings_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
+        lay.addWidget(_page_buttons(pages, on_page))
+    else:
+        lay.addWidget(_note(t("main.findings_none"), "ok"))
+    root.addWidget(card)
+
+
+def build_report_panel(report_data, on_download, errors=None, on_page=lambda index: None):
+    """Returns (scrollable content widget, the "download report" button). `errors`: the findings in the text of the
+    thesis, None when the document was not analysed; on_page(index) shows a page."""
     data = report_data or {}
     content = QWidget()
     content.setStyleSheet("background: transparent; border: none;")
@@ -252,6 +272,8 @@ def build_report_panel(report_data, on_download):
             grade = _number(grade_info)
 
     root.addWidget(_note(t("main.disclaimer"), "warn"))
+    if errors is not None and report_data is not None:
+        _findings_section(root, errors, on_page)
 
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
@@ -259,7 +281,7 @@ def build_report_panel(report_data, on_download):
     if data.get("analysis_error"):
         lay.addWidget(_note(t("main.content_analysis_failed"), "bad"))
     elif grade_info is None:
-        lay.addWidget(_note(t("main.no_content_analysis"), "off"))
+        lay.addWidget(_note(t("main.detailed_only"), "off"))
     if grade_info is not None:
         lay.addWidget(_bar(t("main.score_label"), f"{_fmt(grade)} / {_fmt(max_g)} {t('main.points')}", grade / max_g))
         lay.addWidget(_label(t("main.off_topic", count=off_topic, percent=p_off),
@@ -303,11 +325,11 @@ def build_report_panel(report_data, on_download):
         if axes:
             lay.addWidget(_bullets(_figure_problems(axes), styles.DANGER_DOT))
     elif not img.get("analysis_failed"):
-        lay.addWidget(_note(t("main.no_figures_checked"), "off"))
+        lay.addWidget(_note(t("main.no_figures_checked") if grade_info is not None else t("main.detailed_only"), "off"))
     raster = img.get("image_raster", []) or []
     if raster:
-        lay.addWidget(_label(t("main.raster_detected"), f"font-size: 12px; font-weight: 600; color: {styles.TEXT_2}; {TRANSPARENT}"))
-        lay.addWidget(_chips([n if not str(n)[:1].isdigit() else t("main.figure_chip", num=n) for n in raster]))
+        lay.addWidget(_label(t("main.raster_short", count=len(raster), names=", ".join(str(n).split()[-1] for n in raster)),
+                             f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
     root.addWidget(card)
 
     # ---- sentence statistics
