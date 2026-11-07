@@ -510,7 +510,14 @@ function Retry($action) {
 $keep = $Preserve -split ","
 $done = @()
 try {
-    try { Wait-Process -Id $ProcId -Timeout 120 -ErrorAction SilentlyContinue } catch {}
+    try { Wait-Process -Id $ProcId -Timeout 60 -ErrorAction SilentlyContinue } catch {}
+    if (Get-Process -Id $ProcId -ErrorAction SilentlyContinue) {
+        # the app did not end by itself (an analysis thread stuck in native code): it holds the files to replace
+        Log "the app is still running after 60 s, ending it"
+        # not "taskkill /T": this script is a child of the app too. Its other children die with its job object.
+        try { Stop-Process -Id $ProcId -Force -ErrorAction SilentlyContinue } catch {}
+        try { Wait-Process -Id $ProcId -Timeout 30 -ErrorAction SilentlyContinue } catch {}
+    }
     Start-Sleep -Seconds 1
     Log "swap start"
     foreach ($item in Get-ChildItem -LiteralPath $New -Force) {
@@ -549,7 +556,12 @@ RESULT="$UPDATE/result.txt"
 log() { echo "$(date +%FT%T) $*" >> "$UPDATE/update.log"; }
 keep() { case ",$PRESERVE," in *",$1,"*) return 0;; esac; return 1; }
 
-for _ in $(seq 1 240); do kill -0 "$PID" 2>/dev/null || break; sleep 0.5; done
+for _ in $(seq 1 120); do kill -0 "$PID" 2>/dev/null || break; sleep 0.5; done
+if kill -0 "$PID" 2>/dev/null; then
+    log "the app is still running after 60 s, ending it"
+    kill -KILL "$PID" 2>/dev/null
+    for _ in $(seq 1 60); do kill -0 "$PID" 2>/dev/null || break; sleep 0.5; done
+fi
 sleep 1
 log "swap start"
 done_list=()
@@ -611,14 +623,26 @@ def apply_update_and_restart(staged):
     validate_package(Path(staged.new_dir).parent)
     command = _write_script(staged)
     logger.info("Starting the update helper for version %s", staged.version)
+    from common import process_guard
+
     kwargs = {}
     if sys.platform == "win32":
+        # BREAKAWAY: outside the job object of the app, which kills all its processes when the app ends
         kwargs["creationflags"] = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-                                   | subprocess.CREATE_NEW_PROCESS_GROUP)
+                                   | subprocess.CREATE_NEW_PROCESS_GROUP | process_guard.breakaway_flags())
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     close_fds=True, **kwargs)
+    streams = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    try:
+        helper = subprocess.Popen(command, **streams, **kwargs)
+    except OSError:
+        if not process_guard.breakaway_flags():
+            raise
+        # the app runs inside a job of another program that forbids leaving it: start the helper without that
+        logger.warning("The update helper cannot leave the job object, starting it inside", exc_info=True)
+        kwargs["creationflags"] &= ~process_guard.breakaway_flags()
+        helper = subprocess.Popen(command, **streams, **kwargs)
+    process_guard.spare(helper.pid)             # the app kills its children on exit, but not this one
 
 
 # --------------------------------------------------------------------------- after the swap

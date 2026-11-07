@@ -272,6 +272,16 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
             grade = _number(grade_info)
 
     root.addWidget(_note(t("main.disclaimer"), "warn"))
+
+    failure = data.get("analysis_error")
+    if isinstance(failure, dict):
+        text = t("main.ai_failed", stage=failure.get("stage", "?"), error=failure.get("error", "?"))
+        if failure.get("hint"):
+            text += "\n" + str(failure["hint"])
+        text += "\n" + t("main.ai_failed_logs")
+        root.addWidget(_note(text, "bad"))
+    elif data.get("gpu_layers_fallback") is not None:
+        root.addWidget(_note(t("main.ai_gpu_fallback", layers=data["gpu_layers_fallback"]), "warn"))
     if errors is not None and report_data is not None:
         _findings_section(root, errors, on_page)
 
