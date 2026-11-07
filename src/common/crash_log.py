@@ -34,6 +34,16 @@ def enable():
         logger.exception("Could not enable the crash log")
 
 
+def note(text):
+    """Add a line to crash.log (a crash of the AI process, which the app itself survived)."""
+    try:
+        import time
+        with open(crash_log_path(), "a", encoding="utf-8") as f:
+            f.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} {text}\n")
+    except OSError:
+        logger.exception("Could not write to the crash log")
+
+
 def analysis_started(pdf_path):
     try:
         _marker().write_text(str(pdf_path), encoding="utf-8")

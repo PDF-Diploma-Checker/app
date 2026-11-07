@@ -77,7 +77,8 @@ class AnalysisPipeline:
         def task_llm():
             ling_ready_event.wait()
             try:
-                from app.llm_task import run_task_llm
+                # in its own process: a crash of llama.cpp in native code must not take the app down with it
+                from app.llm_process import run_task_llm_isolated as run_task_llm
 
                 return run_task_llm(
                     doc_obj=doc_obj,
@@ -90,7 +91,11 @@ class AnalysisPipeline:
 
             except Exception as e:
                 logger.error(f"[PIPELINE] LLM script execution error: {e}", exc_info=True)
-                return None, None, "LLM analysis error."
+                from common import run_control
+
+                run_control.report_problem("AI", f"{type(e).__name__}: {e}")
+                failure = {"stage": "?", "error": f"{type(e).__name__}: {e}", "hint": "", "crashed": False}
+                return {"analysis_error": failure}, None, "LLM analysis error."
 
         def task_linguistics():
             try:
@@ -149,12 +154,9 @@ class AnalysisPipeline:
                     config_path=config_path,
                     language=language,
                 )
-                font_usage = doc_obj.get_font_size_usage()
-                doc_obj.get_most_common_font_size = (
-                    lambda: max(font_usage, key=font_usage.get, default=12)
-                    if font_usage
-                    else 12
-                )
+                from app.llm_process import patch_most_common_font_size
+
+                patch_most_common_font_size(doc_obj)
 
                 redaction_errors = validator.validate()
 

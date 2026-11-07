@@ -1,6 +1,11 @@
 import logging
+import multiprocessing
 import os
 import sys
+
+# The AI part runs in a child process started from this same executable (app.llm_process). In a build that child
+# arrives here first: freeze_support() runs it and exits, before any window or log file is opened.
+multiprocessing.freeze_support()
 
 if not getattr(sys, "frozen", False):        # in a build app/launcher.py starts this file
     _SRC = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -9,12 +14,13 @@ if not getattr(sys, "frozen", False):        # in a build app/launcher.py starts
 
 from common.logging_setup import configure_logging
 
-log_file = configure_logging()
+if multiprocessing.current_process().name == "MainProcess":     # not in the AI process of a development start
+    log_file = configure_logging()
 logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from analysis.modules.llm.config import check_and_download_requirements, java_available, llm_runtime_available
-from common import crash_log
+from common import crash_log, process_guard
 from ui import error_dialog, styles
 from ui.license_dialog import ensure_accepted
 from ui.main_window import PDFReader
@@ -23,7 +29,7 @@ SMOKE_MODULES = [
     "ui.main_window", "ui.settings", "ui.report_bug", "ui.log_window", "ui.analysis_dialog",
     "ui.ai_setup_dialog", "common.gpu_check", "common.run_control", "common.resource_monitor",
     "ui.update_dialog", "common.updater",
-    "app.entry", "app.pipeline", "app.llm_task",
+    "app.entry", "app.pipeline", "app.llm_task", "app.llm_process", "common.process_guard",
     "analysis.modules.linguistics.run_linguistics",
     "analysis.modules.redaction.redaction_validator",
 ]
@@ -101,9 +107,10 @@ def main():
     app = QApplication(sys.argv)
     styles.apply_global_style(app)
     crash_log.enable()
+    process_guard.install()         # before LanguageTool or the AI process is started
     error_dialog.install()
     if not ensure_accepted():
-        sys.exit(0)
+        process_guard.exit_now(0)
     check_and_download_requirements()
     if not java_available():
         QMessageBox.warning(
@@ -119,14 +126,19 @@ def main():
         QMessageBox.warning(window, t("analysis.crashed_title"), t("analysis.crashed_text"))
     if update_result:
         _show_update_result(update_result)
-    sys.exit(app.exec())
+    code = app.exec()
+    # not sys.exit(): it waits for analysis threads, and one stuck in native code kept the process (and the files an
+    # update has to replace) alive after the window was gone
+    process_guard.exit_now(code)
 
 
 def run():
     if "--smoke-test" in sys.argv:
         sys.exit(smoke_test())
     if "--analysis-test" in sys.argv:
-        sys.exit(analysis_test(sys.argv[sys.argv.index("--analysis-test") + 1]))
+        process_guard.install()
+        code = analysis_test(sys.argv[sys.argv.index("--analysis-test") + 1])
+        process_guard.exit_now(code)
     try:
         main()
     except Exception:

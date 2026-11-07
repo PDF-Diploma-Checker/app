@@ -177,6 +177,14 @@ def reload_config():
 reload_config()
 
 
+def override_gpu_layers(layers):
+    """Use `layers` GPU layers in this process only (the AI process retrying with fewer layers); not saved."""
+    global N_GPU_LAYERS
+    old = {"N_GPU_LAYERS": N_GPU_LAYERS}
+    N_GPU_LAYERS = int(layers) if DEVICE == "cuda" else 0
+    _propagate(old)
+
+
 # --------------------------------------------------------------------------- checks
 
 def _embedding_complete(directory):

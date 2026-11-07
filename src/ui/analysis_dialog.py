@@ -132,6 +132,11 @@ class ConfigDropFrame(QFrame):
 
 
 _LIVE_WORKERS = set()       # keeps a running QThread alive until it has finished
+_OPEN_BOXES = set()         # non-modal problem windows, kept alive until closed
+
+
+def _escape(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class _EtaInputsWorker(QThread):
@@ -156,6 +161,7 @@ class PipelineWorker(QThread):
     progress_update = Signal(int, str)
     finished_success = Signal(dict)
     finished_error = Signal(str)
+    problem = Signal(str, str, bool)    # (title, text, popup): a part of the analysis failed, the rest goes on
 
     def __init__(self, pdf_path, config_path, use_llm, language, check_images=True):
         super().__init__()
@@ -176,7 +182,7 @@ class PipelineWorker(QThread):
 
     def run(self):
         # code deep in the analysis (the AI models) reports its status and checks for a cancel through run_control
-        run_control.bind(self.cancel_token, self._report_progress)
+        run_control.bind(self.cancel_token, self._report_progress, self.problem.emit)
         crash_log.analysis_started(self.pdf_path)
         try:
             self._report_progress(5, t("analysis.checking_language"))
@@ -707,6 +713,14 @@ class AnalysisDialog(QDialog):
         progress_layout.addSpacing(4)
         progress_layout.addLayout(step_row)
         progress_layout.addWidget(self.pbar)
+        self.problem_label = QLabel()
+        self.problem_label.setWordWrap(True)
+        self.problem_label.setTextFormat(Qt.RichText)
+        self.problem_label.setStyleSheet(
+            f"background-color: {styles.WARNING_BG}; color: {styles.TEXT}; border: 1px solid {styles.WARNING};"
+            " border-radius: 8px; padding: 8px 10px; font-size: 12px;")
+        self.problem_label.setVisible(False)
+        progress_layout.addWidget(self.problem_label)
         progress_layout.addSpacing(6)
         progress_layout.addWidget(self.stages_title)
         progress_layout.addWidget(self.stage_list)
@@ -854,6 +868,7 @@ class AnalysisDialog(QDialog):
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)
         self.worker.finished_error.connect(self.on_analysis_error)
+        self.worker.problem.connect(self._on_problem)
         self.worker.finished.connect(self._stop_monitor)
         self._start_monitor(is_detailed)
         self.worker.start()
@@ -917,6 +932,24 @@ class AnalysisDialog(QDialog):
         except Exception:
             logger.exception("Could not store the analysis time")
 
+    def _on_problem(self, title, text, popup=True):
+        """A part of the analysis failed (usually the AI part): say so at once, in a window of its own that does not
+        stop the analysis. The rest of the analysis goes on and the report shows what is missing."""
+        if self.worker.cancel_token.is_cancelled():
+            return
+        self.problem_label.setText(f"<b>{_escape(title)}</b><br>{_escape(text)}".replace("\n", "<br>"))
+        self.problem_label.setVisible(True)
+        if not popup:
+            return
+        # owned by the main window: it stays open when this dialog closes with the report
+        box = MessageBox(self.parentWidget(), "warning", title, text, MessageBox.Ok, MessageBox.Ok)
+        box.setModal(False)
+        box.setAttribute(Qt.WA_DeleteOnClose, True)
+        _OPEN_BOXES.add(box)
+        box.finished.connect(lambda _=None, b=box: _OPEN_BOXES.discard(b))
+        box.show()
+        box.raise_()
+
     def on_analysis_error(self, message):
         """Tell the user what went wrong and return to the settings screen."""
         if self.worker.cancel_token.is_cancelled():
@@ -977,6 +1010,7 @@ class AnalysisDialog(QDialog):
         super().reject()
 
     def reset_ui_state(self):
+        self.problem_label.setVisible(False)
         self._resize_keep_center(self.CONFIG_SIZE)
         self.pbar.setValue(0)
         self.cancel_btn.setEnabled(True)
