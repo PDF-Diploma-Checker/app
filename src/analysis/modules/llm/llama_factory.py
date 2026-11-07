@@ -25,6 +25,39 @@ _BIG_MODEL_BYTES = 1_000_000_000      # smaller files (projectors...) are not wo
 _VRAM_TAKEN_MB = 300                  # at least this much new video memory means the model really sits on the GPU
 
 
+# llama_decode() return codes (llama.h) and what they mean for the user
+_DECODE_CODES = {
+    1: "brak miejsca w pamięci kontekstu modelu (KV cache) - tekst jest za długi dla ustawionego n_ctx",
+    2: "generowanie przerwane",
+    -1: "nieprawidłowe dane wejściowe dla modelu",
+    -2: "błąd przydziału pamięci (VRAM/RAM)",
+    -3: "błąd obliczeń na urządzeniu (GPU/CPU)",
+}
+
+
+class LlamaRunError(RuntimeError):
+    """llama.cpp reported an error while generating (one that it did not turn into an abort)."""
+
+    @classmethod
+    def from_error(cls, error, llm):
+        text = str(error)
+        code = None
+        if "llama_decode returned" in text:
+            try:
+                code = int(text.rsplit(" ", 1)[-1])
+            except ValueError:
+                pass
+        meaning = _DECODE_CODES.get(code, "")
+        layers = getattr(getattr(llm, "model_params", None), "n_gpu_layers", None)
+        hint = ""
+        if code in (-2, -3) and layers:
+            hint = (f" Model ma {layers} warstw na karcie graficznej: zmniejsz ich liczbę w ustawieniach "
+                    "(Sprawdź system i ustaw CPU/GPU) albo przełącz obliczenia na procesor.")
+        logger.error("llama.cpp failed while generating: %s (%s), GPU layers: %s", text, meaning or "?", layers)
+        message = f"llama.cpp: {text}" + (f" - {meaning}." if meaning else ".") + hint
+        return cls(message)
+
+
 class _CancellableLlama(Llama):
     """A Llama whose completions stop when the analysis is cancelled. Both ways of asking the model go through here:
     chat completions, and plain `llm(prompt)` calls such as the section summaries."""
@@ -42,7 +75,12 @@ class _CancellableLlama(Llama):
         if self._cancel_processor not in processors:    # a chat completion ends up in create_completion too
             processors.append(self._cancel_processor)
         kwargs["logits_processor"] = processors
-        result = generate(*args, **kwargs)
+        try:
+            result = generate(*args, **kwargs)
+        except LlamaRunError:
+            raise                           # already explained by the inner call (chat -> completion)
+        except RuntimeError as error:
+            raise LlamaRunError.from_error(error, self) from error
         run_control.check_cancelled()       # a cancelled generation returns a cut-off answer: do not use it
         return result
 
