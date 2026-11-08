@@ -47,6 +47,8 @@ class ParagraphBlock:  # Informacje o blokach tekstowych, które mogą być para
     words: List[WordInfo] = field(default_factory=list)
     incorrect_caption: int = 0
     language: str = "pl"
+    # A hyphen read as a list marker ("USB" / "- Uniwersalna ...") is cut from `words` but kept here for the dash check.
+    marker_word: Optional[WordInfo] = None
 
 
 @dataclass
