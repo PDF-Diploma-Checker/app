@@ -531,6 +531,19 @@ class PDFMapper:
         if space_density > 0.3:
             return 1
 
+        # A line of running text whose only math-font words are plain numbers (e.g. "wynosić 6,00 mm," or
+        # "0,40 mm do 0,48 mm.") is a continuation of a sentence, not a formula: it holds at least two ordinary
+        # words (also short ones like units). Variables and symbols (v, ∈, =) keep the line a formula.
+        math_words = [w for w in words if any(mf in (w.font or "").lower() for mf in math_font_names)]
+        plain_words = [
+            w for w in words
+            if w not in math_words
+            and sum(c.isalpha() for c in w.text) >= 2
+            and all(c.isalpha() or c in ",.;:" for c in w.text)
+        ]
+        if len(plain_words) >= 2 and all(re.fullmatch(r"[\d.,]+", w.text) for w in math_words):
+            return 0
+
         math_font_count = sum(
             1
             for w in words
