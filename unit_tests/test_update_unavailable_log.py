@@ -10,7 +10,10 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from common import updater  # noqa: E402
-from ui.update_banner import UpdateBanner  # noqa: E402
+try:
+    from ui.update_banner import UpdateBanner  # noqa: E402
+except ImportError as error:    # e.g. a CI runner without the system libraries Qt needs (libEGL)
+    raise unittest.SkipTest(f"Qt is not available: {error}")
 
 ASSET = {"name": updater.APP_DIR_NAME + "-windows-cpu.zip"}
 
