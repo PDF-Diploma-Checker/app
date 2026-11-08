@@ -160,6 +160,18 @@ def language_tool_analisys(blocks):
                     if typo_check(word):
                         dropped("word known to the dictionaries", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
+                    elif match.category == "SYNTAX" and len(word.split()) > 1:
+                        # a misspelled verb looks like a sentence without one, and this finding hides the typo itself
+                        other_tool, messages = (tool_en, polish_messages) if text_language == 'pl' else (tool_pl, english_messages)
+                        typos = [m for m in other_tool.check(word) if m.category == "TYPOS" and not typo_check(m.matched_text)]
+                        for typo in typos:
+                            typo.sentence = match.sentence
+                            typo.offset += match.offset
+                            typo.message = messages["TYPOS"]
+                        new_matches.extend(typos)
+                        if not typos:
+                            dropped("a whole sentence without a misspelled word", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                        continue
                     elif text_language == 'pl':
                         en_matches = tool_en.check(word)
                         for en_match in en_matches:
