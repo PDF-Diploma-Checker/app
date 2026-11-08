@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from common import run_control
-from common.path import APP_CONFIG_PATH, DATA_DIR, DEFAULT_MODEL_DIR, LEGACY_MODEL_DIR
+from common.path import APP_CONFIG_PATH, APP_NAME, DATA_DIR, DEFAULT_MODEL_DIR, LEGACY_MODEL_DIR, PORTABLE
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,14 @@ def default_model_dir():
     return DEFAULT_MODEL_DIR
 
 
+def _is_another_install(model_dir):
+    """True for the models folder of another copy of the app with no models in it: the settings come from an earlier
+    version or the app folder was renamed, and using this path would create a folder that nothing else uses."""
+    path = Path(model_dir).expanduser()
+    app_folder = path.parent if path.name == "models" else path
+    return PORTABLE and app_folder.name == APP_NAME and path != DEFAULT_MODEL_DIR and not _models_present(path)
+
+
 # Settings that describe THIS computer. A settings file copied to another computer (for instance because the app
 # folder was packed after it had been run and configured) must not carry them over: the other computer would "force"
 # a GPU it does not have and look for the models in a folder of somebody else.
@@ -115,6 +123,9 @@ def load_config():
                 for key in _MACHINE_KEYS:
                     cfg[key] = defaults[key]
                 logger.warning("The settings file comes from another computer (%s): hardware settings reset", saved_on)
+            if cfg.get("model_dir") and _is_another_install(cfg["model_dir"]):
+                logger.warning("Models folder %s belongs to another copy of the app: using the default", cfg["model_dir"])
+                cfg["model_dir"] = ""
     except FileNotFoundError:
         try:
             save_config(cfg)
