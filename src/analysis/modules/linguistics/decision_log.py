@@ -6,6 +6,7 @@ import re
 logger = logging.getLogger(__name__)
 
 MAX_SENTENCE_CHARS = 1500
+CONTEXT_CHARS = 500     # so much text on each side of a finding is shown to the model
 _SENTENCE_END = re.compile(r"[.!?…]\s+(?=[\"„(\[]?[A-ZĄĆĘŁŃÓŚŹŻ])")
 
 
@@ -50,6 +51,16 @@ def _match_context(match, block):
     return sentence_with_mark(block.contents, position, len(match.content))
 
 
+def _text_around(match, block):
+    '''The text around the finding, which stands between « ». Empty when the text does not hold it.'''
+    position = _position(match, block)
+    if position is None:
+        return ""
+    end = position + len(match.content)
+    text = block.contents
+    return f"{_flat(text[max(0, position - CONTEXT_CHARS):position])} «{_flat(text[position:end])}» {_flat(text[end:end + CONTEXT_CHARS])}".strip()
+
+
 def _block_info(block):
     return f"block={block.block.block_id}/{block.block.type}/{block.language}" if block else "block=?"
 
@@ -73,6 +84,26 @@ def reported(source, match, block=None, section=""):
                 _flat(match.content)[:80], _flat(match.message), match.why or "-", _match_context(match, block))
 
 
+def _model_line(tag, match, note):
+    logger.info("[%s] %s source=%s rule=%s page=%s found=%r message=%s model=%s | text: %s", tag, match.category, match.source or "-",
+                match.rule or "-", match.page_start, _flat(match.content)[:80], _flat(match.message), _flat(note) or "-", match.context or "-")
+
+
+def confirmed_by_model(match, reason):
+    '''A finding the model read and found to be a real error.'''
+    _model_line("MODEL CONFIRMED", match, reason)
+
+
+def rejected_by_model(match, reason):
+    '''A finding removed from the report, because the model found the text correct.'''
+    _model_line("MODEL REJECTED", match, reason)
+
+
+def not_reviewed(reason, match):
+    '''A finding that stays in the report without the opinion of the model.'''
+    _model_line("MODEL NOT ASKED", match, reason)
+
+
 def report_sources(sources, kept, blocks):
     '''One line for every finding left after the last filter. `sources`: (name of the check, its findings).'''
     by_id = {b.block.block_id: b for b in blocks}
@@ -84,6 +115,8 @@ def report_sources(sources, kept, blocks):
     kept_ids = {id(m) for m in kept}
     for source, matches in sources:
         for match in matches:
+            match.source = source
+            match.context = _text_around(match, by_id.get(match.block_id))
             if id(match) in kept_ids:
                 reported(source, match, by_id.get(match.block_id), sections.get(match.block_id, ""))
             else:

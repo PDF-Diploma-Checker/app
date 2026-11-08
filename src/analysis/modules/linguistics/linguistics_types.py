@@ -21,6 +21,8 @@ class Error_type:
     error_coordinate: list[dict]
     rule: str = ""      # the rule of the check that found it, for the log
     why: str = ""       # what the check saw, for the log
+    source: str = ""    # the name of the check that found it
+    context: str = ""   # the text around it, with the finding between « »
 
 @dataclass
 class Analisys_type:
