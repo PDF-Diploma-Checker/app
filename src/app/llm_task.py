@@ -17,6 +17,7 @@ STAGES = {
         "summaries": (70, "AI: streszczanie rozdziałów i ocena treści..."),
         "images": (80, "AI: analiza rysunków i wykresów..."),
         "sota": (90, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
+        "language_review": (95, "AI: weryfikacja błędów językowych..."),
     },
     "en": {
         "purpose": (55, "AI: finding the thesis purpose..."),
@@ -24,6 +25,7 @@ STAGES = {
         "summaries": (70, "AI: summarising chapters and rating the content..."),
         "images": (80, "AI: analysing figures and charts..."),
         "sota": (90, "AI: rating the state-of-the-art chapter..."),
+        "language_review": (95, "AI: verifying the language errors..."),
     },
 }
 
@@ -148,6 +150,20 @@ def build_image_summary(raw_image_report, language="pl"):
         "problem_details": problem_lines,
         "analysis_failed": failed,
     }
+
+
+def run_language_review(matches, language="pl", cancel_token=None):
+    """The findings of the language checks after the text model has read them. Without the model all of them stay."""
+    _stage(language, "language_review", cancel_token)
+    try:
+        from analysis.modules.llm.linguistic_review import review_findings
+
+        return review_findings(matches, language)
+    except Exception:
+        logger.exception("Review of the language findings failed, all of them stay in the report")
+        return matches
+    finally:
+        cleanup_text_llm_instances()
 
 
 def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):

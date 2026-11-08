@@ -49,6 +49,9 @@ REVIEW_TOKENS = 80
 FIGURE_TOKENS = 70                  # reading a figure, its yes/no checks and comparing it with the text
 GOAL_TOKENS = (100, 0.003)          # base + per character: a longer thesis gets a longer reasoning
 SOTA_TOKENS = (120, 0.03)           # base + per character: every part of the chapter is checked against 3 rules
+LANGUAGE_FINDINGS_PER_PAGE = 3      # findings of the language checks the text model reads
+LANGUAGE_FINDING_TOKENS = 70
+LANGUAGE_FINDING_PROMPT_TOKENS = 450
 _FIGURE_CAPTION = re.compile(r"^\s*(rys|rycin|wykres|figure|fig\.|fot|schemat|diagram)[^\W\d]*\.?\s*(\d+(?:\.\d+)*)", re.I | re.M)
 _SECTION_HEADING = re.compile(r"^\s*(\d+\.\d+(?:\.\d+)*)\.?\s+\S", re.M)
 
@@ -56,11 +59,11 @@ LOW_HIGH = {0: (0.6, 1.8), 1: (0.8, 1.35), 2: (0.8, 1.35)}      # range around t
 LOW_HIGH_MANY = (0.9, 1.15)
 
 # progress bar values at which the stages of run_task_llm() start (see app/llm_task.py STAGES)
-STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("images", 80), ("sota", 90))
+STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("images", 80), ("sota", 90), ("language_review", 95))
 HISTORY_LIMIT = 60
 # raise it whenever raw_estimate() changes: real/predicted ratios measured against an older model would distort the
 # calibration, so only the runs recorded with the same model version are used
-MODEL_VERSION = 4
+MODEL_VERSION = 5
 
 
 @dataclass
@@ -200,6 +203,8 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
         stages.append(("images", VISION_LOADS * vision_load + gemma_load + doc.figures * FIGURE_TOKENS / gen))
     base, per_char = SOTA_TOKENS
     stages.append(("sota", work(0, base + per_char * doc.chars)))
+    findings = doc.pages * LANGUAGE_FINDINGS_PER_PAGE
+    stages.append(("language_review", work(findings * LANGUAGE_FINDING_PROMPT_TOKENS, findings * LANGUAGE_FINDING_TOKENS)))
     return stages
 
 
