@@ -249,7 +249,7 @@ def classify_block_content(
             if marker_type == active_marker:
                 continue
             if marker_type == "dash":
-                if re.match(r"^[-−–—]\s*(ang\.|pol\.|niem\.|fr\.|ros\.|tj\.|czyli)\b", text, re.IGNORECASE):
+                if re.match(r"^[-−–—]\s*(?:z\s+)?(ang\.|pol\.|niem\.|fr\.|ros\.|tj\.|czyli)\b", text, re.IGNORECASE):
                     return "paragraph", None
             if DocumentPatterns.LIST_PATTERNS[marker_type].match(text):
                 return "list", marker_type
