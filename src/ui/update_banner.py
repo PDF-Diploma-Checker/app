@@ -131,9 +131,12 @@ class UpdateBanner(QFrame):
             return True
         try:
             from common import updater
-            ok, _ = updater.can_self_update()
-            return ok and any(str(a.get("name", "")).startswith(updater.APP_DIR_NAME + "-")
-                              for a in self._info.get("assets", []))
+            ok, reason = updater.can_self_update()
+            has_files = any(str(a.get("name", "")).startswith(updater.APP_DIR_NAME + "-")
+                            for a in self._info.get("assets", []))
+            if not (ok and has_files):
+                logger.info("Only the download page is offered: %s", reason or "the release has no files for this app")
+            return ok and has_files
         except Exception:
             logger.exception("Could not check the in-place update")
             return False
