@@ -50,6 +50,12 @@ def check_exeptions(matches, blocks, proper_names, main_font):
                             elif match.offset + len(match.content) < len(text) and text[match.offset + len(match.content)] == '-':
                                 dropped_match("word with a hyphen", match, block)
                                 continue
+                            elif len(match.word_idxs) >= 2 and any(
+                                w.word_index in match.word_idxs and w.text.endswith('-')
+                                for w in block.block.words
+                            ):
+                                dropped_match("word with a hyphen", match, block)
+                                continue
                         except Exception:
                             logger.exception("Failed to check adjacent characters for dash")
                         lemma = lemmatization(word, block.language)
