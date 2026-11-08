@@ -19,10 +19,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: main
+          fetch-depth: 0
 
       - name: Raise the last number and commit it
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
         run: |
-          version=$(python3 tools/bump_version.py)
+          version=$(python3 tools/bump_version.py "$BEFORE" "$AFTER")
+          if [ -z "$version" ]; then
+            echo "This merge set the version itself: it stays"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Set the version to $version"
