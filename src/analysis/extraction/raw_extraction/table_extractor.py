@@ -58,18 +58,13 @@ def find_table_description(table_bbox, text_blocks, priority_side=None):
     primary = priority_side if priority_side else "above"
     secondary = "below" if primary == "above" else "above"
 
-    def build_full_caption(block_list):
-        if not block_list:
+    def build_full_caption(block_list, side):
+        starts = [idx for idx, (_, _, text) in enumerate(block_list) if text.lower().startswith(tbl_keywords)]
+        if not starts:
             return ""
 
-        start_idx = -1
-        for idx, (_, _, text) in enumerate(block_list):
-            if text.lower().startswith(tbl_keywords):
-                start_idx = idx
-                break
-
-        if start_idx == -1:
-            return ""
+        # a paragraph can start with "Tabela 4.2 prezentuje...": the caption is the one next to the table
+        start_idx = starts[-1] if side == "above" else starts[0]
 
         caption_parts = [block_list[start_idx][2]]
         last_by1 = block_list[start_idx][1]
@@ -86,11 +81,11 @@ def find_table_description(table_bbox, text_blocks, priority_side=None):
 
         return " ".join(caption_parts)
 
-    caption_primary = build_full_caption(candidates[primary])
+    caption_primary = build_full_caption(candidates[primary], primary)
     if caption_primary:
         return caption_primary, primary
 
-    caption_secondary = build_full_caption(candidates[secondary])
+    caption_secondary = build_full_caption(candidates[secondary], secondary)
     if caption_secondary:
         return caption_secondary, secondary
 
