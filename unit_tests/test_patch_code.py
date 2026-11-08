@@ -73,6 +73,9 @@ class NeedsFullBuildTest(unittest.TestCase):
     def test_module_our_code_already_used_can_be_patched(self):
         self.assertEqual(self.reasons([("M", "src/ui/a.py")], "import collections\n", "import collections\n"), [])
 
+    def test_module_built_into_python_can_be_patched(self):
+        self.assertEqual(self.reasons([("A", "src/ui/a.py")], new="import itertools\n"), [])
+
     def test_build_and_data_files_need_a_build(self):
         changes = [("M", "DiplomaChecker.spec"), ("M", patch_code.LAUNCHER), ("A", "src/ui/assets/logo.png")]
         self.assertEqual(len(self.reasons(changes)), 3)

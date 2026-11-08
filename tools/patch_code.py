@@ -82,7 +82,8 @@ def needs_full_build(since, changes):
         elif status != "D":
             if bundled is None:
                 bundled = bundled_modules(since)
-            new = external_imports((ROOT / path).read_text(encoding="utf-8")) - bundled
+            # a module built into the interpreter is in every build, whatever our code imported at `since`
+            new = external_imports((ROOT / path).read_text(encoding="utf-8")) - bundled - set(sys.builtin_module_names)
             if new:
                 reasons.append(f"{path}: new imports {', '.join(sorted(new))}")
     return reasons
