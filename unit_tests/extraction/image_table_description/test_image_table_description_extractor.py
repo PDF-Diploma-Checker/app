@@ -12,6 +12,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from analysis.extraction.raw_extraction.bare_struct import TextBlock, TextLine, TextSpan
 from analysis.extraction.raw_extraction.image_extractor import find_image_description
+from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 from analysis.extraction.raw_extraction.table_extractor import find_table_description
 
 
@@ -87,6 +88,35 @@ class TestTableCaption(unittest.TestCase):
         desc, side = find_table_description(self.table_bbox, blocks)
         self.assertEqual(desc, "Tabela 3. Prawdziwy podpis")
         self.assertEqual(side, "above")
+
+    def test_paragraph_about_the_table_is_not_its_caption(self):
+        # Akapit nad podpisem też zaczyna się od słowa "Tabela": podpisem jest blok najbliższy tabeli
+        blocks = [
+            make_text_block("Tabela 5 prezentuje wyniki pomiarów.", (100, 40, 300, 60), block_id=1),
+            make_text_block("Tabela 5. Wyniki pomiarów", (100, 75, 300, 90), block_id=2)
+        ]
+        desc, side = find_table_description(self.table_bbox, blocks)
+        self.assertEqual(desc, "Tabela 5. Wyniki pomiarów")
+        self.assertEqual(side, "above")
+
+    def test_caption_continued_in_the_next_block(self):
+        blocks = [
+            make_text_block("Tabela 6. Bardzo długi podpis", (100, 60, 300, 75), block_id=1),
+            make_text_block("w dwóch blokach", (100, 80, 300, 95), block_id=2)
+        ]
+        desc, _ = find_table_description(self.table_bbox, blocks)
+        self.assertEqual(desc, "Tabela 6. Bardzo długi podpis w dwóch blokach")
+
+
+class TestTableCaptionPattern(unittest.TestCase):
+    '''Podpis tabeli jest osobnym blokiem, także gdy po słowie "Tabela" stoi kropka.'''
+
+    def test_caption_forms(self):
+        for caption in ("Tabela 2.1. Wyniki", "Tabela. 2.1. Wyniki", "Tab. 2.1. Wyniki", "Table 1. Results", "Table. 1. Results"):
+            self.assertTrue(PDFMapper.TAB_PATTERN.match(caption), caption)
+
+    def test_ordinary_sentence(self):
+        self.assertFalse(PDFMapper.TAB_PATTERN.match("Tabela przedstawia wyniki"))
 
 
 if __name__ == "__main__":
