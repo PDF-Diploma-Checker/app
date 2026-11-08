@@ -1,9 +1,11 @@
 """Raise the last number of the version by one: 0.4.2 -> 0.4.3. Prints the new version.
 
-.github/workflows/bump_version.yml runs it after each merge to main.
+.github/workflows/bump_version.yml runs it after each merge to main, with the commits before and after the merge.
+A merge that changes the version itself keeps it: 0.5.0 set for a full build must not become 0.5.1.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -19,6 +21,20 @@ PLACES = {
 def next_version(version):
     major, minor, patch = version.split(".")
     return f"{major}.{minor}.{int(patch) + 1}"
+
+
+def version_at(commit, root=ROOT):
+    """The version in a commit, None when git does not know the commit (the first push of a branch)."""
+    shown = subprocess.run(["git", "show", f"{commit}:src/common/version.py"], cwd=root, capture_output=True,
+                           encoding="utf-8")
+    match = re.search(PLACES["src/common/version.py"], shown.stdout, re.M) if shown.returncode == 0 else None
+    return match.group(1) if match else None
+
+
+def set_by_hand(before, after, root=ROOT):
+    """True when the commits between `before` and `after` changed the version."""
+    old = version_at(before, root)
+    return old is not None and old != version_at(after, root)
 
 
 def bump(root=ROOT):
@@ -40,4 +56,6 @@ def bump(root=ROOT):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) == 3 and set_by_hand(*sys.argv[1:]):
+        sys.exit(0)
     print(bump())

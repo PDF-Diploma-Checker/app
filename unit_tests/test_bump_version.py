@@ -4,6 +4,7 @@ Tests of the automatic version number.
 Run (from the repository root):
     .venv/bin/python -m unittest unit_tests.test_bump_version -v
 '''
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -45,6 +46,29 @@ class BumpVersionTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             bump_version.bump(root)
         self.assertIn('version = "0.4.9"', (root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    def _commit(self, root, version):
+        (root / "src/common/version.py").write_text(f'APP_VERSION = "{version}"\n', encoding="utf-8")
+        env = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", *env, "add", "-A"], cwd=root, check=True)
+        subprocess.run(["git", *env, "commit", "-qm", version], cwd=root, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+
+    def test_a_version_set_in_the_merge_stays(self):
+        root = self._project()
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        first = self._commit(root, "0.4.9")
+        (root / "x").write_text("code", encoding="utf-8")
+        same = self._commit(root, "0.4.9")
+        by_hand = self._commit(root, "0.5.0")
+        self.assertFalse(bump_version.set_by_hand(first, same, root))
+        self.assertTrue(bump_version.set_by_hand(same, by_hand, root))
+
+    def test_an_unknown_commit_means_a_normal_bump(self):
+        root = self._project()
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        after = self._commit(root, "0.4.9")
+        self.assertFalse(bump_version.set_by_hand("0" * 40, after, root))
 
     def test_the_real_project_can_be_read(self):
         for name, pattern in bump_version.PLACES.items():
