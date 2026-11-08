@@ -14,7 +14,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 
 try:
     from analysis.modules.llm.image_analysis import vision_engine
-    from analysis.modules.llm.image_analysis.consistency_checker import verdict_from_answer
+    from analysis.modules.llm.image_analysis.consistency_checker import values_are_printed, verdict_from_answer
 except ImportError as e:  # the base variant has no AI libraries
     raise unittest.SkipTest(f"AI libraries are not available: {e}")
 
@@ -64,6 +64,42 @@ class VerdictTest(unittest.TestCase):
     def test_no_list_of_numbers_decides_nothing(self):
         answer = {"niezgodnosci": [{"element": "A", "w_tekscie": "40", "na_rysunku": "100"}]}
         self.assertEqual(verdict_from_answer(answer, printed=None)["poprawnosc_danych"], "False")
+
+    def _verdict(self, in_text, in_image, **kwargs):
+        answer = {"niezgodnosci": [{"element": "A", "w_tekscie": in_text, "na_rysunku": in_image}]}
+        return verdict_from_answer(answer, **kwargs)["poprawnosc_danych"]
+
+    def test_the_same_number_written_differently_agrees(self):
+        for in_text, in_image in (("0,9", "0.90"), ("40,0%", "40%"), ("5000 ms", "5,000 ms"), ("0.989", "1.0")):
+            self.assertEqual(self._verdict(in_text, in_image), "True", (in_text, in_image))
+
+    def test_a_fraction_with_three_places_is_no_thousand(self):
+        self.assertEqual(self._verdict("0,989", "989"), "False")
+
+    def test_value_within_a_range_in_the_text_agrees(self):
+        self.assertEqual(self._verdict("0,4–0,6", "0.5"), "True")
+        self.assertEqual(self._verdict("0,4–0,6", "0.8"), "False")
+
+    def test_words_are_not_values(self):
+        self.assertEqual(self._verdict("odrzucone", "0.8"), "True")
+
+    def test_value_the_paragraph_does_not_give_is_no_mismatch(self):
+        self.assertEqual(self._verdict("75%", "68%", paragraph="Rysunek 1: zstd osiągnął 68%."), "True")
+        self.assertEqual(self._verdict("75%", "68%", paragraph="Rysunek 1: zstd osiągnął 75%."), "False")
+
+    def test_number_of_an_axis_scale_is_not_a_printed_value(self):
+        printed = [0, 5000, 10000, 15000, 20000, 0, 0.2, 0.4, 0.6, 0.8, 1.0]
+        self.assertEqual(self._verdict("0.7", "1.0", printed=printed), "True")
+
+    def test_chart_read_from_its_labels_is_compared(self):
+        self.assertTrue(values_are_printed("Czas\ngzip: 180 ms\nlz4: 20 ms", [180, 70, 20]))
+
+    def test_chart_estimated_from_its_axis_is_not_compared(self):
+        self.assertFalse(values_are_printed("W0: 0.2\nW1: 0.6\nW2: 1.0", [0, 5000, 10000, 15000, 20000, 1.0]))
+        self.assertFalse(values_are_printed("Evolution\nA: B", []))
+
+    def test_no_list_of_numbers_keeps_the_comparison(self):
+        self.assertTrue(values_are_printed("A: 1", None))
 
     def test_answer_without_the_list_is_an_error(self):
         self.assertEqual(verdict_from_answer({"cos": 1})["poprawnosc_danych"], "Error")

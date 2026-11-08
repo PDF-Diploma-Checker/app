@@ -121,6 +121,8 @@ class ReferencesTest(unittest.TestCase):
 
     def test_caption_is_not_a_discussion_of_the_figure(self):
         self.assertTrue(is_caption("Rysunek 1. Architektura systemu", "1"))
+        self.assertFalse(is_caption("rys. 3.4. Sześć klawiszy rozmieszczono w niej po trzy", "3.4"))
+        self.assertFalse(is_caption("rys. 4.3.", "4.3"))
         self.assertTrue(is_caption("Rys. 1 Architektura", "1"))
         self.assertFalse(is_caption("Rysunek 1 przedstawia architekturę systemu oraz wszystkie jej moduły w szczegółach.", "1"))
         self.assertFalse(is_caption("Jak pokazano na rysunku 1, system działa.", "1"))

@@ -82,6 +82,8 @@ def mentions_figure(text, number, family="rys"):
 def is_caption(paragraph, number, family="rys"):
     """True when the paragraph is the figure's own caption (or its entry in the list of figures)."""
     text = paragraph.strip()
+    if not text[:1].isupper():      # the end of a broken sentence: "... przedstawia" / "rys. 4.3."
+        return False
     pattern = reference_pattern(number, family)
     match = pattern.match(text)
     if not match:

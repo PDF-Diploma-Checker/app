@@ -11,6 +11,8 @@ from analysis.extraction.raw_extraction.bare_struct import (
 
 logger = logging.getLogger(__name__)
 
+VECTOR_RENDER_ZOOM = fitz.Matrix(3, 3)      # 216 DPI: at the default 72 DPI the vision model misreads the small print of a chart
+
 def get_raster_figure_numbers(document_data: DocumentData) -> List[str]:
     if not document_data or not getattr(document_data, "pages", None):
         return []
@@ -159,7 +161,7 @@ def merge_fragment_images(
                 clip = (union + (-pad, -pad, pad, pad)) & page.rect if big.image_type == "vector" else union
                 try:
                     if big.image_type == "vector":
-                        pix = page.get_pixmap(clip=clip)
+                        pix = page.get_pixmap(clip=clip, matrix=VECTOR_RENDER_ZOOM)
                         pix.save(big.path)
                         big.width, big.height = pix.width, pix.height
                     big.bbox = (union.x0, union.y0, union.x1, union.y1)
@@ -421,7 +423,7 @@ def extract_vector_graphics(
                     priority_side = found_side
 
                 try:
-                    pix = page.get_pixmap(clip=bbox)
+                    pix = page.get_pixmap(clip=bbox, matrix=VECTOR_RENDER_ZOOM)
                     img_path = f"images/p{page_index}_vec_{i}.png"
                     pix.save(img_path)
                     logger.info(f"Successfully saved vector image: {img_path}")
