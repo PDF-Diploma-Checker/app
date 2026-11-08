@@ -768,12 +768,16 @@ class PDFMapper:
         """
         item = data["item"]
         words = item.words
+        marker_word = None
         if len(words) > 1 and words[0].start_char == 0 and words[0].end_char == 0:
+            if words[0].text == "-":
+                marker_word = words[0]
             words = words[1:]
         return ParagraphBlock(
             block_id=data["block_id"],
             content=item.text,
             words=words,
+            marker_word=marker_word,
         )
 
     def _empty_list_buffer(self, reason: str = ""):

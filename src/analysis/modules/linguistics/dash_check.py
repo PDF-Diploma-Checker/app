@@ -31,7 +31,9 @@ def dash_check(blocks, main_font=None):
         has_em_dash = bool(re.search(r'—', text))
 
         if unit.type in {"acronyms", "toc", "tof", "tot"}:
-            for word in unit.words:
+            marker_word = getattr(unit, "marker_word", None)
+            candidate_words = ([marker_word] if marker_word is not None else []) + list(unit.words)
+            for word in candidate_words:
                 if word.text == '-':
                     if unit.language == 'en':
                         message = "Hyphen instead of en dash in a definition."
