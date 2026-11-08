@@ -2,9 +2,9 @@ import json
 import re
 import logging
 from typing import Dict, Any, List
-from llama_cpp import Llama
 
 from .config import MODEL_PATH, N_GPU_LAYERS
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,8 @@ def get_llm():
     if _llm_instance is None:
         logger.info("Loading SOTA evaluation LLM from %s", MODEL_PATH)
         try:
-            _llm_instance = Llama(
+            _llm_instance = make_llama(
+                purpose="Ocena SOTA",
                 model_path=str(MODEL_PATH),
                 n_ctx=4096,
                 n_gpu_layers=N_GPU_LAYERS,
@@ -91,21 +92,41 @@ def evaluate_r1(chunks: List[str]) -> int:
     """Evaluate rule R1 across all chunks."""
     prompt = """Twoim zadaniem jest ocenić, czy podany fragment tekstu spełnia regułę R1.
 Reguła R1: Czy fragment zawiera wyraźną ocenę (parametry, skuteczność) lub wskazuje konkretne WADY/ZALETY istniejących, działających rozwiązań?
-[... reszta promptu ...]"""
+
+UWAGA KRYTYCZNA - NIE MYL R1 Z LUKĄ BADAWCZĄ:
+- Słowa takie jak "brakuje badań", "luka w wiedzy", "nie wiadomo", "nierozwiązany problem" to NIE SĄ wady technologii! To są luki badawcze (które należą do innej reguły). 
+- Nie przyznawaj R1 za to, że autor pisze, czego w nauce jeszcze nie zbadano.
+
+KRYTERIA:
+- ZWRÓĆ TRUE TYLKO wtedy, gdy fragment chwali działające systemy (np. "redukuje czas o 18%") lub wylicza ich znane techniczne wady (np. "bateria działa krótko").
+- ZWRÓĆ FALSE, jeśli fragment skupia się wyłącznie na brakach w wiedzy, braku ram prawnych czy niewiadomych, które dopiero trzeba zbadać.
+- ZWRÓĆ FALSE, jeśli to tylko suchy opis działania."""
     return evaluate_condition_over_chunks(prompt, chunks)
 
 def evaluate_r2(chunks: List[str]) -> int:
     """Evaluate rule R2 across all chunks."""
     prompt = """Twoim zadaniem jest ocenić, czy podany fragment tekstu spełnia regułę R2.
 Reguła R2: Czy fragment JEDNOZNACZNIE wskazuje LUKĘ BADAWCZĄ w nauce lub NIEROZWIĄZANY problem naukowy?
-[... reszta promptu ...]"""
+
+UWAGA KRYTYCZNA:
+Nie myl "problemu, który technologia już rozwiązuje" (np. zanieczyszczenia powietrza, awarie sieci) z "luką badawczą". 
+
+KRYTERIA (Bądź bezlitosny):
+- ZWRÓĆ FALSE, jeśli fragment opisuje technologie, które z powodzeniem rozwiązują jakieś problemy (np. "technologie te stanowią dojrzałe rozwiązania").
+- ZWRÓĆ TRUE TYLKO WTEDY, gdy autor wyraźnie pisze, że czegoś W NAUCE JESZCZE NIE WIADOMO, brakuje badań lub coś wymaga dalszych analiz naukowych (np. "Brakuje badań nad...", "Niewiadomą pozostaje...")."""
     return evaluate_condition_over_chunks(prompt, chunks)
 
 def evaluate_r3(chunks: List[str]) -> int:
     """Evaluate rule R3 across all chunks."""
     prompt = """Twoim zadaniem jest ocenić, czy podany fragment tekstu spełnia regułę R3.
 Reguła R3: Czy fragment zawiera BEZPOŚREDNIE PORÓWNANIE co najmniej dwóch NAZWANYCH, RÓŻNYCH METOD rozwiązujących ten sam problem?
-[... reszta promptu ...]"""
+
+UWAGA KRYTYCZNA:
+Podawanie skuteczności (np. "system redukuje korki o 18%") TO NIE JEST PORÓWNANIE METOD! To tylko opis skuteczności jednego systemu. Aby było to porównanie, autor musi dosłownie zestawić dwie metody.
+
+KRYTERIA:
+- ZWRÓĆ TRUE TYLKO WTEDY, gdy we fragmencie walczą ze sobą dwie metody (np. "Metoda X jest lepsza niż Metoda Y w warunkach miejskich").
+- ZWRÓĆ FALSE, jeśli fragment to wyliczanka świetnie działających systemów z różnych dziedzin. To nie jest zderzenie metod!"""
     return evaluate_condition_over_chunks(prompt, chunks)
 
 def get_sota_status(score: int) -> str:

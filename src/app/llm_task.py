@@ -1,5 +1,38 @@
 import gc
+import logging
+import os
 import traceback
+
+from common import run_control
+from common.cancellation import check_cancelled
+from common.timing import StageTimer
+
+logger = logging.getLogger(__name__)
+
+# status lines of the LLM stages (the progress bar value is the second element); keyed by the thesis language
+STAGES = {
+    "pl": {
+        "purpose": (55, "AI: wyszukiwanie celu pracy..."),
+        "goal": (62, "AI: sprawdzanie realizacji celu..."),
+        "summaries": (70, "AI: streszczanie rozdziałów i ocena treści..."),
+        "images": (80, "AI: analiza rysunków i wykresów..."),
+        "sota": (90, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
+    },
+    "en": {
+        "purpose": (55, "AI: finding the thesis purpose..."),
+        "goal": (62, "AI: checking whether the goal was met..."),
+        "summaries": (70, "AI: summarising chapters and rating the content..."),
+        "images": (80, "AI: analysing figures and charts..."),
+        "sota": (90, "AI: rating the state-of-the-art chapter..."),
+    },
+}
+
+
+def _stage(language, name, cancel_token=None):
+    """Stop here if the user cancelled, otherwise announce the next stage."""
+    check_cancelled(cancel_token)
+    value, text = STAGES.get(language, STAGES["pl"])[name]
+    run_control.notify(text, value)
 
 def cleanup_text_llm_instances():
     """
@@ -24,6 +57,15 @@ def cleanup_text_llm_instances():
                 close_fn()
             _goal_realization_mod._LLM = None
 
+        from analysis.modules.llm import evaluate_sota as _evaluate_sota_mod
+
+        llm_obj = getattr(_evaluate_sota_mod, "_llm_instance", None)
+        if llm_obj is not None:
+            close_fn = getattr(llm_obj, "close", None)
+            if callable(close_fn):
+                close_fn()
+            _evaluate_sota_mod._llm_instance = None
+
         model_cache = getattr(_get_purpose_mod, "_LLAMA_MODELS", None)
         if isinstance(model_cache, dict):
             for model in list(model_cache.values()):
@@ -47,44 +89,68 @@ def cleanup_text_llm_instances():
         pass
 
 
-def build_image_summary(raw_image_report):
+def split_failed_checks(entries):
+    """Separate thesis errors from figures the model could not check: returns (errors, whether any check failed)."""
+    errors = [entry for entry in entries if not entry.get("analysis_failed")]
+    return errors, len(errors) != len(entries)
+
+
+def build_image_summary(raw_image_report, language="pl"):
     """
     Build image_analysis dictionary in the same format as the old pipeline task_llm.
     """
     if raw_image_report is None:
         raw_image_report = []
 
-    total_images = len(raw_image_report)
-    bad_images_count = 0
+    from analysis.modules.llm.image_analysis.figures import image_text
+
+    # The report has one entry per paragraph that mentions a figure; the totals count figures.
+    worst_status = {}
+    failed = False
     image_details_lines = []
+    problem_lines = []
 
     for item in raw_image_report:
-        img_id = item.get("obrazek", item.get("id", "Nieznany"))
+        img_id = item.get("obrazek", item.get("id", image_text(language, "unknown")))
         is_correct = item.get("poprawnosc_danych", "True")
         errors = item.get("bledy", "None")
 
         if isinstance(errors, list):
             errors = " ".join(errors)
 
-        if is_correct == "False" or is_correct is False:
-            bad_images_count += 1
-            status_text = "Wykryto rozbieznosci"
+        if is_correct == "Error":
+            failed = True
+            worst_status.setdefault(img_id, "failed")
+            status = "failed"
+        elif is_correct == "Unreadable":
+            worst_status.setdefault(img_id, "failed")
+            status = "failed"
+        elif is_correct == "False" or is_correct is False:
+            worst_status[img_id] = "bad"
+            status = "bad"
         else:
-            status_text = "Poprawny"
+            if worst_status.get(img_id) != "bad":
+                worst_status[img_id] = "good"
+            status = "good"
 
-        image_details_lines.append(
-            f"Rysunek {img_id}: {status_text} - Szczegoly: {errors}"
-        )
+        status_text = image_text(language, f"status_{status}")
+        line = f"{img_id}: {status_text} - {image_text(language, 'details')}: {errors}"
+        image_details_lines.append(line)
+        if status != "good":
+            problem_lines.append(line)
 
+    statuses = list(worst_status.values())
     return {
-        "total": total_images,
-        "bad_count": bad_images_count,
-        "good_count": total_images - bad_images_count,
+        "total": len(statuses),
+        "bad_count": statuses.count("bad"),
+        "good_count": statuses.count("good"),
         "details": image_details_lines,
+        "problem_details": problem_lines,
+        "analysis_failed": failed,
     }
 
 
-def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True):
+def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):
     """
     Run the LLM part of the analysis pipeline.
     Return format is intentionally identical to the old nested task_llm():
@@ -93,7 +159,9 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
     if not use_llm:
         return None, None, "Tryb Szybki."
 
+    timer = StageTimer(logger, "LLM")
     try:
+        timer.next("preparing the text")
         from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
         from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
         from analysis.modules.llm.get_grade import get_overall_grade, get_content_grade
@@ -104,6 +172,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         )
         from analysis.modules.llm.get_summary import get_summaries
         from analysis.modules.llm.get_subtitles import get_subtitles
+        from analysis.modules.llm.results_log import log_results
         from analysis.modules.llm.run_sota import get_final_sota_report
         from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
 
@@ -112,6 +181,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         plain_txt_purpose = get_plain_text(pdf_path)
         txt_for_llm = extractPDF_llm(pdf_path)
+        check_cancelled(cancel_token)
 
         if not plain_txt_purpose:
             raise ValueError("plain_txt_purpose is empty")
@@ -119,7 +189,15 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         if txt_for_llm is None:
             raise ValueError("extractPDF_llm returned None")
 
+        timer.next("finding the purpose")
+        _stage(language, "purpose", cancel_token)
         purpose = get_purpose(plain_txt_purpose, language)
+        check_cancelled(cancel_token)
+
+        timer.next("checking the goal")
+        _stage(language, "goal", cancel_token)
+
+        cleanup_text_llm_instances()        # the purpose model must leave the video memory before the next model loads
 
         goal_result = check_goal_realization(
             text=plain_txt_purpose,
@@ -128,74 +206,138 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         )
 
         purpose_score = get_score_from_goal_result(goal_result)
+        check_cancelled(cancel_token)
         purpose_reason = str(goal_result.get("reason", "") or "")
+        log_results("Thesis purpose and its realization", purpose=purpose, score=purpose_score, reason=purpose_reason)
 
         cleanup_text_llm_instances()
 
+        timer.next("summaries")
+        _stage(language, "summaries", cancel_token)
         subtitles = get_subtitles(txt_for_llm)
         summaries = get_summaries(subtitles, language)
+        check_cancelled(cancel_token)
 
-        content_res = get_content_grade(purpose, summaries)
+        timer.next("embeddings")
+        cleanup_text_llm_instances()        # the review of doubtful sections loads the text model again
+        content_res = get_content_grade(purpose, summaries, language)
 
         if isinstance(content_res, tuple) and len(content_res) == 2:
             content_grade_val, off_topic_headings = content_res
         else:
-            content_grade_val = content_res if isinstance(content_res, (int, float)) else 0.0
+            content_grade_val = content_res if isinstance(content_res, (int, float)) else None
             off_topic_headings = []
+
+        log_results("Content grade", embedding_grade=content_grade_val, off_topic_headings=off_topic_headings)
 
         cleanup_text_llm_instances()
 
         if check_images:
-            from analysis.modules.llm.image_analysis.run_image import analyze_images
-            from analysis.modules.llm.image_analysis.image_quality_checker import (
-                get_full_image_quality_json,
-            )
-            from analysis.modules.llm.image_analysis.font_checker import (
-                get_font_consistency_report,
-            )
+            timer.next("figures")
+            _stage(language, "images", cancel_token)
+            analysis_failed = False
 
             try:
-                raw_image_report = analyze_images(doc_obj, mapped_doc)
-            except Exception:
-                raw_image_report = []
+                from analysis.modules.llm.image_analysis.run_image import analyze_images
 
-            image_summary_data = build_image_summary(raw_image_report)
+                raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
+            except Exception:
+                logger.exception("Image consistency analysis failed")
+                raw_image_report = []
+                analysis_failed = True
+
+            image_summary_data = build_image_summary(raw_image_report, language)
+            check_cancelled(cancel_token)
 
             cleanup_text_llm_instances()
 
             try:
+                from analysis.modules.llm.image_analysis.image_quality_checker import (
+                    get_full_image_quality_json,
+                )
+
                 quality_errors = get_full_image_quality_json(
                     doc_obj,
                     mapped_doc,
                     pdf_path,
                     verbose=False,
+                    language=language,
                 )
-                if quality_errors is None:
-                    quality_errors = []
+                quality_errors, failed = split_failed_checks(quality_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
+                logger.exception("Image quality analysis failed")
                 quality_errors = []
+                analysis_failed = True
 
             cleanup_text_llm_instances()
+            check_cancelled(cancel_token)
 
             try:
+                from analysis.modules.llm.image_analysis.font_checker import (
+                    get_font_consistency_report,
+                )
+
                 font_errors = get_font_consistency_report(
                     doc_obj,
                     mapped_doc,
                     verbose=False,
+                    language=language,
                 )
-                if font_errors is None:
-                    font_errors = []
+                font_errors, failed = split_failed_checks(font_errors or [])
+                analysis_failed = analysis_failed or failed
             except Exception:
+                logger.exception("Image font analysis failed")
                 font_errors = []
+                analysis_failed = True
 
+            cleanup_text_llm_instances()
+            check_cancelled(cancel_token)
+
+            try:
+                from analysis.modules.llm.image_analysis.axis_checker import get_axis_report
+
+                axis_errors = get_axis_report(doc_obj, mapped_doc, language=language)
+                axis_errors, failed = split_failed_checks(axis_errors or [])
+                analysis_failed = analysis_failed or failed
+            except Exception:
+                logger.exception("Chart axis analysis failed")
+                axis_errors = []
+                analysis_failed = True
+
+            image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
             cleanup_text_llm_instances()
         else:
             image_summary_data = build_image_summary([])
             quality_errors = []
             font_errors = []
+            axis_errors = []
 
+        log_results(
+            "Figures",
+            summary=image_summary_data,
+            quality_errors=quality_errors,
+            font_errors=font_errors,
+            axis_errors=axis_errors,
+        )
+        check_cancelled(cancel_token)
+        timer.next("SOTA")
+        _stage(language, "sota", cancel_token)
         res_id, res_title, res_score, res_method, res_cites, r1, r2, r3 = (
             get_final_sota_report(mapped_doc, language)
+        )
+        check_cancelled(cancel_token)
+
+        log_results(
+            "State of the art (SOTA)",
+            chapter_id=res_id,
+            title=res_title,
+            score=res_score,
+            basis=res_method,
+            citations=res_cites,
+            r1=r1,
+            r2=r2,
+            r3=r3,
         )
 
         score = get_overall_grade(
@@ -214,6 +356,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "off_topic_sections": bad_sections,
             "p_off": round(p_off_val, 2),
             "off_topic_headings": off_topic_headings,
+            "purpose_score": purpose_score,
             "purpose_reason": purpose_reason,
         }
 
@@ -230,10 +373,20 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "image_analysis": image_summary_data,
             "jakosc_obrazkow": quality_errors,
             "czcionki_obrazkow": font_errors,
+            "osie_wykresow": axis_errors,
         }
+
+        log_results("Final content grade", **content_grade_dict)
 
         return result, score, "Analiza LLM zakończona pomyślnie."
 
-    except Exception:
+    except Exception as error:
+        stage = timer.label or "?"
+        logger.exception("LLM analysis failed at the stage %r of %s", stage, os.path.basename(str(pdf_path)))
         traceback.print_exc()
-        return None, None, "Błąd analizy SOTA/LLM."
+        # the user has to learn about it: without this the analysis just "finishes" with no content grade
+        failure = {"stage": stage, "error": f"{type(error).__name__}: {error}"}
+        return {"analysis_error": failure}, None, "Błąd analizy SOTA/LLM."
+    finally:
+        timer.finish()
+        cleanup_text_llm_instances()        # free RAM/VRAM also after an error or a cancelled analysis

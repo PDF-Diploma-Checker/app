@@ -1,9 +1,9 @@
-import re
 import os
 import sys
 import json
 import logging
-from pathlib import Path
+
+from analysis.modules.llm.image_analysis.figures import collect_figures, figure_sort_key, image_text
 
 logger = logging.getLogger(__name__)
 
@@ -20,29 +20,10 @@ except ImportError:
     raise ImportError("Brak biblioteki PyMuPDF. Uruchom: pip install PyMuPDF")
 
 
-def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
+def check_image_quality(doc_obj, pdf_path, dpi_threshold=75, language="pl"):
     low_quality_report = []
     
-    caption_pattern = re.compile(r"(?:^|\n)\s*rys(?:unek|\.)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
-    
-    unique_images = {}
-    
-    for page in doc_obj.pages:
-        for img in getattr(page, "images", []):
-            desc = getattr(img, "description", "").strip()
-            if desc:
-                match = caption_pattern.search(desc)
-                if match:
-                    found_id = match.group(1)
-                    img_path = Path(getattr(img, "path", ""))
-                    
-                    if img_path.exists():
-                        if found_id not in unique_images:
-                            unique_images[found_id] = {"desc": desc, "path": img_path}
-                        else:
-                            old_desc = unique_images[found_id]["desc"]
-                            if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
-                                unique_images[found_id] = {"desc": desc, "path": img_path}
+    figures = collect_figures(doc_obj)
 
     try:
         pdf_doc = fitz.open(str(pdf_path))
@@ -64,8 +45,8 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
                     real_dpi = int(w_px / w_inches)
                     dpi_map[(w_px, h_px)] = real_dpi
 
-    for img_id, data in unique_images.items():
-        img_path = data["path"]
+    for figure in figures:
+        img_id, img_path = figure["id"], figure["path"]
         extension = img_path.suffix.lower()
         
         if extension in ['.svg', '.eps', '.pdf']:
@@ -87,24 +68,24 @@ def check_image_quality(doc_obj, pdf_path, dpi_threshold=75):
 
                 if actual_dpi < dpi_threshold:
                     low_quality_report.append({
-                        "rysunek": f"Rys. {img_id}",
+                        "rysunek": img_id,
                         "format": extension.upper().replace(".", ""),
                         "rozdzielczosc_wewnetrzna": f"{w}x{h} px",
                         "zageszczenie_pikseli": f"~{actual_dpi} DPI",
-                        "blad": "Obraz został nadmiernie rozciągnięty, co spowodowało widoczną 'pikselozę'.",
-                        "wymaganie": f"Minimum {dpi_threshold} DPI (Standardowy zrzut ekranu ma 96 DPI)"
+                        "blad": image_text(language, "low_dpi"),
+                        "wymaganie": image_text(language, "dpi_requirement", threshold=dpi_threshold)
                     })
         except Exception as e:
             logger.exception("Failed to read image quality data for %s", img_path)
             low_quality_report.append({
-                "rysunek": f"Rys. {img_id}",
+                "rysunek": img_id,
                 "format": extension.upper().replace(".", ""),
                 "rozdzielczosc_wewnetrzna": "Błąd odczytu",
-                "blad": f"Nie udało się zweryfikować pliku: {e}",
-                "wymaganie": "Zalecana wymiana grafiki."
+                "blad": image_text(language, "unreadable_file", error=e),
+                "wymaganie": image_text(language, "replace_image")
             })
             
-    low_quality_report.sort(key=lambda x: float(x["rysunek"].replace("Rys. ", "")))
+    low_quality_report.sort(key=lambda x: figure_sort_key(x["rysunek"]))
     return low_quality_report
 
 

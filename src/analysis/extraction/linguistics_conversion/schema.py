@@ -23,6 +23,8 @@ class WordInfo:  # Położenie XY oraz relatywne słowa
     line: int = 0
     incorrect_bibliography: int = 0
     is_index: bool = False
+    glued_to_prev: bool = False        # a "[n]" span that touches the word before it (no gap in the PDF)
+    missing_bib_space: int = 0         # 1 = no space between the text and a bibliography reference: "tekst[17]"
 
 
 @dataclass
@@ -44,6 +46,7 @@ class ParagraphBlock:  # Informacje o blokach tekstowych, które mogą być para
     debug_empty: str = ""
     words: List[WordInfo] = field(default_factory=list)
     incorrect_caption: int = 0
+    language: str = "pl"
 
 
 @dataclass
@@ -53,6 +56,7 @@ class ListItem:
     text: str
     bbox: List[float]
     words: List[WordInfo] = field(default_factory=list)
+    is_widow: int = 0                  # words of a too short last line (used for bibliography entries)
 
 
 @dataclass
@@ -64,6 +68,7 @@ class ListBlock:
     is_bibliography: bool = False
     items: List[ListItem] = field(default_factory=list)
     words: List[WordInfo] = field(default_factory=list)
+    language: str = "pl"
 
 
 @dataclass
@@ -461,35 +466,61 @@ def is_widow_func(combined_words):
     """
     Detects typographical 'widows' within a paragraph. A widow is defined here as
     a very short final line of a paragraph (consisting of 1 or 2 isolated words).
-
-    Args:
-        combined_words (list[WordInfo]): A list of all words making up the paragraph.
-
-    Returns:
-        int: The number of words constituting the widow (1 or 2), or 0 if no widow is detected.
     """
     if not combined_words or getattr(combined_words[-1], "is_index", False):
         return 0
 
-    is_widow = 0
+    lines = []
+    current_line = []
+    last_line_id = None
 
-    if combined_words and len(combined_words) >= 10:
-        last_word = combined_words[-1]
-        second_to_last_word = combined_words[-2]
-        word_text = getattr(last_word, "text", str(last_word))
+    for word in combined_words:
+        line_id = (word.page_number, word.line)
+        if last_line_id is None or line_id == last_line_id:
+            current_line.append(word)
+        else:
+            lines.append(current_line)
+            current_line = [word]
+        last_line_id = line_id
 
-        if word_text.count(" ") <= 1:
-            last_y0 = last_word.bbox[1] if hasattr(last_word, "bbox") and last_word.bbox else 0
-            prev_y0 = second_to_last_word.bbox[1] if hasattr(second_to_last_word, "bbox") and second_to_last_word.bbox else 0
-            if abs(last_y0 - prev_y0) > 3.0:
-                is_widow = 1
-            elif len(combined_words) >= 3:
-                third_to_last_word = combined_words[-3]
-                third_y0 = third_to_last_word.bbox[1] if hasattr(third_to_last_word, "bbox") and third_to_last_word.bbox else 0
-                if abs(prev_y0 - third_y0) > 3.0:
-                    is_widow = 2
+    if current_line:
+        lines.append(current_line)
 
-    return is_widow
+    if len(lines) < 2:
+        return 0
+
+    last_line_words = lines[-1]
+
+    words_in_last_line = len(last_line_words)
+
+    if words_in_last_line in (1, 2):
+        return words_in_last_line
+
+    return 0
+
+_LINK = re.compile(r"https?://|ftp://|www\.|doi\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+
+
+def ends_with_link(combined_words):
+    """
+    True when the last line of a bibliography entry holds a URL or DOI, or only the end of one broken at the line
+    break ("https://doi.org/10.1000/" / "abc-def"). Such a line cannot be shortened, so it is not a widow.
+    """
+    lines = {}
+    for word in combined_words:
+        lines.setdefault((word.page_number, word.line), []).append(word.text)
+    lines = list(lines.values())
+
+    if any(_LINK.search(text) for text in lines[-1]):
+        return True
+    for line in reversed(lines[:-1]):
+        if line[-1].endswith((",", ";", ")", "]")):     # the link ended there, what follows is ordinary text
+            return False
+        if _LINK.search(line[-1]):
+            return True
+        if len(line) > 1:                               # a line of ordinary words: no link is being continued
+            return False
+    return False
 
 
 def is_bekart_func(combined_words):

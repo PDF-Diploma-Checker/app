@@ -5,6 +5,12 @@
 #   gpu  - same as cpu, but torch with CUDA and llama-cpp-python built with CUDA
 #          (needs the CUDA Toolkit: `nvcc` must be on PATH; the archive is several GB)
 #   all  - base, cpu and gpu, one after another
+#
+# Use a ready environment instead of building a new one (no uv sync, nothing is compiled):
+#   PYTHON_BIN=/path/to/.venv/bin/python ./build_linux.sh gpu
+# The environment must already match the variant (e.g. torch with CUDA and a CUDA build of
+# llama-cpp-python for gpu). Works with a single variant only, not with "all".
+#
 # Every variant gets its own environment (.venv-build-<variant>) and its own output folder
 # (dist/<variant>), so the variants never mix and your development .venv is left alone.
 set -euo pipefail
@@ -24,7 +30,16 @@ if [ "$VARIANT" = "all" ] && [ "$HAVE_UV" = "0" ]; then
   echo "'all' needs uv and uv.lock (one environment per variant). Build the variants separately instead."
   exit 1
 fi
-if { [ "$VARIANT" = "gpu" ] || [ "$VARIANT" = "all" ]; } && ! command -v nvcc >/dev/null 2>&1; then
+if [ -n "${PYTHON_BIN:-}" ]; then
+  if [ "$VARIANT" = "all" ]; then
+    echo "PYTHON_BIN dziala tylko z jednym wariantem (base, cpu albo gpu), nie z 'all'."
+    exit 1
+  fi
+  if [ ! -x "$PYTHON_BIN" ]; then
+    echo "PYTHON_BIN nie wskazuje na wykonywalny plik: $PYTHON_BIN"
+    exit 1
+  fi
+elif { [ "$VARIANT" = "gpu" ] || [ "$VARIANT" = "all" ]; } && ! command -v nvcc >/dev/null 2>&1; then
   echo "Wariant gpu wymaga CUDA Toolkit (brak 'nvcc' w PATH): llama-cpp-python jest kompilowany z CUDA."
   echo "Zainstaluj toolkit albo zbuduj tylko base/cpu."
   exit 1
@@ -43,7 +58,16 @@ build_one() {
   echo "=== Wariant: $variant ==="
 
   local py
-  if [ "$HAVE_UV" = "1" ]; then
+  if [ -n "${PYTHON_BIN:-}" ]; then
+    py="$PYTHON_BIN"
+    echo "Uzywam gotowego srodowiska: $py (bez uv sync, nic nie jest kompilowane)"
+    echo "Musi odpowiadac wariantowi '$variant'; sprawdzenie dla gpu ponizej."
+    if command -v uv >/dev/null 2>&1; then
+      uv pip install --python "$py" pyinstaller
+    else
+      "$py" -m pip install pyinstaller
+    fi
+  elif [ "$HAVE_UV" = "1" ]; then
     local venv=".venv-build-$variant"
     unset VIRTUAL_ENV            # an activated dev venv must not leak into the build
     export UV_PROJECT_ENVIRONMENT="$venv"
@@ -66,6 +90,13 @@ build_one() {
     "$py" -c "import sys, llama_cpp; sys.exit(0 if llama_cpp.llama_supports_gpu_offload() else 1)" || {
       echo "llama-cpp-python w tym srodowisku jest zbudowany BEZ CUDA."
       echo "Usun .venv-build-gpu, wykonaj 'uv cache clean llama-cpp-python' i uruchom ponownie."
+      exit 1
+    }
+  fi
+
+  if [ "$variant" = "gpu" ] && [ -n "${PYTHON_BIN:-}" ]; then
+    "$py" -c "import sys, torch; sys.exit(0 if torch.version.cuda else 1)" || {
+      echo "torch w tym srodowisku jest bez CUDA (wariant gpu wymaga wersji z CUDA)."
       exit 1
     }
   fi

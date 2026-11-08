@@ -4,7 +4,6 @@ import sys
 import logging
 from pathlib import Path
 import requests
-from llama_cpp import Llama
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parents[3]
@@ -17,6 +16,7 @@ for p in (PROJECT_ROOT, SRC_DIR):
 
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 from analysis.modules.llm.config import MODEL_PATH, LANGUAGE, THESIS_PATH, N_GPU_LAYERS
+from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,8 @@ def ask_model(model_name, prompt, num_predict=120):
     if model_name not in _LLAMA_MODELS:
         logger.info("Loading purpose-extraction LLM from %s", model_name)
         try:
-            _LLAMA_MODELS[model_name] = Llama(
+            _LLAMA_MODELS[model_name] = make_llama(
+                purpose="Cel pracy",
                 model_path=model_name,
                 n_ctx=N_CTX,
                 n_threads=N_THREADS,

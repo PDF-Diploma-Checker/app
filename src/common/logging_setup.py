@@ -1,5 +1,5 @@
 """Central logging config: call configure_logging() once at startup.
-Sets up a rotating file handler (platformdirs log dir), a queue handler for the log window, and global exception hooks."""
+Sets up a rotating file handler (see common.path.LOG_DIR), a queue handler for the log window, and global exception hooks."""
 
 import logging
 import logging.handlers
@@ -8,7 +8,7 @@ import sys
 import threading
 from pathlib import Path
 
-import platformdirs
+from common.path import LOG_DIR
 
 APP_NAME = "Diploma Checker"
 LOG_FILENAME = "app.log"
@@ -22,7 +22,7 @@ _configured = False
 def get_log_dir():
     """Return the per-user log directory, creating it if it doesn't exist yet."""
 
-    log_dir = Path(platformdirs.user_log_dir(APP_NAME, appauthor=False))
+    log_dir = Path(LOG_DIR)      # next to the app when it is built, otherwise the per-user log directory
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir
 

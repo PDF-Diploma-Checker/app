@@ -39,11 +39,28 @@ for pkg in ("llama_cpp", "sentence_transformers"):
 hiddenimports += collect_submodules("analysis")
 hiddenimports += collect_submodules("ui")
 hiddenimports += collect_submodules("common")
-hiddenimports += collect_submodules("app", filter=lambda n: n != "app.main")
-datas += collect_data_files("analysis")
+hiddenimports += collect_submodules("app", filter=lambda n: n != "app.launcher")
+# only what the app reads at run time: test data and saved results (with the text of real theses) stay out of the build
+datas += collect_data_files("analysis", excludes=[
+    "**/wyniki/**", "**/evaluation/**", "**/redaction_debug/**", "**/example_img/**", "**/support_scripts/**",
+    "modules/redaction/test", "**/*.md",
+])
+
+# _internal/VERSION.txt: the APP_VERSION this build was made from. tools/prepare_release_assets.py compares it with
+# the release tag, so a build of an old version cannot be published under a new tag.
+import re
+with open(os.path.join(SRC, "common", "version.py"), encoding="utf-8") as _f:
+    _version = re.search(r"^APP_VERSION\s*=\s*[\"']([^\"']+)[\"']", _f.read(), re.M).group(1)
+_version_file = os.path.join(workpath, "VERSION.txt")
+os.makedirs(workpath, exist_ok=True)
+with open(_version_file, "w", encoding="utf-8") as _f:
+    _f.write(_version + "\n")
+datas.append((_version_file, "."))
+datas.append(("LICENSE", "."))
+print(f"[spec] building version {_version}")
 
 a = Analysis(
-    ["src/app/main.py"],
+    ["src/app/launcher.py"],
     pathex=["src"],
     binaries=binaries,
     datas=datas,
@@ -54,6 +71,9 @@ a = Analysis(
     excludes=[],
     noarchive=False,
     optimize=0,
+    # plain files next to the executable: a change in our code touches them and not the executable, so an update
+    # downloads kilobytes and tools/patch_code.py can change a finished build. Only the libraries stay inside.
+    module_collection_mode={"ui": "py", "common": "py", "analysis": "py", "app": "py"},
 )
 pyz = PYZ(a.pure)
 

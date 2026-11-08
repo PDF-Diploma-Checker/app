@@ -5,7 +5,9 @@ from pathlib import Path
 import language_tool_python
 from .linguistics_types import Error_type
 from analysis.extraction.linguistics_conversion.schema import *
-from .helpers import get_match_info, morf, spell
+from .helpers import get_match_info, morf, spell, nlp_pl
+from .decision_log import dropped
+import re
 import string
 import logging
 from collections import Counter
@@ -75,6 +77,7 @@ def _init_language_tools():
             _TOOL_PL.disabled_rules.add('SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('ADJ_SUBST_ADJ_UNIFY')
             _TOOL_PL.disabled_rules.add('FORMAT_DZIESIETNY')
+            _TOOL_PL.disabled_rules.add('OD_X_Y_OD_X_DO_Y')
             _TOOL_PL.disabled_rules.add('SPACJA_ZA_PRZECINKIEM_DZIESITNYM')
             _TOOL_PL.disabled_rules.add('ZDANIE_PODRZEDNE_Z_KTORY_LUB_JAKI')
             _TOOL_PL.disabled_categories.add('MISC')
@@ -142,12 +145,20 @@ def language_tool_analisys(blocks):
             for match in matches:
                 if (match.category == 'TYPOGRAPHY' or match.category == 'PUNCTUATION'):
                     if block.block.type != "paragraph":
+                        dropped("punctuation outside a paragraph", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif not any(letter.isalpha() for letter in match.matched_text):
+                        dropped("no letters in the match", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
+                    elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl":
+                        reason = predicative_adjective_reason(match.message, contents, match.offset, match.error_length)
+                        if reason:
+                            dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                            continue
                 if match.category in {"TYPOS", "SPELLING", "COMPOUNDING", "SYNTAX"}:
                     word = contents[match.offset:match.offset + match.error_length].strip(string.punctuation + string.whitespace)
                     if typo_check(word):
+                        dropped("word known to the dictionaries", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif text_language == 'pl':
                         en_matches = tool_en.check(word)
@@ -156,6 +167,8 @@ def language_tool_analisys(blocks):
                             en_match.offset += match.offset
                             en_match.message = match.message
                         new_matches.extend(en_matches)
+                        if not en_matches:
+                            dropped("correct in English", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     else:
                         pl_matches = tool_pl.check(word)
@@ -164,11 +177,13 @@ def language_tool_analisys(blocks):
                             pl_match.offset += match.offset
                             pl_match.message = match.message
                         new_matches.extend(pl_matches)
+                        if not pl_matches:
+                            dropped("correct in Polish", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                 new_matches.append(match)
 
             for m in new_matches:
-                start_page, end_page, word_idxs, error_coordinate = get_match_info(block.block, m.offset, m.error_length)
+                start_page, end_page, word_idxs, error_coordinate, has_index = get_match_info(block.block, m.offset, m.error_length)
                 message = m.message
                 if text_language == 'en':
                     if block.block.language == 'en':
@@ -180,6 +195,11 @@ def language_tool_analisys(blocks):
                         message = english_messages.get(m.category, m.message)
                     else:
                         message = m.message
+
+                if has_index:
+                    dropped("index entry", m.category, m.rule_id, contents, m.offset, m.error_length, block)
+                    continue
+
                 errors.append(Error_type(
                     content=contents[m.offset:m.offset + m.error_length],
                     category=m.category,
@@ -191,6 +211,8 @@ def language_tool_analisys(blocks):
                     page_end=end_page,
                     word_idxs=word_idxs,
                     error_coordinate=error_coordinate,
+                    rule=m.rule_id,
+                    why=f"LanguageTool {text_language}: {m.message}; suggestions: {m.replacements[:3]}",
                 ))
 
     category_counts = Counter(e.category for e in errors)
@@ -199,19 +221,82 @@ def language_tool_analisys(blocks):
         logger.info("  LT category '%s': %d", cat, count)
     return errors
 
-def typo_check(typo_text):
-    '''Double check typos found by language analysis with Polish and English dictionaries.'''
-    analysis = morf.analyse(typo_text)
-    words = typo_text.lower().split()
-    for interpretation in analysis:
-        tag = interpretation[2][2]
-        if tag != "ign":
-            return True
-    typos = spell.unknown(words)
-    if not typos:
+# Polskie końcówki dodawane do zapożyczeń (np. "rank-owania", "transformer-owym", "framework-u").
+# Posortowane od najdłuższej, żeby odcinać jak najdłuższą końcówkę.
+POLISH_LOANWORD_SUFFIXES = sorted((
+    "owaniami", "owaniach", "owaniem", "owaniom", "owaniu", "owania", "owanie", "owań",
+    "owanego", "owanemu", "owanej", "owanym", "owanych", "owanymi", "owaną", "owana", "owane", "owany", "owani",
+    "owaliśmy", "owałem", "owałam", "owałeś", "owali", "owała", "owało", "owały", "ował", "ować",
+    "ujemy", "ujecie", "ujesz", "ują", "uje", "uję",
+    "owego", "owemu", "owych", "owymi", "owym", "owej", "ową", "owa", "owe", "owy", "owi",
+    "ami", "ach", "iem", "em", "om", "ów", "u", "a", "y", "i", "e",
+), key=len, reverse=True)
+# Rdzenie krótsze niż 4 litery (np. "the" + "a") dawałyby fałszywe trafienia. Rdzenie 4-literowe muszą być
+# częstymi słowami angielskimi ("rank"), bo słownik zawiera też rzadkie skróty ("prog" -> "progamowania").
+MIN_LOANWORD_STEM = 4
+SHORT_LOANWORD_STEM = 5
+MIN_SHORT_STEM_FREQUENCY = 1000
+
+def is_known_word(word):
+    '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
+    if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
         return True
+    return not spell.unknown(word.lower().split())
+
+def is_polish_inflected_loanword(word):
+    '''Checks if word is a known English word with a Polish ending, e.g. "rankowania", "transformerowym".
+    Stems are checked only in the English dictionary - Polish forms are already recognized by Morfeusz,
+    and Polish stems would accept typos (e.g. "progam" + "owania").'''
+    word = word.lower()
+    for suffix in POLISH_LOANWORD_SUFFIXES:
+        if not word.endswith(suffix):
+            continue
+        stem = word[:-len(suffix)]
+        if len(stem) < MIN_LOANWORD_STEM:
+            continue
+        # Niema końcówka -e jest pomijana przy odmianie (np. "cache" -> "cachowania")
+        for candidate in (stem, stem + "e"):
+            if len(candidate) < SHORT_LOANWORD_STEM:
+                if spell[candidate] >= MIN_SHORT_STEM_FREQUENCY:
+                    return True
+            elif candidate in spell:
+                return True
     return False
 
+COMPOUND_SENTENCE_VERBS_RE = re.compile(r"\(„([^”]+)”\)\s+a drugim\s+\(„([^”]+)”\)")
 
+def is_adjective_verb_homograph(word):
+    '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''
+    tags = {interpretation[2][2].split(":")[0] for interpretation in morf.analyse(word.lower())}
+    return "adj" in tags and "praet" in tags
 
+def predicative_adjective_reason(message, contents, offset, length):
+    '''Checks if the second "verb" found by LanguageTool rule ZDANIA_ZLOZONE is an adjective after a copula.
+    Returns the reason for dropping the match or None.'''
+    verbs = COMPOUND_SENTENCE_VERBS_RE.search(message)
+    if not verbs or not is_adjective_verb_homograph(verbs.group(2)):
+        return None
+    doc = nlp_pl(contents)
+    token = next((t for t in doc if offset <= t.idx < offset + length and t.text == verbs.group(2)), None)
+    if token is None:
+        return None
+    has_copula = any(child.dep_ == "cop" for child in token.children)
+    conjuncts = [child for child in token.children if child.dep_ == "conj"]
+    if not has_copula and any(c.pos_ == "VERB" and "Past" in c.morph.get("Tense") for c in conjuncts):
+        return None
+    if has_copula:
+        return "copula"
+    if token.dep_.startswith("xcomp"):
+        return f"complement of '{token.head.lemma_}'"
+    if any(c.pos_ == "ADJ" and "Nom" in c.morph.get("Case")
+           and c.morph.get("Gender") == token.morph.get("Gender")
+           and c.morph.get("Number") == token.morph.get("Number") for c in conjuncts):
+        return "coordinated with an adjective"
+    return None
 
+def typo_check(typo_text):
+    '''Double check typos found by language analysis with Polish and English dictionaries.'''
+    # Każde słowo osobno - Morfeusz dla całej frazy zwraca interpretacje każdego słowa,
+    # więc jedno znane słowo ukrywałoby literówkę w pozostałych
+    words = typo_text.split()
+    return bool(words) and all(is_known_word(w) or is_polish_inflected_loanword(w) for w in words)

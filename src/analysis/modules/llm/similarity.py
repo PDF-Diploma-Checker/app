@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
+import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
@@ -23,8 +24,12 @@ from analysis.modules.llm.get_subtitles import extract_subtitles_from_pdf
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_summary import summarize_subtitles
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, OUTPUT_DIR, LANGUAGE, N_GPU_LAYERS
+from analysis.modules.llm.config import resolve_embedding_model
 
 logger = logging.getLogger(__name__)
+
+EMPTY_SUMMARY_MARK = "["     # "[BRAK TREŚCI W SEKCJI]", "[PUSTY FRAGMENT]"
+MIN_SECTIONS_FOR_COHESION = 3
 
 
 def normalize_text(text):
@@ -60,21 +65,13 @@ def compute_similarity_for_summaries(purpose, summaries, embedding_model=EMBEDDI
         new_item["summary"] = normalize_text(new_item.get("summary") or "")
         items.append(new_item)
 
-    if not purpose:
-        for item in items:
-            item["cosine_similarity"] = 0.0
-        return {
-            "purpose": purpose,
-            "items": items,
-            "average_similarity": 0.0,
-        }
-
     texts = []
     valid_indices = []
 
     for i, item in enumerate(items):
         summary = item["summary"]
-        if summary:
+        item["has_content"] = bool(summary) and not summary.startswith(EMPTY_SUMMARY_MARK)
+        if item["has_content"]:
             valid_indices.append(i)
             texts.append(get_summary_text_for_embedding(summary))
 
@@ -94,15 +91,9 @@ def compute_similarity_for_summaries(purpose, summaries, embedding_model=EMBEDDI
 
     try:
         model = SentenceTransformer(
-            embedding_model,
+            resolve_embedding_model(embedding_model),   # the folder we downloaded, no cache symlinks needed
             trust_remote_code=True,
             device=device,
-        )
-
-        purpose_embedding = model.encode(
-            [get_purpose_text_for_embedding(purpose)],
-            convert_to_numpy=True,
-            normalize_embeddings=True,
         )
 
         text_embeddings = model.encode(
@@ -114,13 +105,26 @@ def compute_similarity_for_summaries(purpose, summaries, embedding_model=EMBEDDI
         logger.exception("Embedding computation failed using model %s", embedding_model)
         raise RuntimeError(f"Embedding computation failed using model {embedding_model}") from e
 
-    scores = cosine_similarity(purpose_embedding, text_embeddings).flatten()
+    scores = np.zeros(len(texts))
+    if purpose:
+        purpose_embedding = model.encode(
+            [get_purpose_text_for_embedding(purpose)],
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        scores = cosine_similarity(purpose_embedding, text_embeddings).flatten()
 
     for item in items:
         item["cosine_similarity"] = 0.0
 
     for idx, score in zip(valid_indices, scores):
         items[idx]["cosine_similarity"] = float(score)
+
+    # how well a section fits the rest of the thesis: it does not depend on the purpose being found correctly
+    if len(texts) >= MIN_SECTIONS_FOR_COHESION:
+        for position, idx in enumerate(valid_indices):
+            others = np.delete(text_embeddings, position, axis=0).mean(axis=0, keepdims=True)
+            items[idx]["section_similarity"] = float(cosine_similarity(others, text_embeddings[[position]])[0][0])
 
     average_similarity = float(scores.mean()) if len(scores) > 0 else 0.0
 

@@ -1,144 +1,55 @@
 import sys
 import json
-import re
-import gc
-import base64
 import logging
 from pathlib import Path
-from llama_cpp import Llama
-from llama_cpp.llama_chat_format import Llava15ChatHandler
 
 current_dir = Path(__file__).resolve().parent
 sys.path.append(str(current_dir.parent))
 sys.path.append(str(current_dir.parents[3]))
 
-from analysis.modules.llm import config
+from analysis.modules.llm.image_analysis.figures import collect_figures, image_text, parse_yes_no
+from analysis.modules.llm.image_analysis.vision_engine import VisionEngine
 
 logger = logging.getLogger(__name__)
 
 
-def extract_images_for_fonts(doc_obj, mapped_doc):
-    """Extract real figure images and captions, filtering out text-only references."""
-    caption_pattern = re.compile(r"(?:^|\n)\s*rys(?:unek|\.)?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
-    unique_images = {}
-    
-    for page in doc_obj.pages:
-        for img in getattr(page, "images", []):
-            desc = getattr(img, "description", "").strip()
-            if desc:
-                match = caption_pattern.search(desc)
-                if match:
-                    found_id = match.group(1)
-                    
-                    if found_id not in unique_images:
-                        unique_images[found_id] = {"desc": desc, "bytes": None}
-                        img_path = Path(getattr(img, "path", ""))
-                        if img_path.exists():
-                            try:
-                                with open(img_path, "rb") as f:
-                                    unique_images[found_id]["bytes"] = f.read()
-                            except OSError:
-                                logger.exception("Failed to read image file %s", img_path)
-                    else:
-                        old_desc = unique_images[found_id]["desc"]
-                        if not re.match(r"(?i)^rys", old_desc.strip()) and re.match(r"(?i)^rys", desc.strip()):
-                            unique_images[found_id]["desc"] = desc
-                            img_path = Path(getattr(img, "path", ""))
-                            if img_path.exists():
-                                try:
-                                    with open(img_path, "rb") as f:
-                                        unique_images[found_id]["bytes"] = f.read()
-                                except OSError:
-                                    logger.exception("Failed to read image file %s", img_path)
-                        
-    images = [{"id": img_id, "bytes": data["bytes"]} for img_id, data in unique_images.items() if data["bytes"] is not None]
-    return images
+# Asked about "any text", the model gave false alarms on plain charts
+FONT_QUESTION = (
+    "Look at the labels and values of this chart, not its title. "
+    "Is one of them printed at a clearly different font size than the others of its kind?"
+)
 
-class LlavaFontEngine:
-    """LLaVA-based engine for single-image font consistency checks."""
-    def __init__(self, model_path=str(config.LLAVA_MODEL_PATH), mmproj_path=str(config.LLAVA_MMPROJ_PATH)):
-        logger.info("Loading font-consistency LLaVA model from %s", model_path)
-        try:
-            self.chat_handler = Llava15ChatHandler(clip_model_path=mmproj_path)
-            self.llm = Llama(
-                model_path=model_path,
-                chat_handler=self.chat_handler,
-                n_ctx=4096,
-                n_gpu_layers=config.N_GPU_LAYERS,
-                logits_all=True,
-                verbose=False
-            )
-        except Exception as e:
-            logger.exception("Failed to load font-consistency LLaVA model from %s", model_path)
-            raise RuntimeError(f"Failed to load font-consistency LLaVA model from {model_path}") from e
 
-    def check_font_consistency(self, image_bytes):
-        """Return whether font sizes in an image appear visually consistent."""
-        base64_img = base64.b64encode(image_bytes).decode('utf-8')
-        data_uri = f"data:image/jpeg;base64,{base64_img}"
-
-        prompt = """Analyze the text and labels inside this single chart/image. 
-        Are the font sizes consistent? (For example, all axis labels should be roughly the same size, with no randomly huge or tiny texts mixed together). 
-        If the fonts are consistent and look uniform, answer ONLY with the word: YES.
-        If the fonts are inconsistent or have mismatched sizes, answer ONLY with the word: NO.
-        Do not explain. Do not use any other words."""
-
-        try:
-            response = self.llm.create_chat_completion(
-                messages=[{
-                    "role": "user", 
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_uri}}, 
-                        {"type": "text", "text": prompt}
-                    ]
-                }],
-                temperature=0.0,
-                max_tokens=10 
-            )
-            
-            result_text = response["choices"][0]["message"]["content"].strip().lower()
-            
-            if "yes" in result_text or "true" in result_text:
-                return {"consistent": True, "reason": "OK"}
-            elif "no" in result_text or "false" in result_text:
-                return {"consistent": False, "reason": "Model LLaVA wykrył niespójne rozmiary czcionek na obrazku."}
-            else:
-                return {"consistent": True, "reason": f"Niejednoznaczna odpowiedź AI: {result_text}. Domyślnie zaakceptowano."}
-                
-        except Exception as e:
-            logger.exception("Font consistency check inference failed")
-            return {"consistent": False, "reason": f"Błąd przetwarzania AI: {str(e)}"}
-
-def get_font_consistency_report(doc_obj, mapped_doc, verbose=False):
+def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl"):
     """Return a report of figures with inconsistent font sizing."""
-    images = extract_images_for_fonts(doc_obj, mapped_doc)
+    images = collect_figures(doc_obj)
     bad_fonts_report = []
 
     if not images:
         return bad_fonts_report
 
-    if verbose: logger.info(f"\n[AI] Ładowanie modelu wizyjnego LLaVA (Spójność Czcionek) do VRAM...")
-    
-    llava = LlavaFontEngine()
-    
-    for idx, img in enumerate(images, 1):
-        if verbose: logger.info(f"[{idx}/{len(images)}] LLaVA weryfikuje czcionki Rysunku {img['id']}...")
-        
-        assessment = llava.check_font_consistency(img["bytes"])
-        
-        is_consistent = assessment.get("consistent", True)
-        if str(is_consistent).lower() == "false":
-            bad_fonts_report.append({
-                "rysunek": f"Rys. {img['id']}",
-                "blad": "Niespójne wielkości czcionek na wykresie/obrazku.",
-                "szczegoly_ai": assessment.get("reason", "Model AI zauważył drastyczne różnice w wielkościach tekstu.")
-            })
-            
-    if verbose: logger.info(f"[AI] Zwalniam VRAM po analizie czcionek...")
-    del llava
-    gc.collect()
-    
+    with VisionEngine("Czcionki na rysunkach") as engine:
+        for idx, img in enumerate(images, 1):
+            if verbose:
+                logger.info("[%d/%d] Weryfikacja czcionek rysunku %s...", idx, len(images), img["id"])
+            try:
+                inconsistent = parse_yes_no(engine.ask_yes_no(img["bytes"], FONT_QUESTION))
+            except Exception:
+                logger.exception("Font consistency check inference failed")
+                bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+                continue
+            if inconsistent is None:    # not checked is something else than checked and fine
+                logger.warning("No clear font answer for figure %s", img["id"])
+                bad_fonts_report.append({"rysunek": img["id"], "analysis_failed": True})
+                continue
+            if inconsistent:
+                bad_fonts_report.append({
+                    "rysunek": img["id"],
+                    "blad": image_text(language, "fonts_inconsistent"),
+                })
+
     return bad_fonts_report
+
 
 if __name__ == "__main__":
     import time

@@ -10,17 +10,17 @@ import functools
 import spacy
 from spacy.language import Language as Spacy_language
 from spellchecker import SpellChecker
-from common.path import resource_path
+from common.path import LANGUAGETOOL_DIR, resource_path
 import sys
 import re
+import unicodedata
 from pathlib import Path
 import logging
 
 logger = logging.getLogger(__name__)
 
 os.environ["TQDM_DISABLE"] = "True"
-app_data = os.environ.get('APPDATA', os.path.expanduser('~'))
-LT_DATA_DIR = os.path.join(app_data, "DiplomaChecker", "LanguageTool")
+LT_DATA_DIR = str(LANGUAGETOOL_DIR)
 os.makedirs(LT_DATA_DIR, exist_ok=True)
 os.environ["LTP_PATH"] = LT_DATA_DIR
 
@@ -118,9 +118,41 @@ def language(text):
     else:
         return 'en'
 
+
+LETTERLIKE_MATH_LETTERS = set("ℂℍℕℙℚℝℤℬℰℱℋℐℒℳℛℯℊℴℭℌℑℜℨℎ")
+
+def normalize_math_letters(text):
+    '''Replaces letters and digits written with math font with plain ones.'''
+    return "".join(unicodedata.normalize("NFKC", c) if "\U0001D400" <= c <= "\U0001D7FF" or c in LETTERLIKE_MATH_LETTERS else c for c in text)
+
+def has_math_characters(text):
+    '''Checks if the text contains math symbols'''
+    return any("\U0001D400" <= c <= "\U0001D7FF" or unicodedata.category(c) == "Sm" for c in text)
+
+def is_latin_word(text):
+    '''Checks if every letter of the text belongs to the Latin alphabet'''
+    return all(unicodedata.name(c, "").startswith("LATIN") for c in text if c.isalpha())
+
+MATH_FONTS = ("math", "cmmi", "cmsy", "cmex", "msbm", "msam", "eufm")
+
+def is_math_font(font):
+    '''Checks if the font is used for typesetting math (variables, symbols)'''
+    return any(m in font.lower() for m in MATH_FONTS)
+
+def font_family(font):
+    '''Returns font name without style (bold/italic), size and subset prefix, e.g. TimesNewRomanPS-BoldMT -> TimesNewRomanPS,
+    NimbusSanL-ReguItal -> NimbusSanL, PLRoman12-Bold -> PLRoman.'''
+    name = font.split("+")[-1]
+    name = re.split(r"[-,]", name, maxsplit=1)[0]
+    name = re.sub(r"MT$", "", name)
+    name = re.sub(r"(bold|italic|ital|oblique)$", "", name, flags=re.IGNORECASE)
+    return re.sub(r"\d+$", "", name).lower()
+
 def get_match_info(block, offset, length):
     '''Adjust coordinates of text content to its position in pdf based on extraction structure.
     Returns coordinates to be later passed to highlight bboxes.'''
+
+    has_index = False
     end_offset = offset + length
     word_idxs = []
     start_page = None
@@ -150,6 +182,8 @@ def get_match_info(block, offset, length):
                         word_end = idx + len(word.text)
                         search_from = idx + len(word.text)
                     if word_start < local_end and word_end > local_start:
+                        if word.is_index:
+                            has_index = True
                         word_idxs.append(word.word_index)
                         lines[(word.page_number, word.line)].append(word)
                         if start_page is None:
@@ -160,6 +194,8 @@ def get_match_info(block, offset, length):
     else:
         for word in block.words:
             if word.start_char < end_offset and word.end_char > offset:
+                if word.is_index:
+                    has_index = True
                 word_idxs.append(word.word_index)
                 lines[(word.page_number, word.line)].append(word)
                 if start_page is None:
@@ -180,7 +216,7 @@ def get_match_info(block, offset, length):
     if not error_coordinate:
         error_coordinate = [{"page": -1, "coordinates": [0, 0, 0, 0]}]
 
-    return start_page, end_page, word_idxs, error_coordinate
+    return start_page, end_page, word_idxs, error_coordinate, has_index
 
 def extract_errors_to_json(matches, name):
     '''Helper function used for debugging, extracts structures to JSON file, and saves in in linguistics folder.'''

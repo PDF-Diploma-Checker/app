@@ -2,13 +2,23 @@ import concurrent.futures
 import importlib
 import logging
 import os
+import platform
+import sys
 import threading
 
 from analysis.extraction.service import ExtractionService
 from analysis.modules.linguistics.linguistics_service import LinguisticsService
+from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
+from common.timing import log_time
+from common.version import APP_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+def kwargs_summary(kwargs):
+    """The analysis options for the log, without callbacks."""
+    return {key: value for key, value in kwargs.items() if isinstance(value, (bool, str, int, type(None)))}
 
 
 class AnalysisPipeline:
@@ -17,8 +27,18 @@ class AnalysisPipeline:
         self.linguistics_service = LinguisticsService()
         self.llm_service = None
 
-    def run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True):
+    def run(self, input_document, use_llm=True, **kwargs):
+        mode = "detailed" if use_llm else "fast"
+        name = os.path.basename(str(getattr(input_document, "pdf_path", "")))
+        logger.info("Analysis of %s: app %s, Python %s, %s %s, %s mode, frozen=%s, options=%s", name, APP_VERSION,
+                    platform.python_version(), platform.system(), platform.release(), mode,
+                    getattr(sys, "frozen", False), kwargs_summary(kwargs))
+        with log_time(logger, f"Whole analysis of {name} ({mode} mode)"):
+            return self._run(input_document, use_llm=use_llm, **kwargs)
+
+    def _run(self, input_document, progress_callback=None, use_llm=True, config_path=None, language="pl", check_images=True, cancel_token=None):
         def report_progress(value, text):
+            check_cancelled(cancel_token)
             if progress_callback:
                 progress_callback(value, text)
 
@@ -35,7 +55,9 @@ class AnalysisPipeline:
         from analysis.extraction.main_extractor import extractPDF
         from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers
 
-        doc_obj = extractPDF(pdf_path)
+        with log_time(logger, "PDF extraction"):
+            doc_obj = extractPDF(pdf_path)
+        check_cancelled(cancel_token)
         doc_dict = doc_obj._to_dict()
 
         try:
@@ -55,7 +77,8 @@ class AnalysisPipeline:
         def task_llm():
             ling_ready_event.wait()
             try:
-                from app.llm_task import run_task_llm
+                # in its own process: a crash of llama.cpp in native code must not take the app down with it
+                from app.llm_process import run_task_llm_isolated as run_task_llm
 
                 return run_task_llm(
                     doc_obj=doc_obj,
@@ -63,11 +86,16 @@ class AnalysisPipeline:
                     language=language,
                     use_llm=use_llm,
                     check_images=check_images,
+                    cancel_token=cancel_token,
                 )
 
             except Exception as e:
                 logger.error(f"[PIPELINE] LLM script execution error: {e}", exc_info=True)
-                return None, None, "LLM analysis error."
+                from common import run_control
+
+                run_control.report_problem("AI", f"{type(e).__name__}: {e}")
+                failure = {"stage": "?", "error": f"{type(e).__name__}: {e}", "hint": "", "crashed": False}
+                return {"analysis_error": failure}, None, "LLM analysis error."
 
         def task_linguistics():
             try:
@@ -90,7 +118,9 @@ class AnalysisPipeline:
                 for block in raw_blocks.logical_blocks:
                     block.language = language
 
-                ling_matches, sentence_analysis = ling_module.run_linguistics(raw_blocks)
+                ling_matches, sentence_analysis = ling_module.run_linguistics(
+                    raw_blocks, cancel_token=cancel_token
+                )
 
                 logger.info(f"[PIPELINE] Found {len(ling_matches)} linguistic issues.")
 
@@ -124,12 +154,9 @@ class AnalysisPipeline:
                     config_path=config_path,
                     language=language,
                 )
-                font_usage = doc_obj.get_font_size_usage()
-                doc_obj.get_most_common_font_size = (
-                    lambda: max(font_usage, key=font_usage.get, default=12)
-                    if font_usage
-                    else 12
-                )
+                from app.llm_process import patch_most_common_font_size
+
+                patch_most_common_font_size(doc_obj)
 
                 redaction_errors = validator.validate()
 
@@ -143,17 +170,22 @@ class AnalysisPipeline:
 
         report_progress(30, "Starting analyses...")
 
-        redaction_errors = task_redaction()
+        with log_time(logger, "Redaction check"):
+            redaction_errors = task_redaction()
 
         report_progress(50, "Redaction completed. Running remaining analyses...")
 
         workers_count = 2 if use_llm else 1
 
+        def timed(label, task):
+            with log_time(logger, label):
+                return task()
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers_count) as executor:
-            future_ling = executor.submit(task_linguistics)
+            future_ling = executor.submit(timed, "Linguistic analysis", task_linguistics)
 
             if use_llm:
-                future_llm = executor.submit(task_llm)
+                future_llm = executor.submit(timed, "LLM analysis", task_llm)
 
             ling_matches, ling_stats = future_ling.result()
 

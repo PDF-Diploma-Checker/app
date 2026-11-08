@@ -1,7 +1,6 @@
 import os
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLayout, QFrame, QListView, QStyledItemDelegate,
-    QPushButton, QLineEdit, QComboBox, QFileDialog, QMessageBox,
+    QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLayout, QLineEdit, QListView, QPushButton, QScrollArea, QWidget, QStyledItemDelegate, QVBoxLayout,
 )
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QGuiApplication
@@ -9,8 +8,16 @@ from analysis.modules.llm import config as app_config
 
 from . import icons, styles
 from .i18n import t
+from .message_box import MessageBox
+from .ai_setup_dialog import AiSetupDialog
+from .license_dialog import LicenseDialog
+from .model_download_dialog import download_models
+from common import gpu_check
+from common.version import APP_VERSION
 
 CONTROL_WIDTH = 150
+COMBO_WIDTH = 230
+SCREEN_MARGIN = 40
 CONTROL_HEIGHT = 40
 
 
@@ -104,7 +111,8 @@ class SettingsDialog(QDialog):
         self.setup_ui()
         self.load_config()
         # height follows the content (wrapped descriptions differ per language)
-        self.setFixedHeight(self.layout().totalHeightForWidth(self.width()))
+        needed = self.body.layout().totalHeightForWidth(self.width()) + self.footer.sizeHint().height() + 1
+        self.setFixedHeight(min(needed, self.screen().availableGeometry().height() - SCREEN_MARGIN))
 
     # ------------------------------------------------------------ building
     def _row(self, title, description, control, stacked=False):
@@ -141,8 +149,15 @@ class SettingsDialog(QDialog):
         return box
 
     def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(32, 28, 32, 24)
+        # the settings scroll and the buttons stay: the dialog is never higher than the screen
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.body = QWidget()
+        self.body.setObjectName("SettingsBody")
+        self.body.setStyleSheet(f"QWidget#SettingsBody {{ background-color: {styles.SURFACE}; }}")
+        main_layout = QVBoxLayout(self.body)
+        main_layout.setContentsMargins(32, 28, 32, 16)
         main_layout.setSpacing(0)
 
         title_label = QLabel(t("settings.header"))
@@ -184,34 +199,78 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(
             self._row(t("settings.model_dir"), t("settings.model_dir_desc"), dir_layout, stacked=True)
         )
+        self.effective_dir_label = QLabel()
+        self.effective_dir_label.setWordWrap(True)
+        self.effective_dir_label.setStyleSheet(styles.HINT_STYLE)
+        self.effective_dir_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        main_layout.addSpacing(6)
+        main_layout.addWidget(self.effective_dir_label)
         main_layout.addSpacing(24)
 
         self.combo_device = DropdownCombo()
-        self.combo_device.addItems(["cuda", "cpu"])
-        self.combo_device.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.combo_device.addItem(t("settings.device_gpu"), "cuda")
+        self.combo_device.addItem(t("settings.device_cpu"), "cpu")
+        self.combo_device.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
+        self.combo_device.currentIndexChanged.connect(self._update_gpu_layers)
         main_layout.addLayout(self._row(t("settings.device"), t("settings.device_desc"), self.combo_device))
         main_layout.addSpacing(24)
 
         self.input_gpu_layers = QLineEdit()
         self.input_gpu_layers.setPlaceholderText(t("settings.gpu_layers_placeholder"))
-        self.input_gpu_layers.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.input_gpu_layers.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
         main_layout.addLayout(
             self._row(t("settings.gpu_layers"), t("settings.gpu_layers_desc"), self.input_gpu_layers)
         )
         main_layout.addSpacing(24)
 
         self.combo_language = DropdownCombo()
-        self.combo_language.addItems(["pl", "en"])
-        self.combo_language.setFixedSize(CONTROL_WIDTH, CONTROL_HEIGHT)
+        self.combo_language.addItem("Polski", "pl")
+        self.combo_language.addItem("English", "en")
+        self.combo_language.setFixedSize(COMBO_WIDTH, CONTROL_HEIGHT)
         main_layout.addLayout(
             self._row(t("settings.default_language"), t("settings.default_language_desc"), self.combo_language)
         )
 
-        main_layout.addSpacing(28)
-        main_layout.addWidget(_separator())
-        main_layout.addSpacing(20)
+        main_layout.addSpacing(24)
+        btn_setup = QPushButton("  " + t("settings.ai_setup"))
+        btn_setup.setIcon(icons.icon("settings", styles.TEXT_3, 16, 2.0))
+        btn_setup.setFixedHeight(CONTROL_HEIGHT)
+        btn_setup.setStyleSheet(styles.GRAY_BUTTON_STYLE + "QPushButton { padding: 0 14px; }")
+        btn_setup.setCursor(Qt.PointingHandCursor)
+        btn_setup.clicked.connect(self.open_ai_setup)
+        setup_row = QHBoxLayout()
+        setup_row.addWidget(btn_setup)
+        setup_row.addStretch(1)
+        main_layout.addLayout(setup_row)
 
-        btn_layout = QHBoxLayout()
+        # AI models: are they in the folder in use, and a button to download them without starting an analysis
+        main_layout.addSpacing(24)
+        self.models_status = QLabel()
+        self.models_status.setWordWrap(True)
+        self.btn_download = QPushButton("  " + t("settings.download_models"))
+        self.btn_download.setIcon(icons.icon("download", "#FFFFFF", 16, 2.0))
+        self.btn_download.setFixedHeight(CONTROL_HEIGHT)
+        self.btn_download.setStyleSheet(styles.BLUE_BUTTON_STYLE + "QPushButton { padding: 0 14px; }")
+        self.btn_download.setCursor(Qt.PointingHandCursor)
+        self.btn_download.clicked.connect(self.download_models)
+        models_row = QHBoxLayout()
+        models_row.setSpacing(12)
+        models_row.addWidget(self.models_status, 1)
+        models_row.addWidget(self.btn_download, 0, Qt.AlignVCenter)
+        main_layout.addLayout(self._row(t("settings.models"), t("settings.models_desc"), models_row, stacked=True))
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"QScrollArea {{ background-color: {styles.SURFACE}; border: none; }}")
+        scroll.setWidget(self.body)
+        outer.addWidget(scroll, 1)
+        outer.addWidget(_separator())
+
+        self.footer = QWidget()
+        btn_layout = QHBoxLayout(self.footer)
+        btn_layout.setContentsMargins(32, 16, 32, 24)
         btn_layout.setSpacing(10)
         btn_save = QPushButton(t("settings.save"))
         btn_save.setFixedHeight(42)
@@ -226,24 +285,65 @@ class SettingsDialog(QDialog):
         btn_cancel.setCursor(Qt.PointingHandCursor)
         btn_cancel.clicked.connect(self.reject)
 
+        version_label = QLabel(t("settings.version", version=APP_VERSION))
+        version_label.setStyleSheet(styles.HINT_STYLE)
+        version_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        btn_layout.addWidget(version_label, 0, Qt.AlignVCenter)
+        btn_license = QPushButton(t("settings.license"))
+        btn_license.setFixedHeight(42)
+        btn_license.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        btn_license.setCursor(Qt.PointingHandCursor)
+        btn_license.clicked.connect(lambda: LicenseDialog(self).exec())
+        btn_layout.addWidget(btn_license, 0, Qt.AlignVCenter)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
-        main_layout.addLayout(btn_layout)
+        outer.addWidget(self.footer)
+
+    def _update_gpu_layers(self):
+        """The layers on the graphics card mean nothing when the processor does the work."""
+        self.input_gpu_layers.setEnabled(self.combo_device.currentData() == "cuda")
 
     def browse_directory(self):
         dir_path = QFileDialog.getExistingDirectory(self, t("settings.choose_model_dir"))
         if dir_path:
             self.input_model_dir.setText(os.path.normpath(dir_path))
 
+    def open_ai_setup(self):
+        """System check + CPU/GPU + models folder; afterwards the fields show what was saved."""
+        dialog = AiSetupDialog(self, first_run=False)
+        dialog.exec()
+        self.load_config()
+        if dialog.saved and dialog.download_requested:
+            self.download_models()
+
+    def download_models(self):
+        download_models(self)
+        self._update_models_status()
+
+    def _update_models_status(self):
+        available = app_config.llm_runtime_available()
+        present = available and app_config.are_ai_models_downloaded()
+        if not available:
+            text, color = t("settings.models_no_runtime"), styles.TEXT_2
+        elif present:
+            text, color = t("settings.models_present"), styles.SUCCESS
+        else:
+            text, color = t("settings.models_missing", size=f"{gpu_check.AI_MODELS_SIZE_GB:.0f}"), styles.WARNING
+        self.models_status.setText(text)
+        self.models_status.setStyleSheet(f"font-size: 13px; color: {color}; background: transparent; border: none;")
+        self.btn_download.setVisible(available and not present)
+
     def load_config(self):
         data = app_config.load_config()
         self.input_model_dir.setText(data.get("model_dir", ""))
-        idx = self.combo_device.findText(data.get("device", "cpu"))
+        self.effective_dir_label.setText(t("settings.effective_model_dir", path=app_config.MODEL_DIR))
+        self._update_models_status()
+        idx = self.combo_device.findData(data.get("device", "cpu"))
         if idx >= 0:
             self.combo_device.setCurrentIndex(idx)
         self.input_gpu_layers.setText(str(data.get("n_gpu_layers", 0)))
-        idx = self.combo_language.findText(data.get("language", "pl"))
+        idx = self.combo_language.findData(data.get("language", "pl"))
         if idx >= 0:
             self.combo_language.setCurrentIndex(idx)
 
@@ -251,24 +351,28 @@ class SettingsDialog(QDialog):
     def save_config(self):
         try:
             gpu_layers = int(self.input_gpu_layers.text().strip())
+            if gpu_layers < 0:
+                raise ValueError
         except ValueError:
-            gpu_layers = 25
+            MessageBox.warning(self, t("common.error"), t("settings.invalid_gpu_layers"))
+            self.input_gpu_layers.setFocus()
+            return
 
         data = app_config.load_config()
         data.update({
-            "device": self.combo_device.currentText(),
+            "device": self.combo_device.currentData(),
             "n_gpu_layers": gpu_layers,
             "model_dir": self.input_model_dir.text().strip(),
-            "language": self.combo_language.currentText(),
+            "language": self.combo_language.currentData(),
         })
         try:
             app_config.save_config(data)
             app_config.reload_config()
         except Exception as e:
-            QMessageBox.critical(self, t("common.error"), t("settings.save_failed", error=str(e)))
+            MessageBox.critical(self, t("common.error"), t("settings.save_failed", error=str(e)))
             return
 
-        QMessageBox.information(
+        MessageBox.information(
             self, t("common.success"),
             t("settings.saved", path=self.config_path) + "\n\n"
             + t("settings.restart_note"),

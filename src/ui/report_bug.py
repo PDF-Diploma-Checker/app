@@ -16,12 +16,13 @@ import requests
 from PySide6 import __version__ as pyside_version
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
-    QVBoxLayout,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QRadioButton, QVBoxLayout,
 )
 
 from . import styles
 from .i18n import t
+from .message_box import MessageBox, fit_minimum_height
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
 from common.system_info import build_system_report
 
@@ -92,8 +93,8 @@ def build_diagnostic_zip(system_info):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("info.txt", system_info)
-        for f in sorted(log_dir.glob(f"{log_file.name}*")):
-            if f.is_file():
+        for f in sorted(log_dir.glob(f"{log_file.name}*")) + [log_dir / "crash.log"]:
+            if f.is_file() and f.stat().st_size:
                 zf.write(f, arcname=f.name)
 
     return buffer.getvalue()
@@ -192,7 +193,7 @@ class ReportDialog(QDialog):
     def __init__(self, url, thesis_path=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle(t("report.window_title"))
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(480)
 
         self.url = url
         self.thesis_path = thesis_path
@@ -214,13 +215,22 @@ class ReportDialog(QDialog):
         self.message_edit.textChanged.connect(self._limit_message)
         layout.addWidget(self.message_edit)
 
+        layout.addWidget(QLabel(t("report.scope_label")))
+        self.logs_only = QRadioButton(t("report.scope_logs"))
+        self.logs_only.setChecked(True)     # the thesis leaves the computer only on an explicit choice
+        layout.addWidget(self.logs_only)
+        self.with_thesis = QRadioButton(t("report.scope_thesis"))
+        self.with_thesis.setEnabled(thesis_path is not None)
+        layout.addWidget(self.with_thesis)
+
         self.consent = QCheckBox()
         consent_row = QHBoxLayout()
         consent_row.addWidget(self.consent, 0, Qt.AlignTop)
-        consent_label = QLabel(t("report.consent"))
+        consent_label = QLabel(t("report.consent_logs"))
         consent_label.setWordWrap(True)
         consent_label.mousePressEvent = lambda _event: self.consent.toggle()
         consent_row.addWidget(consent_label, 1)
+        self.with_thesis.toggled.connect(lambda full: self._on_scope_changed(consent_label, full))
         layout.addLayout(consent_row)
 
         buttons = QHBoxLayout()
@@ -243,6 +253,17 @@ class ReportDialog(QDialog):
 
         layout.addLayout(buttons)
 
+        fit_minimum_height(self)     # keeps the dialog from shrinking until the texts overlap
+
+    def _on_scope_changed(self, consent_label, with_thesis):
+        """Consent is given for what is really sent, so changing the scope asks for it again."""
+        consent_label.setText(t("report.consent_thesis" if with_thesis else "report.consent_logs"))
+        self.consent.setChecked(False)
+
+    def selected_thesis(self):
+        """The file to attach: None unless the user chose to send the whole thesis."""
+        return self.thesis_path if self.with_thesis.isChecked() else None
+
     def _limit_message(self):
         """Keep the description within MAX_USER_MESSAGE_CHARS."""
         text = self.message_edit.toPlainText()
@@ -260,10 +281,12 @@ class ReportDialog(QDialog):
         self.send_btn.setEnabled(False)
         self.cancel_btn.setEnabled(False)
         self.consent.setEnabled(False)
+        self.logs_only.setEnabled(False)
+        self.with_thesis.setEnabled(False)
         self.send_btn.setText(t("report.sending"))
 
         self._thread = QThread(self)
-        self._sender = ReportSender(self.url, self.thesis_path, self.message_edit.toPlainText())
+        self._sender = ReportSender(self.url, self.selected_thesis(), self.message_edit.toPlainText())
         self._sender.moveToThread(self._thread)
         self._thread.started.connect(self._sender.run)
         self._sender.finished.connect(self._on_finished)
@@ -288,11 +311,11 @@ class ReportDialog(QDialog):
 
     def _show_result(self, ok, error):
         if ok:
-            QMessageBox.information(self, t("report.sent_title"), t("report.sent_text"))
+            MessageBox.information(self, t("report.sent_title"), t("report.sent_text"))
             self.accept()
             return
 
-        QMessageBox.warning(self, t("report.failed_title"), t("report.failed_text", error=error))
+        MessageBox.warning(self, t("report.failed_title"), t("report.failed_text", error=error))
         self._reset_buttons()
 
     def _reset_buttons(self):
@@ -300,6 +323,8 @@ class ReportDialog(QDialog):
         self.send_btn.setEnabled(self.consent.isChecked())
         self.cancel_btn.setEnabled(True)
         self.consent.setEnabled(True)
+        self.logs_only.setEnabled(True)
+        self.with_thesis.setEnabled(self.thesis_path is not None)
         self.message_edit.setEnabled(True)
 
     def reject(self):
@@ -315,7 +340,7 @@ def send_report(parent=None, thesis_path=None):
     try:
         url = _load_report_url()
     except ReportConfigError as e:
-        QMessageBox.warning(parent, t("report.unavailable_title"), str(e))
+        MessageBox.warning(parent, t("report.unavailable_title"), str(e))
         return
 
     if thesis_path and not Path(thesis_path).is_file():

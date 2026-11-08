@@ -1,8 +1,9 @@
 from collections import defaultdict
 import re
-from .helpers import lemmatization
+from .helpers import lemmatization, font_family
 from .proper_check import check_if_proper
 from .typos_final_filter import refine_typos
+from .decision_log import dropped_match
 import string
 import logging
 
@@ -16,43 +17,53 @@ def check_exeptions(matches, blocks, proper_names, main_font):
     valid_errors = []
     blocks_to_check = defaultdict(list)
     for match in matches:
-        blocks_to_check[f'{match.block_id}_{match.page_start}'].append(match)
+        blocks_to_check[match.block_id].append(match)
     for block in blocks:
         if not block.block.words:
             continue
-        block_key = f'{block.block.block_id}_{block.block.words[0].page_number}'
+        block_key = block.block.block_id
         if block_key in blocks_to_check:
             for match in blocks_to_check[block_key]:
                 text = block.contents
                 word = match.content
                 word_clean = word.strip(string.punctuation + string.whitespace)
                 if word_clean in {p[0] for p in proper_names}:
+                    dropped_match("proper name", match, block)
                     continue
                 elif word_clean.lower() in {p[1] for p in proper_names}:
+                    dropped_match("proper name", match, block)
                     continue
                 potential_exeption = False
                 inside_quotes = check_quotes(match.offset, match.offset + match.error_length, text)
                 if not inside_quotes:
+                    if remove_errors_different_font(match, block, main_font):
+                        dropped_match("font other than the main one", match, block)
+                        continue
                     if match.category in {"TYPOS", "SPELLING" ,"COMPOUNDING", "SYNTAX"}:
-                        if remove_errors_different_font(match, block, main_font):
-                            continue
                         try:
                             if any(letter == '-' for letter in match.content):
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                             elif match.offset > 0 and text[match.offset - 1] == '-':
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                             elif match.offset + len(match.content) < len(text) and text[match.offset + len(match.content)] == '-':
+                                dropped_match("word with a hyphen", match, block)
                                 continue
                         except Exception:
                             logger.exception("Failed to check adjacent characters for dash")
                         lemma = lemmatization(word, block.language)
                         if check_if_proper(block.block, match, proper_names, lemma):
+                            dropped_match("proper name in this block", match, block)
                             continue
                         potential_exeptions[lemma].append(match)
                         potential_exeption = True
                     if match.category == "CASING" and match.offset == 0:
+                        dropped_match("casing at the start of a block", match, block)
                         continue
-                if not inside_quotes and not potential_exeption:
+                if inside_quotes:
+                    dropped_match("inside quotes", match, block)
+                elif not potential_exeption:
                     valid_errors.append(match)
     exeptions = []  
     before_typo_refine = len(valid_errors)
@@ -60,11 +71,12 @@ def check_exeptions(matches, blocks, proper_names, main_font):
     after_typo_refine = len(valid_errors)
     repeated_words_dropped = 0
     for lemma, match_list in potential_exeptions.items():
-        if len(match_list) > 2:
-            exeptions.extend(match_list)
-            repeated_words_dropped += len(match_list)
-        else:
-            valid_errors.extend(match_list)
+        # if len(match_list) > 2:
+        #     exeptions.extend(match_list)
+        #     repeated_words_dropped += len(match_list)
+        # else:
+        #     valid_errors.extend(match_list)
+        valid_errors.extend(match_list)
 
     logger.info("Exception filtering complete:")
     logger.info("  Input: %d, output: %d", len(matches), len(valid_errors))
@@ -74,15 +86,20 @@ def check_exeptions(matches, blocks, proper_names, main_font):
     return valid_errors
 
 
-def remove_errors_different_font(match, block, main_font):
-    '''Exclueds matches that use different font than main tex for example code snippet citations.'''
+def remove_errors_different_font(match, block, main_font, ignore_style=False):
+    '''Exclueds matches that use different font than main tex for example code snippet citations.
+    With ignore_style bold/italic variants of the main font are not treated as a different font.'''
     if not main_font or not match.word_idxs:
         return False
+    main_family = font_family(main_font)
     words_by_idx = {w.word_index: w for w in block.block.words}
     for idx in match.word_idxs:
         word = words_by_idx.get(idx)
-        if word is not None and word.font != main_font:
-            return True
+        if word is None or word.font == main_font:
+            continue
+        if ignore_style and font_family(word.font) == main_family:
+            continue
+        return True
     return False
 
 def check_quotes(start, end, text, return_spans=False):

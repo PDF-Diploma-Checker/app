@@ -9,11 +9,13 @@ from PySide6.QtWidgets import (
 )
 
 from common.path import resource_path
+from common.version import APP_VERSION
 
 from . import icons, styles
 from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
 from .settings import SettingsDialog
+from .update_banner import UpdateBanner
 
 # Column widths shared by the table header and every row, so they always line up.
 ICON_W = 38
@@ -158,6 +160,7 @@ class StartPage(QWidget):
         self.setup_ui()
         self.retranslate_ui()
         language_signals.changed.connect(self.retranslate_ui)
+        self.update_banner.start_check()     # background check; the notice stays hidden unless a newer release exists
 
     def dragEnterEvent(self, event):
         """Accept initial window dragging protocols if the user enters the active landing space with system URL"""
@@ -181,6 +184,9 @@ class StartPage(QWidget):
         main_layout.setSpacing(0)
 
         main_layout.addWidget(self._build_app_bar())
+
+        self.update_banner = UpdateBanner()
+        main_layout.addWidget(self.update_banner)
 
         self.content_widget = QWidget()
         self.content_widget.setStyleSheet("background: transparent;")
@@ -238,6 +244,13 @@ class StartPage(QWidget):
             f"font-size: 21px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
         )
         bar.addWidget(brand)
+        version = QLabel(f"v{APP_VERSION}")
+        version.setToolTip(t("settings.version", version=APP_VERSION))
+        version.setStyleSheet(
+            f"font-size: 12px; font-weight: 500; color: {styles.TEXT_2}; background-color: {styles.NEUTRAL_BG};"
+            " border: none; border-radius: 8px; padding: 2px 8px;"
+        )
+        bar.addWidget(version, 0, Qt.AlignVCenter)
         bar.addStretch(1)
 
         self.lang_switch = LanguageSwitch()

@@ -1,15 +1,18 @@
 import re
 from .linguistics_types import Error_type
 from .helpers import get_match_info 
+from .exeptions_check import check_quotes
 import logging
 from collections import Counter
+from .exeptions_check import remove_errors_different_font
 
 logger = logging.getLogger(__name__)
 
-def dash_check(blocks):
+def dash_check(blocks, main_font=None):
     '''Checks text blocks for correct usage of hyphens, en dashes and em dashes in Polish and English.'''
     logger.info("Starting dash check")
     checked_matches = []
+    different_font_dropped = 0
 
     for block in blocks:
         if block.block.type in {"keywords", "math", "code_snippet"}:
@@ -30,7 +33,7 @@ def dash_check(blocks):
         if unit.type in {"acronyms", "toc", "tof", "tot"}:
             for word in unit.words:
                 if word.text == '-':
-                    if block.block.language == 'en':
+                    if unit.language == 'en':
                         message = "Hyphen instead of en dash in a definition."
                     else:
                         message = "Dywiz zamiast półpauzy w definicji."
@@ -57,7 +60,7 @@ def dash_check(blocks):
                     if (pos_before >= 0 and text[pos_before].isalpha() and
                             pos_after < len(text) and text[pos_after].isalpha()):
                         continue
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
                 if block.block.language == 'en':
                     message = "Hyphen instead of en dash or spaces around the hyphen in a hyphenated name."
                 else:
@@ -79,7 +82,7 @@ def dash_check(blocks):
             # blad spojnosci jak raz sie uzwa tego i tego
             match = re.search(r'—', text)
             if match:
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, match.start(), 1)
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, match.start(), 1)
                 if block.block.language == 'en':
                     message = "Inconsistency: the text uses both en dashes and em dashes."
                 else:
@@ -102,7 +105,7 @@ def dash_check(blocks):
         for m in re.finditer(dash_no_space_regex, text):
             # Sprawdzamy czy to nie jest zakres dat (cyfra-cyfra), co jest dopuszczalne
             if not (re.match(r'\d', m.group(1) or "") and re.match(r'\d', m.group(2) or "")):
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
                 if block.block.language == 'en':
                     message = "Missing space around dash in interjection."
                 else:
@@ -127,7 +130,7 @@ def dash_check(blocks):
             for m in re.finditer(date_error_regex, text):
                 content = m.group()
                 if '-' in content or ' ' in content:
-                    start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(content))
+                    start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(content))
                     if block.block.language == 'en':
                         message = "English dates do not use spaces around en dashes (–)."
                     else:
@@ -148,8 +151,8 @@ def dash_check(blocks):
             # pl: półpauza lub dywiz bez spacji (1990–2000 lub 1990-2000).
             date_space_regex = r'(\d+\s+[–-]\s+\d+)'
             for m in re.finditer(date_space_regex, text):
-                start_page, end_page, word_idxs, error_coordinare = get_match_info(unit, m.start(), len(m.group()))
-                if block.block.language == 'en':
+                start_page, end_page, word_idxs, error_coordinare, _ = get_match_info(unit, m.start(), len(m.group()))
+                if unit.language == 'en':
                     message = "In Polish date/number ranges, no spaces are used around the dash."
                 else:
                     message = "W polskich zakresach dat/liczb nie używa się spacji wokół myślnika."     
@@ -165,9 +168,10 @@ def dash_check(blocks):
                     word_idxs=word_idxs,
                     error_coordinate= error_coordinare
                 ))
-            
 
-        checked_matches.extend(errors)
+        kept_errors = [e for e in errors if not remove_errors_different_font(e, block, main_font, ignore_style=True)]
+        different_font_dropped += len(errors) - len(kept_errors)
+        checked_matches.extend(kept_errors)
         
     msg_counts = Counter()
     for m in checked_matches:
@@ -182,6 +186,49 @@ def dash_check(blocks):
         else:
             msg_counts["other"] += 1
     logger.info("Dash check complete: %d matches", len(checked_matches))
+    logger.info("  Different font dropped: %d", different_font_dropped)
     for error_type, count in msg_counts.most_common():
         logger.info("  Dash error type '%s': %d", error_type, count)
     return checked_matches
+
+
+ABBREV_NO_SPACE = re.compile(
+    r'(?<![\w.])(?:tzw|tzn|np|itp|itd|tj|wg|ww|ds|ang|pol|niem|fr)\.(?=[a-ząćęłńóśźż])'
+)
+
+def abbreviation_space_check(blocks, main_font=None):
+    '''Finds abbreviations followed by a word with no space after the dot, e.g. "tzw.krótkiej".'''
+    checked_matches = []
+    for block in blocks:
+        unit = block.block
+        if unit.type in {"math", "code_snippet", "toc", "tof", "tot", "acronyms", "keywords"}:
+            continue
+        if unit.type == "list" and getattr(unit, "is_bibliography", False):
+            continue
+        text = block.contents
+        for m in ABBREV_NO_SPACE.finditer(text):
+            word_end = m.end()
+            while word_end < len(text) and text[word_end].isalpha():
+                word_end += 1
+            if check_quotes(m.start(), word_end, text):
+                continue
+            if "/" in text[max(0, m.start() - 10):word_end + 10]:   # adresy URL
+                continue
+            start_page, end_page, word_idxs, coords, has_index = get_match_info(unit, m.start(), word_end - m.start())
+            if has_index:
+                continue
+            all_words = unit.words if hasattr(unit, "words") and unit.words else [
+                w for item in getattr(unit, "items", []) for w in item.words
+            ]
+            matched_words = [w for w in all_words if not (w.end_char <= m.start() or w.start_char >= word_end)]
+            if main_font and any(w.font != main_font for w in matched_words):
+                continue
+            lang = getattr(unit, "language", getattr(block, "language", "pl"))
+            message = "Missing space after an abbreviation." if lang == "en" else "Brak spacji po skrócie."
+            checked_matches.append(Error_type(
+                content=text[m.start():word_end], category="PUNCTUATION", message=message,
+                offset=m.start(), error_length=word_end - m.start(), block_id=unit.block_id,
+                page_start=start_page, page_end=end_page, word_idxs=word_idxs, error_coordinate=coords,
+            ))
+    return checked_matches
+

@@ -10,6 +10,8 @@ from analysis.extraction.raw_extraction.text_extractor import (
     fix_latex,
 )
 
+logger = logging.getLogger(__name__)
+
 def find_table_description(table_bbox, text_blocks, priority_side=None):
     """
     Locates the caption or description for a table by analyzing the spatial relationship
@@ -117,7 +119,7 @@ def extract_tables(
         try:
             extracted_data = tab.extract()
         except Exception as e:
-            logging.error(f"Failed to extract table data: {e}")
+            logger.error(f"Failed to extract table data: {e}")
             continue
 
         if tab.col_count < 2:
@@ -183,7 +185,7 @@ def extract_tables(
                 data=cleaned_data,
             )
         )
-        logging.info("Extracted standard table successfully.")
+        logger.info("Extracted standard table successfully.")
 
     return table_bboxes, priority_side
 
@@ -243,8 +245,22 @@ def extract_apa_tables(
             apa_rect = fitz.Rect(min_x, top_y, max_x, bottom_y)
             grouped_table_rects.append(apa_rect)
 
+    vertical_lines = []
+    for d in drawings:
+        r = fitz.Rect(d["rect"])
+        if r.width <= 4 and r.height > 20:
+            vertical_lines.append(r)
+
     for apa_rect in grouped_table_rects:
         try:
+            vlines_inside = [
+                v for v in vertical_lines
+                if v.x0 >= apa_rect.x0 and v.x1 <= apa_rect.x1
+                and v.y0 >= apa_rect.y0 - 5 and v.y1 <= apa_rect.y1 + 5
+            ]
+            if len(vlines_inside) >= 2:
+                continue
+
             is_duplicate = False
             for existing_rect in existing_table_bboxes:
                 intersect = apa_rect & existing_rect
@@ -363,9 +379,9 @@ def extract_apa_tables(
                     table_type="apa",
                 )
             )
-            logging.info("Extracted APA table successfully.")
+            logger.info("Extracted APA table successfully.")
         except Exception as e:
-            logging.error(f"Failed to process potential APA table: {e}")
+            logger.error(f"Failed to process potential APA table: {e}")
 
     return apa_bboxes, priority_side
 
@@ -587,8 +603,8 @@ def extract_lineless_tables(
                     )
                 )
                 table_extracted = True
-                logging.info("Extracted lineless table successfully.")
+                logger.info("Extracted lineless table successfully.")
             except Exception as e:
-                logging.error(f"Failed to process potential lineless table: {e}")
+                logger.error(f"Failed to process potential lineless table: {e}")
 
     return lineless_bboxes, priority_side

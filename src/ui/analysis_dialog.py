@@ -1,30 +1,47 @@
 import logging
 import os
+import time
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QButtonGroup, QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
-    QMessageBox, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from analysis.modules.llm.config import (
     are_ai_models_downloaded,
-    download_ai_models_with_progress,
     download_specific_language,
     llm_runtime_available,
+    load_config,
+    save_config,
 )
 
+from common import eta, gpu_check, run_control
+from common.resource_monitor import ResourceMonitor
+from common import crash_log
+from common.cancellation import AnalysisCancelled, CancelToken
+
 from . import icons, styles
+from .ai_setup_dialog import AiSetupDialog
 from .i18n import t
+from .message_box import MessageBox
+from .model_download_dialog import download_models
+from .progress_panel import ResourcePanel, StageList, clock
 
 logger = logging.getLogger(__name__)
 
+# key in the user's app_config.json: the requirements file (JSON) used last, offered again next time
+LAST_CONFIG_KEY = "last_config_file"
+
+
+
+SCREEN_MARGIN = 40
 
 
 class FileBadge(QFrame):
     removed = Signal()
 
-    def __init__(self, filename, parent=None):
+    def __init__(self, filename, parent=None, *, info_text=None):
         super().__init__(parent)
         self.setObjectName("FileBadge")
         self.setStyleSheet(styles.FILE_BADGE_FRAME)
@@ -52,7 +69,7 @@ class FileBadge(QFrame):
         self.name_label.setToolTip(filename)
         self.name_label.setStyleSheet(styles.FILE_BADGE_NAME_LABEL)
 
-        self.info_label = QLabel(t("analysis.config_info"))
+        self.info_label = QLabel(info_text or t("analysis.config_info"))
         self.info_label.setStyleSheet(styles.FILE_BADGE_INFO_LABEL)
 
         text_layout.addWidget(self.name_label)
@@ -114,36 +131,74 @@ class ConfigDropFrame(QFrame):
         super().mouseReleaseEvent(event)
 
 
+_LIVE_WORKERS = set()       # keeps a running QThread alive until it has finished
+_OPEN_BOXES = set()         # non-modal problem windows, kept alive until closed
+
+
+def _escape(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+class _EtaInputsWorker(QThread):
+    """Reads the PDF and asks the system about the hardware, off the UI thread (both take a moment)."""
+    done = Signal(object, object)
+
+    def __init__(self, pdf_path, parent=None):
+        super().__init__(parent)
+        self._pdf_path = pdf_path
+
+    def run(self):
+        try:
+            doc = eta.doc_facts(self._pdf_path) if self._pdf_path else None
+            hw = eta.hardware_info()
+        except Exception:
+            logger.exception("Time estimate inputs failed")
+            doc, hw = None, {}
+        self.done.emit(doc, hw)
+
+
 class PipelineWorker(QThread):
     progress_update = Signal(int, str)
     finished_success = Signal(dict)
     finished_error = Signal(str)
+    problem = Signal(str, str, bool)    # (title, text, popup): a part of the analysis failed, the rest goes on
 
-    def __init__(self, pdf_path, config_path, use_llm, language, download_models_flag=False):
+    def __init__(self, pdf_path, config_path, use_llm, language, check_images=True):
         super().__init__()
         self.pdf_path = pdf_path
         self.config_path = config_path
         self.use_llm = use_llm
         self.language = language
-        self.download_models_flag = download_models_flag
+        self.check_images = check_images
+        self.cancel_token = CancelToken()
+
+    def cancel(self):
+        """Ask the pipeline to stop; it does so at its next checkpoint."""
+        self.cancel_token.cancel()
+
+    def _report_progress(self, value, text):
+        self.cancel_token.check()
+        self.progress_update.emit(value, text)
 
     def run(self):
+        # code deep in the analysis (the AI models) reports its status and checks for a cancel through run_control
+        run_control.bind(self.cancel_token, self._report_progress, self.problem.emit)
+        crash_log.analysis_started(self.pdf_path)
         try:
-            self.progress_update.emit(5, t("analysis.checking_language"))
+            self._report_progress(5, t("analysis.checking_language"))
             download_specific_language(self.language)
 
-            if self.use_llm and self.download_models_flag:
-                download_ai_models_with_progress(self.progress_update.emit)
-
-            self.progress_update.emit(40, t("analysis.starting_engine"))
+            self._report_progress(40, t("analysis.starting_engine"))
             from app.entry import run_analysis_for_pdf
 
             final_report = run_analysis_for_pdf(
                 pdf_path=self.pdf_path,
                 config_path=self.config_path,
-                progress_callback=self.progress_update.emit,
+                progress_callback=self._report_progress,
                 use_llm=self.use_llm,
                 language=self.language,
+                check_images=self.check_images,
+                cancel_token=self.cancel_token,
             )
 
             report_objects = getattr(final_report, "linguistics_errors", [])
@@ -197,12 +252,24 @@ class PipelineWorker(QThread):
                 if h <= 0:
                     h = 20.0
 
+                extra_rects = []
+                if isinstance(err_coord, list):
+                    for c in err_coord[1:]:
+                        bl = c.get("coordinates") if isinstance(c, dict) else None
+                        if bl and len(bl) >= 4 and c.get("page", -1) != -1:
+                            x1, y1, x2, y2 = (float(v) for v in bl[:4])
+                            extra_rects.append({
+                                "page": c["page"],
+                                "coords": {"x": x1, "y": y1, "w": max(x2 - x1, 1.0), "h": max(y2 - y1, 1.0)},
+                            })
+
                 ui_report.append({
                     "page": page_nr,
                     "category": str(category),
                     "found_text": str(text),
                     "comment": str(comment),
                     "coords": {"x": x, "y": y, "w": w, "h": h},
+                    "extra_rects": extra_rects,
                 })
 
             sota_data = getattr(final_report, "llm_result", None)
@@ -211,72 +278,153 @@ class PipelineWorker(QThread):
                 "sota": sota_data if isinstance(sota_data, dict) else None,
                 "language": self.language,
             }
+            self.cancel_token.check()
             self.finished_success.emit(ui_data)
 
+        except AnalysisCancelled:
+            logger.info("Analysis cancelled by the user")
         except Exception as e:
             logger.exception("Analysis pipeline failed")
             self.finished_error.emit(str(e))
+        finally:
+            crash_log.analysis_finished()
+            run_control.unbind()
 
 
 
 
 class AnalysisDialog(QDialog):
-    CONFIG_SIZE = (640, 720)
-    PROGRESS_SIZE = (640, 300)
+    CONFIG_SIZE = (640, 830)
+    PROGRESS_SIZE = (640, 480)              # fast mode: no AI stages, no graphics card
+    PROGRESS_SIZE_AI = (640, 710)
 
     def __init__(self, pdf_path, parent=None):
         super().__init__(parent)
         self.pdf_path = pdf_path
         self.setObjectName("AnalysisDialog")
         self.setWindowTitle(t("analysis.title"))
-        self.setFixedSize(*self.CONFIG_SIZE)
+        self.setFixedSize(*self._fit_to_screen(self.CONFIG_SIZE))
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Dialog)
         self.setStyleSheet(styles.DIALOG_STYLE)
 
         self.config_file_path = None
         self.ai_available = llm_runtime_available()
         self.models_available = are_ai_models_downloaded() if self.ai_available else False
-        self.should_download_models = False
-        self._gpu_info_ready = False
+        self._close_after_cancel = False
+        self._cancel_started = None
+        self.monitor = None
+        self._eta_doc = None
+        self._eta_hw = None
+        self._eta_ready = False
+        self.estimate = None
+        self.tracker = None
+        self._started = time.monotonic()
+        self.stats_timer = QTimer(self)
+        self.stats_timer.setInterval(1000)
+        self.stats_timer.timeout.connect(self._refresh_stats)
 
         self.setup_ui()
+        self._restore_last_config()
+        worker = _EtaInputsWorker(self.pdf_path)       # no parent: it may outlive this dialog by a moment
+        _LIVE_WORKERS.add(worker)
+        worker.finished.connect(lambda w=worker: _LIVE_WORKERS.discard(w))
+        worker.done.connect(self._on_eta_inputs)
+        worker.start()
 
-    def check_gpu_vram(self):
-        """Return (gpu name, VRAM in GB). Torch is imported lazily: it is slow and optional."""
-        try:
-            import torch
-            if torch.cuda.is_available():
-                device = torch.cuda.current_device()
-                name = torch.cuda.get_device_name(device)
-                vram_gb = torch.cuda.get_device_properties(device).total_memory / (1024 ** 3)
-                return name, vram_gb
-        except Exception:
-            pass
-        return None, 0.0
+    @staticmethod
+    def _device_line():
+        """(text, colour, background) describing what the AI calculations will run on, from the saved settings."""
+        cfg = load_config()
+        layers = cfg.get("n_gpu_layers", 0)
+        if cfg.get("device") == "cuda" and layers and gpu_check.llama_gpu_support():
+            return (t("analysis.device_line_gpu", layers="max" if layers < 0 else layers),
+                    styles.SUCCESS, styles.SUCCESS_BG)
+        return t("analysis.device_line_cpu"), styles.WARNING, styles.WARNING_BG
 
-    def _ensure_gpu_info(self):
-        """Fill the GPU hint label once, the first time the detailed mode is selected."""
-        if self._gpu_info_ready:
-            return
-        self._gpu_info_ready = True
+    def _update_gpu_warning(self):
+        """Warn about a card too small for the models. The hardware facts arrive later than the choice of the mode."""
+        hw = self._eta_hw or {}
+        vram = hw.get("vram_gb", 0.0)
+        weak = self.btn_dokladny.isChecked() and gpu_check.is_weak_gpu(vram)
+        if weak:
+            self.gpu_warning_label.setText(t("analysis.weak_gpu", name=hw.get("gpu_name", "GPU"), vram=f"{vram:.1f}",
+                                             needed=f"{gpu_check.GOOD_VRAM_GB:.0f}"))
+        self.gpu_warning_label.setVisible(weak)
 
-        gpu_name, vram_gb = self.check_gpu_vram()
-        if gpu_name:
-            if vram_gb >= 8.0:
-                color, bg = styles.SUCCESS, styles.SUCCESS_BG
-                rec_text = t("analysis.gpu_ok", name=gpu_name, vram=f"{vram_gb:.1f}")
-            else:
-                color, bg = styles.WARNING, styles.WARNING_BG
-                rec_text = t("analysis.gpu_low", name=gpu_name, vram=f"{vram_gb:.1f}")
-        else:
-            color, bg = styles.WARNING, styles.WARNING_BG
-            rec_text = t("analysis.gpu_none")
-
-        self.gpu_info_label.setText(rec_text)
+    def _update_device_line(self):
+        text, color, bg = self._device_line()
+        self.gpu_info_label.setText(text)
         self.gpu_info_label.setStyleSheet(
             f"font-size: 13px; color: {color}; background-color: {bg}; "
             "border: none; border-radius: 8px; padding: 8px 10px;"
         )
+
+    def _run_ai_setup(self, first_run):
+        """Show the AI setup (system check, CPU/GPU, models folder). True when the detailed mode can be used."""
+        dialog = AiSetupDialog(self, first_run=first_run)
+        dialog.exec()
+        if dialog.saved and dialog.download_requested:
+            download_models(self)       # right away, with its own progress window, not hidden in the analysis
+        self.models_available = are_ai_models_downloaded()
+        if dialog.saved and not self.models_available:
+            MessageBox.information(self, t("analysis.no_models_title"), t("analysis.models_still_missing"))
+        return bool(dialog.saved and self.models_available)
+
+    def _open_ai_setup(self):
+        """The link below the device line: check the system again / change CPU-GPU or the models folder."""
+        if not self._run_ai_setup(first_run=False):
+            if not self.models_available:
+                self._switch_to_fast()
+                return
+        self._update_device_line()
+        self._update_eta()
+
+    def _switch_to_fast(self):
+        self.btn_szybki.setChecked(True)
+        self._update_eta()
+        self.btn_dokladny.setChecked(False)
+        self.cb_images.setVisible(False)
+        self.gpu_info_label.setVisible(False)
+        self.gpu_warning_label.setVisible(False)
+        self.setup_link.setVisible(False)
+        self.mode_hint_label.setVisible(True)
+
+    # ------------------------------------------------------------ time estimate
+    def _on_eta_inputs(self, doc, hw):
+        self._eta_doc, self._eta_hw, self._eta_ready = doc, hw, True
+        self._update_gpu_warning()
+        self._update_eta()
+
+    def _current_estimate(self):
+        """Estimate for what is selected right now, or None while the inputs are unavailable."""
+        if not self._eta_ready or self._eta_doc is None:
+            return None
+        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
+        machine = eta.machine_from_config(load_config(), self._eta_hw or {})
+        return eta.estimate(self._eta_doc, machine, is_detailed, self.cb_images.isChecked())
+
+    def _update_eta(self):
+        if not self._eta_ready:
+            self.eta_label.setText(t("analysis.eta_calc"))
+            return
+        est = self._current_estimate()
+        if est is None:
+            self.eta_label.setText(t("analysis.eta_unknown"))
+            return
+        lines = [t("analysis.eta_line", range=eta.format_range(est, t))]
+        basis = est.basis
+        if self.btn_dokladny.isChecked() and self.ai_available:
+            if basis["gpu"]:
+                device = t("analysis.eta_device_gpu", name=basis["gpu_name"], layers=basis["layers"])
+            else:
+                device = t("analysis.eta_device_cpu", threads=basis["threads"])
+            lines.append(t("analysis.eta_basis", pages=basis["pages"], kchars=round(basis["chars"] / 1000),
+                           images=basis["images"], device=device))
+            if est.n_history:
+                lines.append(t("analysis.eta_history", n=est.n_history))
+            else:
+                lines.append(t("analysis.eta_rough"))
+        self.eta_label.setText("\n".join(lines))
 
     @staticmethod
     def _field_label(text):
@@ -337,6 +485,18 @@ class AnalysisDialog(QDialog):
         header.addWidget(self.close_btn, alignment=Qt.AlignTop)
         self.main_layout.addLayout(header)
 
+        # everything between the header and the buttons scrolls: on a small screen the buttons stay reachable
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        body = QWidget()
+        body.setStyleSheet("background: transparent;")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(body)
+
         self.config_widget = QWidget()
         self.config_widget.setStyleSheet("background: transparent;")
         config_layout = QVBoxLayout(self.config_widget)
@@ -350,7 +510,7 @@ class AnalysisDialog(QDialog):
 
         self.json_frame = ConfigDropFrame()
         self.json_frame.setStyleSheet(styles.JSON_FRAME_STYLE)
-        self.json_frame.setFixedHeight(230)
+        self.json_frame.setFixedHeight(200)
         json_inner_layout = QVBoxLayout(self.json_frame)
         json_inner_layout.setContentsMargins(24, 16, 24, 16)
         json_inner_layout.setSpacing(6)
@@ -435,48 +595,69 @@ class AnalysisDialog(QDialog):
         self.gpu_info_label.setWordWrap(True)
         self.gpu_info_label.setVisible(False)
 
+        self.gpu_warning_label = QLabel()
+        self.gpu_warning_label.setWordWrap(True)
+        self.gpu_warning_label.setVisible(False)
+        self.gpu_warning_label.setStyleSheet(
+            f"font-size: 13px; color: {styles.WARNING}; background-color: {styles.WARNING_BG}; "
+            "border: none; border-radius: 8px; padding: 8px 10px;"
+        )
+
+        self.setup_link = QPushButton(t("analysis.check_system"))
+        self.setup_link.setCursor(Qt.PointingHandCursor)
+        self.setup_link.setStyleSheet(styles.LINK_BUTTON_STYLE)
+        self.setup_link.setVisible(False)
+        self.setup_link.clicked.connect(self._open_ai_setup)
+
         mode_section.addWidget(self._field_label(t("analysis.mode")))
         mode_section.addWidget(mode_segment)
         mode_section.addWidget(self.mode_hint_label)
         mode_section.addWidget(self.cb_images)
         mode_section.addWidget(self.gpu_info_label)
+        mode_section.addWidget(self.gpu_warning_label)
+        mode_section.addWidget(self.setup_link, alignment=Qt.AlignLeft)
+
+        self.eta_label = QLabel(t("analysis.eta_calc"))
+        self.eta_label.setWordWrap(True)
+        self.eta_label.setStyleSheet(
+            f"font-size: 13px; color: {styles.TEXT_3}; background-color: {styles.NEUTRAL_BG}; "
+            "border: none; border-radius: 8px; padding: 8px 10px;"
+        )
+        mode_section.addWidget(self.eta_label)
+        self.cb_images.toggled.connect(lambda _: self._update_eta())
 
         def on_szybki_clicked():
-            self.btn_szybki.setChecked(True)
-            self.btn_dokladny.setChecked(False)
-            self.cb_images.setVisible(False)
-            self.gpu_info_label.setVisible(False)
-            self.mode_hint_label.setVisible(True)
+            self._switch_to_fast()
 
         def on_dokladny_clicked():
-            if not are_ai_models_downloaded() and not self.should_download_models:
-                reply = QMessageBox.question(
-                    self,
-                    t("analysis.no_models_title"),
-                    t("analysis.no_models_text"),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
-                )
-                if reply != QMessageBox.Yes:
-                    self.btn_dokladny.setChecked(False)
-                    self.btn_szybki.setChecked(True)
+            # The first time the detailed mode is chosen (or while the models are missing) the AI setup opens:
+            # system check, CPU/GPU, models folder. Without a usable result the fast mode stays selected.
+            needs_setup = (
+                not load_config().get("hardware_configured")
+                or not are_ai_models_downloaded()
+            )
+            if needs_setup:
+                first_run = not load_config().get("hardware_configured")
+                if not self._run_ai_setup(first_run=first_run):
+                    self._switch_to_fast()
                     return
-                self.should_download_models = True
-                self.models_available = True
 
             self.btn_szybki.setChecked(False)
             self.btn_dokladny.setChecked(True)
-            self._ensure_gpu_info()
+            self._update_device_line()
             self.cb_images.setVisible(True)
             self.gpu_info_label.setVisible(True)
+            self._update_gpu_warning()
+            self.setup_link.setVisible(True)
             self.mode_hint_label.setVisible(False)
+            self._update_eta()
 
         self.btn_szybki.clicked.connect(on_szybki_clicked)
         self.btn_dokladny.clicked.connect(on_dokladny_clicked)
 
         config_layout.addLayout(mode_section)
         config_layout.addStretch(1)
-        self.main_layout.addWidget(self.config_widget, 1)
+        body_layout.addWidget(self.config_widget, 1)
 
         # --- progress view ----------------------------------------------------------
         self.progress_widget = QWidget()
@@ -484,14 +665,37 @@ class AnalysisDialog(QDialog):
         self.progress_widget.setStyleSheet("background: transparent;")
         progress_layout = QVBoxLayout(self.progress_widget)
         progress_layout.setContentsMargins(0, 0, 0, 0)
-        progress_layout.setSpacing(14)
+        progress_layout.setSpacing(10)
 
+        # time: what is left (big) and what has passed / the whole (small)
+        self.eta_left_label = QLabel(t("analysis.eta_calc"))
+        self.eta_left_label.setStyleSheet(
+            f"font-size: 24px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
+        )
+        self.eta_detail_label = QLabel()
+        self.eta_detail_label.setWordWrap(True)
+        self.eta_detail_label.setStyleSheet(styles.HINT_STYLE)
+
+        # current step + percent above the bar
+        step_row = QHBoxLayout()
+        step_row.setSpacing(10)
         self.progress_label = QLabel(t("analysis.preparing"))
         self.progress_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.progress_label.setWordWrap(True)
         self.progress_label.setStyleSheet(
-            f"font-size: 15px; color: {styles.TEXT_3}; background: transparent; border: none;"
+            f"font-size: 14px; color: {styles.TEXT_3}; background: transparent; border: none;"
         )
+        self.percent_label = QLabel("0%")
+        self.percent_label.setStyleSheet(
+            f"font-size: 14px; font-weight: 600; color: {styles.PRIMARY}; background: transparent; border: none;"
+        )
+        step_row.addWidget(self.progress_label, 1)
+        step_row.addWidget(self.percent_label, 0, Qt.AlignTop)
+
+        self.stages_title = self._field_label(t("analysis.stages_title"))
+        self.stage_list = StageList()
+        self.resources_title = self._field_label(t("analysis.resources_title"))
+        self.resource_panel = ResourcePanel()
 
         self.pbar = QProgressBar()
         self.pbar.setStyleSheet(styles.PROGRESS_BAR_STYLE)
@@ -504,13 +708,29 @@ class AnalysisDialog(QDialog):
         self.cancel_btn.setCursor(Qt.PointingHandCursor)
         self.cancel_btn.clicked.connect(self.cancel_analysis)
 
-        progress_layout.addStretch()
-        progress_layout.addWidget(self.progress_label)
+        progress_layout.addWidget(self.eta_left_label)
+        progress_layout.addWidget(self.eta_detail_label)
+        progress_layout.addSpacing(4)
+        progress_layout.addLayout(step_row)
         progress_layout.addWidget(self.pbar)
-        progress_layout.addSpacing(8)
-        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
+        self.problem_label = QLabel()
+        self.problem_label.setWordWrap(True)
+        self.problem_label.setTextFormat(Qt.RichText)
+        self.problem_label.setStyleSheet(
+            f"background-color: {styles.WARNING_BG}; color: {styles.TEXT}; border: 1px solid {styles.WARNING};"
+            " border-radius: 8px; padding: 8px 10px; font-size: 12px;")
+        self.problem_label.setVisible(False)
+        progress_layout.addWidget(self.problem_label)
+        progress_layout.addSpacing(6)
+        progress_layout.addWidget(self.stages_title)
+        progress_layout.addWidget(self.stage_list)
+        progress_layout.addSpacing(6)
+        progress_layout.addWidget(self.resources_title)
+        progress_layout.addWidget(self.resource_panel)
         progress_layout.addStretch()
-        self.main_layout.addWidget(self.progress_widget, 1)
+        progress_layout.addWidget(self.cancel_btn, alignment=Qt.AlignLeft)
+        body_layout.addWidget(self.progress_widget, 1)
+        self.main_layout.addWidget(scroll, 1)
 
         # --- footer -------------------------------------------------------------------
         self.footer = QWidget()
@@ -552,10 +772,34 @@ class AnalysisDialog(QDialog):
             if item.widget():
                 item.widget().deleteLater()
 
-    def set_config_file(self, path):
+    def _restore_last_config(self):
+        """Offer the requirements file used last time again; the trash icon on the badge lets the user pick another."""
+        try:
+            path = load_config().get(LAST_CONFIG_KEY)
+        except Exception:
+            logger.exception("Could not read the last used configuration file")
+            return
+        if isinstance(path, str) and path.lower().endswith(".json") and os.path.isfile(path):
+            self.set_config_file(path, remembered=True)
+
+    def _remember_config_file(self):
+        """Store the chosen file as the latest one (or forget it when the analysis runs without a file)."""
+        try:
+            cfg = load_config()
+            if cfg.get(LAST_CONFIG_KEY) == self.config_file_path:
+                return
+            if self.config_file_path:
+                cfg[LAST_CONFIG_KEY] = self.config_file_path
+            else:
+                cfg.pop(LAST_CONFIG_KEY, None)
+            save_config(cfg)
+        except Exception:
+            logger.exception("Could not remember the configuration file")
+
+    def set_config_file(self, path, remembered=False):
         self.config_file_path = path
         self._clear_badge()
-        badge = FileBadge(os.path.basename(path))
+        badge = FileBadge(os.path.basename(path), info_text=t("analysis.config_last") if remembered else None)
         badge.removed.connect(self.remove_config_file)
         self.badge_layout.addWidget(badge)
         self.badge_container.setVisible(True)
@@ -567,59 +811,209 @@ class AnalysisDialog(QDialog):
         self._clear_badge()
         self.json_frame.setVisible(True)
 
+    def _fit_to_screen(self, size):
+        """The size of the dialog, not higher than the screen (it has no frame to move it by)."""
+        return size[0], min(size[1], self.screen().availableGeometry().height() - SCREEN_MARGIN)
+
     def _resize_keep_center(self, size):
         """Resize the fixed-size dialog around its current centre."""
+        size = self._fit_to_screen(size)
         centre = self.geometry().center()
         self.setFixedSize(*size)
         self.move(centre.x() - size[0] // 2, centre.y() - size[1] // 2)
 
     def start_analysis(self):
-        self._resize_keep_center(self.PROGRESS_SIZE)
+        self._remember_config_file()
+        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
+        chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
+        self._resize_keep_center(self.PROGRESS_SIZE_AI if is_detailed else self.PROGRESS_SIZE)
         self.config_widget.setVisible(False)
         self.footer.setVisible(False)
         self.progress_widget.setVisible(True)
         self.title_label.setText(t("analysis.analyzing"))
+        self.percent_label.setText("0%")
+        self.eta_left_label.setText(t("analysis.eta_calc"))
+        self.eta_detail_label.clear()
 
-        is_detailed = self.btn_dokladny.isChecked() and self.ai_available
-        chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
+        hw = self._eta_hw or {}
+        machine = eta.machine_from_config(load_config(), hw)
+        self.resource_panel.configure(is_detailed, machine.gpu, machine.gpu_layers,
+                                      gpu_name=hw.get("gpu_name", ""), threads=hw.get("threads"))
+        self.stages_title.setVisible(is_detailed)
+        self.stage_list.setVisible(is_detailed)
 
         self.run_pipeline_worker(is_detailed, chosen_lang)
 
     def run_pipeline_worker(self, is_detailed, chosen_lang):
+        eta.take_model_loads()
+        self.estimate = self._current_estimate()
+        self.tracker = eta.EtaTracker(self.estimate) if self.estimate else None
+        self._started = time.monotonic()
+        if is_detailed:
+            if self.estimate:
+                stages = self.estimate.stages
+            else:
+                stages = [("prep", None), ("purpose", None), ("goal", None), ("summaries", None)]
+                stages += [("images", None)] if self.cb_images.isChecked() else []
+                stages += [("sota", None)]
+            self.stage_list.set_stages(stages)
+        self.cancel_btn.setEnabled(True)
         self.worker = PipelineWorker(
             pdf_path=self.pdf_path,
             config_path=self.config_file_path,
             use_llm=is_detailed,
             language=chosen_lang,
-            download_models_flag=self.should_download_models,
+            check_images=self.cb_images.isChecked(),
         )
         self.worker.progress_update.connect(self.update_progress)
         self.worker.finished_success.connect(self.on_analysis_success)
         self.worker.finished_error.connect(self.on_analysis_error)
+        self.worker.problem.connect(self._on_problem)
+        self.worker.finished.connect(self._stop_monitor)
+        self._start_monitor(is_detailed)
         self.worker.start()
 
+    def _start_monitor(self, is_detailed):
+        """Live GPU/CPU load from the system (nvidia-smi, /proc/stat) for the progress view and the log."""
+        self._stop_monitor()
+        self.monitor = ResourceMonitor(watch_gpu=is_detailed)
+        self.monitor.start()
+        self.stats_timer.start()
+        self._refresh_stats()
+
+    def _refresh_stats(self):
+        if self.monitor is not None:
+            self.resource_panel.update_sample(self.monitor.latest)
+        if self._is_analysis_running() and self.worker.cancel_token.is_cancelled():
+            return
+        elapsed = time.monotonic() - self._started
+        if self.tracker is None:
+            self.eta_left_label.setText(t("analysis.eta_unknown_short"))
+            self.eta_detail_label.setText(t("analysis.eta_elapsed_only", elapsed=clock(elapsed)))
+            return
+        left = self.tracker.remaining()
+        total_s = self.tracker.elapsed() + left                             # always consistent with left
+        if left < 60:
+            self.eta_left_label.setText(t("analysis.eta_left_lt1"))
+        else:
+            self.eta_left_label.setText(t("analysis.eta_left", left=eta.format_duration(left, t)))
+        if total_s < 60:
+            self.eta_detail_label.setText(t("analysis.eta_elapsed_only", elapsed=clock(elapsed)))
+        else:
+            self.eta_detail_label.setText(
+                t("analysis.eta_elapsed", elapsed=clock(elapsed), total=eta.format_duration(total_s, t)))
+        if not self.stage_list.isHidden():
+            self.stage_list.update_state(self.tracker.stage, self.tracker.stage_seconds())
+
+    def _stop_monitor(self):
+        self.stats_timer.stop()
+        monitor, self.monitor = self.monitor, None
+        if monitor is not None:
+            monitor.stop()
+
     def on_analysis_success(self, final_report):
+        if self.worker.cancel_token.is_cancelled():
+            return
         self.final_report = final_report
+        self._record_run()
         self.accept()
+
+    def _record_run(self):
+        """Keep the real duration of this analysis: later estimates are corrected with it."""
+        if self.tracker is None or self.estimate is None or self._eta_doc is None:
+            return
+        try:
+            is_detailed = self.btn_dokladny.isChecked() and self.ai_available
+            machine = eta.machine_from_config(load_config(), self._eta_hw or {})
+            eta.record_run(
+                self._eta_doc, machine, is_detailed, self.cb_images.isChecked(), self.estimate,
+                self.tracker.elapsed(), self.tracker.stage_seconds(), eta.take_model_loads(),
+            )
+        except Exception:
+            logger.exception("Could not store the analysis time")
+
+    def _on_problem(self, title, text, popup=True):
+        """A part of the analysis failed (usually the AI part): say so at once, in a window of its own that does not
+        stop the analysis. The rest of the analysis goes on and the report shows what is missing."""
+        if self.worker.cancel_token.is_cancelled():
+            return
+        self.problem_label.setText(f"<b>{_escape(title)}</b><br>{_escape(text)}".replace("\n", "<br>"))
+        self.problem_label.setVisible(True)
+        if not popup:
+            return
+        # owned by the main window: it stays open when this dialog closes with the report
+        box = MessageBox(self.parentWidget(), "warning", title, text, MessageBox.Ok, MessageBox.Ok)
+        box.setModal(False)
+        box.setAttribute(Qt.WA_DeleteOnClose, True)
+        _OPEN_BOXES.add(box)
+        box.finished.connect(lambda _=None, b=box: _OPEN_BOXES.discard(b))
+        box.show()
+        box.raise_()
 
     def on_analysis_error(self, message):
         """Tell the user what went wrong and return to the settings screen."""
-        QMessageBox.critical(
+        if self.worker.cancel_token.is_cancelled():
+            return
+        MessageBox.critical(
             self,
             t("analysis.error_title"),
             message or t("analysis.unknown_error"),
         )
         self.reset_ui_state()
 
-    def cancel_analysis(self):
-        if hasattr(self, "worker") and self.worker.isRunning():
-            self.worker.terminate()
-            self.worker.wait()
-        self.reset_ui_state()
+    def _is_analysis_running(self):
+        return hasattr(self, "worker") and self.worker.isRunning()
+
+    def cancel_analysis(self, close_after=False):
+        """Stop the running analysis.
+
+        Python threads cannot be killed safely, so the worker is asked to stop and
+        the UI waits for it to reach the next checkpoint before going back.
+        """
+        self._close_after_cancel = self._close_after_cancel or close_after
+        if not self._is_analysis_running():
+            self._on_worker_cancelled()
+            return
+        if self.worker.cancel_token.is_cancelled():
+            return
+        self.worker.cancel()
+        self.worker.progress_update.disconnect(self.update_progress)
+        self.worker.finished.connect(self._on_worker_cancelled)
+        self.cancel_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        logger.info("Cancel requested by the user")
+        self._cancel_started = time.monotonic()
+        self.progress_label.setText(t("analysis.cancelling"))
+        self.eta_left_label.setText(t("analysis.cancelling_title"))
+        self.eta_detail_label.setText(t("analysis.cancelling_note"))
+        self.pbar.setRange(0, 0)        # keeps moving: the window is not frozen, it waits for the current step
+        if self.worker.isFinished():
+            # The thread ended before the connection was made.
+            self._on_worker_cancelled()
+
+    def _on_worker_cancelled(self):
+        if self._cancel_started is not None:
+            logger.info("The analysis stopped %.1f s after the cancel request", time.monotonic() - self._cancel_started)
+            self._cancel_started = None
+        self.pbar.setRange(0, 100)
+        self.cancel_btn.setEnabled(True)
+        if self._close_after_cancel:
+            self._close_after_cancel = False
+            super().reject()
+        else:
+            self.reset_ui_state()
+
+    def reject(self):
+        if self._is_analysis_running():
+            self.cancel_analysis(close_after=True)
+            return
+        super().reject()
 
     def reset_ui_state(self):
+        self.problem_label.setVisible(False)
         self._resize_keep_center(self.CONFIG_SIZE)
         self.pbar.setValue(0)
+        self.cancel_btn.setEnabled(True)
         self.progress_label.setText(t("analysis.preparing"))
         self.progress_widget.setVisible(False)
         self.config_widget.setVisible(True)
@@ -628,5 +1022,13 @@ class AnalysisDialog(QDialog):
         self.title_label.setText(t("analysis.title"))
 
     def update_progress(self, value, text):
-        self.pbar.setValue(value)
-        self.progress_label.setText(text)
+        if self.worker.cancel_token.is_cancelled():     # a progress event queued before the cancel arrives late
+            return
+        if value >= 0:
+            value = max(value, self.pbar.value())   # stages report out of order: the bar never goes back
+            self.pbar.setValue(value)
+            self.percent_label.setText(f"{value}%")
+        if text:
+            self.progress_label.setText(text)
+        if self.tracker is not None and value >= 0:
+            self.tracker.on_progress(value)

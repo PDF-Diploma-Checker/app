@@ -1,4 +1,4 @@
-from .helpers import add_match
+from .helpers import add_match, normalize_math_letters, has_math_characters, is_latin_word, is_math_font
 import re
 from .language_error_extractor import typo_check
 import logging
@@ -58,7 +58,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
     global_acronyms = {
         "USA", "EU", "UN", "NATO", "WHO", "UNESCO", "ONZ", "UE", "PL", "EN", 
         "IT", "PC", "USB", "GPS", "WiFi", "PDF", "PhD", "MSc", "BSc", "SI", "CEO", "MIN", "MAX", 
-        "3D", "2D","1D", "°C", "CO2", "H2O", "NVIDIA"
+        "3D", "2D","1D", "°C", "CO2", "H2O", "NVIDIA", "ISO", "PN-ISO"
     }
     quote_marks = {'"', '„', '”', '«', '»', '“', '‟', '‘', '’'}
     category = "ACRONYM_UNDEFINED"
@@ -83,10 +83,17 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
             if block.type == "heading" and block.content == block.content.upper():
                 continue 
             prev_word = block.words[0]
+            content = normalize_math_letters(block.content)
             for word in block.words:
-                text = word.text
+                text = normalize_math_letters(word.text)
                 clean_text = text.strip("|():;,.!?[]\n\t \"„”«»“‟‘’")
                 if any(c in quote_marks for c in text):
+                    prev_word = word
+                    continue
+                if has_math_characters(word.text) and not clean_text.isalpha():
+                    prev_word = word
+                    continue
+                if not is_latin_word(clean_text):
                     prev_word = word
                     continue
                 if clean_text in global_acronyms:
@@ -95,7 +102,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                 if not potential_acronym(text):
                     prev_word = word
                     continue
-                if prev_word.italic and prev_word.text != text:
+                if prev_word.italic and not is_math_font(prev_word.font) and normalize_math_letters(prev_word.text) != text:
                     prev_word = word
                     continue
                 if roman_numeral.match(clean_text):
@@ -110,7 +117,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                         prev_word = word
                         continue
                 page = word.page_number
-                if no_parenthesis.search(block.content[word.start_char:]):
+                if no_parenthesis.search(content[word.start_char:]):
                     prev_word = word
                     continue   
                 if clean_text in acronyms_with_definitions:
