@@ -5,8 +5,9 @@ from pathlib import Path
 import language_tool_python
 from .linguistics_types import Error_type
 from analysis.extraction.linguistics_conversion.schema import *
-from .helpers import get_match_info, morf, spell
+from .helpers import get_match_info, morf, spell, nlp_pl
 from .decision_log import dropped
+import re
 import string
 import logging
 from collections import Counter
@@ -149,6 +150,11 @@ def language_tool_analisys(blocks):
                     elif not any(letter.isalpha() for letter in match.matched_text):
                         dropped("no letters in the match", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
+                    elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl":
+                        reason = predicative_adjective_reason(match.message, contents, match.offset, match.error_length)
+                        if reason:
+                            dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                            continue
                 if match.category in {"TYPOS", "SPELLING", "COMPOUNDING", "SYNTAX"}:
                     word = contents[match.offset:match.offset + match.error_length].strip(string.punctuation + string.whitespace)
                     if typo_check(word):
@@ -256,6 +262,37 @@ def is_polish_inflected_loanword(word):
             elif candidate in spell:
                 return True
     return False
+
+COMPOUND_SENTENCE_VERBS_RE = re.compile(r"\(„([^”]+)”\)\s+a drugim\s+\(„([^”]+)”\)")
+
+def is_adjective_verb_homograph(word):
+    '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''
+    tags = {interpretation[2][2].split(":")[0] for interpretation in morf.analyse(word.lower())}
+    return "adj" in tags and "praet" in tags
+
+def predicative_adjective_reason(message, contents, offset, length):
+    '''Checks if the second "verb" found by LanguageTool rule ZDANIA_ZLOZONE is an adjective after a copula.
+    Returns the reason for dropping the match or None.'''
+    verbs = COMPOUND_SENTENCE_VERBS_RE.search(message)
+    if not verbs or not is_adjective_verb_homograph(verbs.group(2)):
+        return None
+    doc = nlp_pl(contents)
+    token = next((t for t in doc if offset <= t.idx < offset + length and t.text == verbs.group(2)), None)
+    if token is None:
+        return None
+    has_copula = any(child.dep_ == "cop" for child in token.children)
+    conjuncts = [child for child in token.children if child.dep_ == "conj"]
+    if not has_copula and any(c.pos_ == "VERB" and "Past" in c.morph.get("Tense") for c in conjuncts):
+        return None
+    if has_copula:
+        return "copula"
+    if token.dep_.startswith("xcomp"):
+        return f"complement of '{token.head.lemma_}'"
+    if any(c.pos_ == "ADJ" and "Nom" in c.morph.get("Case")
+           and c.morph.get("Gender") == token.morph.get("Gender")
+           and c.morph.get("Number") == token.morph.get("Number") for c in conjuncts):
+        return "coordinated with an adjective"
+    return None
 
 def typo_check(typo_text):
     '''Double check typos found by language analysis with Polish and English dictionaries.'''
