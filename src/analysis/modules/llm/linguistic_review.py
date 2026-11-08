@@ -11,6 +11,7 @@ import logging
 import string
 
 from analysis.modules.linguistics.decision_log import confirmed_by_model, not_reviewed, rejected_by_model
+from analysis.modules.linguistics.helpers import morf
 from analysis.modules.linguistics.language_error_extractor import typo_check
 from analysis.modules.llm import config
 from analysis.modules.llm.llama_factory import make_llama
@@ -27,6 +28,9 @@ REVIEWED_SOURCES = ("language_tool", "sentence_check", "decimal_check")
 FORMAT_RULES = ("PERSONAL_FORM",)   # correct Polish that a thesis must still avoid: the model only sees the grammar
 _POLISH_LETTERS = {"a": "ą", "c": "ć", "e": "ę", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "źż"}
 MAX_MISSING_LETTERS = 2
+_ALPHABET = "aąbcćdeęfghijklłmnńoóprsśtuwyzźż"
+MIN_TYPO_LENGTH = 7     # a shorter unknown word is one letter from too many real ones ("stdio": "studio")
+UNREADABLE_RULES = ("ZDANIA_ZLOZONE",)  # the model calls a missing comma between two clauses correct text
 
 _PROMPTS = {
     "pl": """Fragment pracy dyplomowej (zgłoszone miejsce stoi między « i »):
@@ -88,14 +92,45 @@ def _with_polish_letters(text):
     return None
 
 
+def _is_polish(word):
+    return any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word))
+
+
+def _one_letter_from_polish(match):
+    """The Polish word this unknown one becomes with one letter fixed ("przbiega": "przebiega"), None when there is none.
+    The model calls such a word a technical term. A capital is only ignored at the start of a sentence, elsewhere it
+    is a name."""
+    word = match.content.strip(string.punctuation + string.whitespace)
+    before = match.context.partition("«")[0].rstrip()
+    if word.istitle() and (not before or before[-1] in ".!?:"):
+        word = word.lower()
+    if not (word.isalpha() and word.islower()) or len(word) < MIN_TYPO_LENGTH or typo_check(word):
+        return None
+    splits = [(word[:i], word[i:]) for i in range(len(word) + 1)]
+    candidates = itertools.chain(
+        (left + right[1] + right[0] + right[2:] for left, right in splits if len(right) > 1),
+        (left + letter + right for left, right in splits for letter in _ALPHABET),
+        (left + right[1:] for left, right in splits if right),
+        (left + letter + right[1:] for left, right in splits if right for letter in _ALPHABET),
+    )
+    return next((candidate for candidate in candidates if candidate != word and _is_polish(candidate)), None)
+
+
 def _why_not_asked(match, language):
     """Why the model does not read this finding, None when it should."""
     if match.source not in REVIEWED_SOURCES or match.category in FORMAT_RULES:
         return "a rule of the format, the text alone does not settle it"
+    if match.rule in UNREADABLE_RULES:
+        return "a comma between clauses, the model does not judge it well"
     if not match.context:
         return "no text around it"
-    fixed = _with_polish_letters(match.content) if language == "pl" else None
-    return f"a typo for certain, the word is {fixed}" if fixed else None
+    if language != "pl":
+        return None
+    fixed = _with_polish_letters(match.content)
+    if fixed:
+        return f"a typo for certain, the word is {fixed}"
+    near = _one_letter_from_polish(match)
+    return f"a typo for certain, one letter from {near}" if near else None
 
 
 def _flat(text):

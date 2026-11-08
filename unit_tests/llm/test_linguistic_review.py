@@ -94,6 +94,28 @@ class ReviewTest(unittest.TestCase):
             self.assertIsNone(review._with_polish_letters("ODE"))
             self.assertIsNone(review._with_polish_letters("czesto"))     # known as it is
 
+    def test_a_word_one_letter_from_a_polish_one_is_a_typo_for_certain(self):
+        with patch.object(review, "make_llama") as make:
+            match = finding("przbiega", context="sygnał «przbiega» dalej")
+            self.assertEqual(review.review_findings([match]), [match])
+        make.assert_not_called()
+
+    def test_a_capital_counts_only_at_the_start_of_a_sentence(self):
+        self.assertIsNotNone(review._one_letter_from_polish(finding("Podaczas", context="«Podaczas» pracy")))
+        self.assertIsNotNone(review._one_letter_from_polish(finding("Podaczas", context="Koniec. «Podaczas» pracy")))
+        self.assertIsNone(review._one_letter_from_polish(finding("Podaczas", context="metoda «Podaczas» dalej")))
+
+    def test_short_words_and_terms_are_still_asked_about(self):
+        for word in ("stdio", "hermitowskiej", "goldpin", "przebiega"):
+            self.assertIsNone(review._one_letter_from_polish(finding(word, context=f"tekst «{word}» dalej")), word)
+
+    def test_a_comma_between_clauses_is_not_asked_about(self):
+        with patch.object(review, "make_llama") as make:
+            match = finding("można temu zapobiec stosując", context="«można temu zapobiec stosując» filtr")
+            match.rule = "ZDANIA_ZLOZONE"
+            self.assertEqual(review.review_findings([match]), [match])
+        make.assert_not_called()
+
     def test_the_model_reads_the_text_around_the_finding(self):
         llm = model(verdict(True))
         self.run_review([finding()], llm)
