@@ -565,7 +565,8 @@ class PDFReader(QMainWindow):
                             c = extra.get("coords", {})
                             if 0 <= ep < len(doc) and c.get("w", 0) > 0:
                                 r = fitz.Rect(c["x"], c["y"], c["x"] + c["w"], c["y"] + c["h"])
-                                h2 = doc[ep].add_highlight_annot(r)
+                                extra_page = doc[ep]    # an annotation only weakly references its page
+                                h2 = extra_page.add_highlight_annot(r)
                                 h2.set_colors(stroke=(0.95, 0.35, 0.35))
                                 h2.set_opacity(0.55)
                                 h2.update()
