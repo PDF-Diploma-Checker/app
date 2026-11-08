@@ -196,6 +196,13 @@ class AnalysisPipeline:
                 content_grade_result = None
                 llm_summary_text = "LLM analysis was skipped."
 
+        # after the other AI stages, which need the video memory; when they failed the model will not work here either
+        if use_llm and not (llm_result or {}).get("analysis_error"):
+            from app.llm_process import run_language_review_isolated
+
+            with log_time(logger, "Review of the language findings"):
+                ling_matches = run_language_review_isolated(ling_matches, language, cancel_token)
+
         report_progress(100, "Generating final report...")
 
         all_errors = ling_matches + redaction_errors

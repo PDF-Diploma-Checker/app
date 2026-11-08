@@ -855,7 +855,7 @@ class AnalysisDialog(QDialog):
             else:
                 stages = [("prep", None), ("purpose", None), ("goal", None), ("summaries", None)]
                 stages += [("images", None)] if self.cb_images.isChecked() else []
-                stages += [("sota", None)]
+                stages += [("sota", None), ("language_review", None)]
             self.stage_list.set_stages(stages)
         self.cancel_btn.setEnabled(True)
         self.worker = PipelineWorker(
