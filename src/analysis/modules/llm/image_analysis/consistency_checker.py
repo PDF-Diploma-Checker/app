@@ -1,6 +1,5 @@
 import json
 import logging
-import math
 import re
 from analysis.modules.llm import config
 from analysis.modules.llm.image_analysis.figures import image_text
@@ -91,7 +90,7 @@ def _without_axes(printed):
     while start < len(printed):
         end = start + 1
         step = printed[end] - printed[start] if end < len(printed) else 0
-        while step and end + 1 < len(printed) and math.isclose(printed[end + 1] - printed[end], step, abs_tol=1e-6):
+        while step and end + 1 < len(printed) and abs(printed[end + 1] - printed[end] - step) < 1e-6:
             end += 1
         if step and end - start + 1 >= _MIN_AXIS_RUN:
             start = end + 1
