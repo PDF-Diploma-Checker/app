@@ -500,7 +500,7 @@ def is_widow_func(combined_words):
 
     return 0
 
-_LINK = re.compile(r"https?://|ftp://|www\.|doi\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+_LINK = re.compile(r"https?://|ftp://|www\.|do[iı]\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
 
 
 def ends_with_link(combined_words):

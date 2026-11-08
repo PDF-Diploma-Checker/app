@@ -45,6 +45,7 @@ def fix_latex(text):
             "ﬄ": "ffl",
             "ﬅ": "ft",
             "ﬆ": "st",
+            "ı": "i",
         }
         for wrong, right in replace.items():
             text = text.replace(wrong, right)
