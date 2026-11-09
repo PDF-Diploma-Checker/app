@@ -17,7 +17,7 @@ ART_INTRO_KEYWORDS = re.compile(r'\s+(?:[Ii]n|[Ww])\.?:\s+')
 
 DOI_PATTERNS = {
     r'doi\.org/10\.\d{4,9}/\S+': 'link',
-    r'(?:DOI|doi)\s*:\s*10\.\d{4,9}/\S+': 'citation',
+    r'(?:DOI|do[iı])\s*:\s*10\.\d{4,9}/\S+': 'citation',
     r'/doi/10\.\d{4,9}/\S+': 'url_embedded',
 }
 

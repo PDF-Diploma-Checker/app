@@ -47,6 +47,8 @@ class ParagraphBlock:  # Informacje o blokach tekstowych, które mogą być para
     words: List[WordInfo] = field(default_factory=list)
     incorrect_caption: int = 0
     language: str = "pl"
+    # A hyphen read as a list marker ("USB" / "- Uniwersalna ...") is cut from `words` but kept here for the dash check.
+    marker_word: Optional[WordInfo] = None
 
 
 @dataclass
@@ -249,7 +251,7 @@ def classify_block_content(
             if marker_type == active_marker:
                 continue
             if marker_type == "dash":
-                if re.match(r"^[-−–—]\s*(ang\.|pol\.|niem\.|fr\.|ros\.|tj\.|czyli)\b", text, re.IGNORECASE):
+                if re.match(r"^[-−–—]\s*(?:z\s+)?(ang\.|pol\.|niem\.|fr\.|ros\.|tj\.|czyli)\b", text, re.IGNORECASE):
                     return "paragraph", None
             if DocumentPatterns.LIST_PATTERNS[marker_type].match(text):
                 return "list", marker_type
@@ -498,7 +500,7 @@ def is_widow_func(combined_words):
 
     return 0
 
-_LINK = re.compile(r"https?://|ftp://|www\.|doi\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
+_LINK = re.compile(r"https?://|ftp://|www\.|do[iı]\s*:|doi\.org|\b10\.\d{4,9}/|\b[\w-]+\.[a-z]{2,}/", re.IGNORECASE)
 
 
 def ends_with_link(combined_words):

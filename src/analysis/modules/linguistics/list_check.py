@@ -113,7 +113,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                         or definition_sep_pattern.match(effective_text)):
                     definition_id.append(item.item_id)
                     continue
-                if re.search(r'\((?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+', effective_text):
+                if re.search(r'\((?:z\s+)?(?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+', effective_text):
                     definition_id.append(item.item_id)
                     continue
                 if item.words:
