@@ -32,9 +32,27 @@ class BumpVersionTest(unittest.TestCase):
     def test_only_the_last_number_changes(self):
         self.assertEqual(bump_version.next_version("0.4.9"), "0.4.10")
 
+    def test_the_version_is_one_above_the_newest_release(self):
+        self.assertEqual(bump_version.target_version("0.5.1", "0.5.1"), "0.5.2")
+
+    def test_merges_before_the_release_share_one_version(self):
+        self.assertEqual(bump_version.target_version("0.5.2", "0.5.1"), "0.5.2")
+
+    def test_numbers_used_up_without_a_release_come_back(self):
+        self.assertEqual(bump_version.target_version("0.5.4", "0.5.1"), "0.5.2")
+
+    def test_a_version_for_a_full_build_waits_for_its_release(self):
+        self.assertEqual(bump_version.target_version("0.6.0", "0.5.1"), "0.6.0")
+        self.assertEqual(bump_version.target_version("1.0.0", "0.9.3"), "1.0.0")
+
+    def test_nothing_is_written_when_the_version_is_right(self):
+        root = self._project("0.5.2")
+        self.assertIsNone(bump_version.bump("v0.5.1", root))
+        self.assertIn('version = "0.5.2"', (root / "pyproject.toml").read_text(encoding="utf-8"))
+
     def test_every_place_gets_the_new_version(self):
         root = self._project()
-        self.assertEqual(bump_version.bump(root), "0.4.10")
+        self.assertEqual(bump_version.bump("v0.4.9", root), "0.4.10")
         self.assertIn('APP_VERSION = "0.4.10"', (root / "src/common/version.py").read_text(encoding="utf-8"))
         self.assertIn('version = "0.4.10"', (root / "pyproject.toml").read_text(encoding="utf-8"))
         lock = (root / "uv.lock").read_text(encoding="utf-8")
@@ -44,7 +62,7 @@ class BumpVersionTest(unittest.TestCase):
     def test_files_that_disagree_are_not_touched(self):
         root = self._project(lock_version="0.4.8")
         with self.assertRaises(SystemExit):
-            bump_version.bump(root)
+            bump_version.bump("v0.4.8", root)
         self.assertIn('version = "0.4.9"', (root / "pyproject.toml").read_text(encoding="utf-8"))
 
     def _commit(self, root, version):
