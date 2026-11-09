@@ -1,0 +1,24 @@
+name: Build the installer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]   # the older Ubuntu: the Linux file then runs on older systems too
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: uvx --python 3.12 --with requests --with pyinstaller python tools/installer/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.os }}
+          path: dist/installer/*
