@@ -21,14 +21,16 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Raise the last number and commit it
+      - name: Keep the version one above the newest release
         env:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(python3 tools/bump_version.py "$BEFORE" "$AFTER")
+          latest=$(gh release view -R PDF-Diploma-Checker/diploma-checker-download --json tagName --jq .tagName)
+          version=$(python3 tools/bump_version.py "$BEFORE" "$AFTER" "$latest")
           if [ -z "$version" ]; then
-            echo "This merge set the version itself: it stays"
+            echo "The version stays"
             exit 0
           fi
           git config user.name "github-actions[bot]"

@@ -415,6 +415,22 @@ class RedactionValidator:
                         continue
 
                     if len(text_clean) == 1 and text_clean.lower() in CONJUCTIONS:
+                        prev_span = None
+                        seen_last = False
+                        for sp in line.spans[::-1]:
+                            if sp is last_span:
+                                seen_last = True
+                                continue
+                            if seen_last and sp.text.strip() != "":
+                                prev_span = sp
+                                break
+                        if prev_span is None:
+                            continue
+                        prev_text = prev_span.text.strip()
+                        if (len(prev_text) == 1 and prev_text.isalnum()) or (
+                            prev_span.size < last_span.size * 0.85
+                        ):
+                            continue
                         font_lower = getattr(last_span, "font", "").lower()
                         if any(mf in font_lower for mf in MATH_FONTS):
                             continue
@@ -1539,7 +1555,9 @@ class RedactionValidator:
 
         formats = {"a5": (420, 595), "a4": (595, 842), "a3": (842, 1191)}
 
-        if self.config.format not in formats:
+        expected_format = self.config.format.lower()
+
+        if expected_format not in formats:
             if lang == "en":
                 logger.warning(
                     "Redaction: unknown page format in the configuration file"
@@ -1548,12 +1566,12 @@ class RedactionValidator:
                 logger.warning("Redaction: nieznany format strony w konfiguracji")
 
             return False
-        exp_w, exp_h = formats[self.config.format]
+        exp_w, exp_h = formats[expected_format]
         for page_num, (width, height) in doc_data.get_page_dimensions().items():
             if lang == "en":
-                comment = f"The page format used (dimensions: {width}x{height}) does not comply with the requirements of {formats[self.config.format].upper()}"
+                comment = f"The page format used (dimensions: {width}x{height}) does not comply with the requirements of {expected_format.upper()}"
             else:
-                comment = f"Używany format strony (wymiary: {width}x{height})jest niezgodny z wymaganiami {formats[self.config.format].upper()}"
+                comment = f"Używany format strony (wymiary: {width}x{height})jest niezgodny z wymaganiami {expected_format.upper()}"
 
             if not (
                 (abs(width - exp_w) <= tolerance and abs(height - exp_h) <= tolerance)
@@ -1573,8 +1591,7 @@ class RedactionValidator:
                     )
                 )
                 return False
-            else:
-                return True
+        return True
 
     def check_orientation(self, doc_data: DocumentData) -> bool:
         doc_data.get_page_dimensions()
