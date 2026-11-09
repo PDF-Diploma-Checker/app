@@ -154,7 +154,7 @@ def _simulate_crash(kind, send):
     os.abort()
 
 
-def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path):
+def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job="analysis"):
     """Entry point of the AI process."""
     lock = threading.Lock()
 
@@ -197,6 +197,11 @@ def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, g
             config.override_gpu_layers(gpu_layers)
         _route_llama_log(stream)
         logger.info("AI process %s started (layers on the GPU: %s)", os.getpid(), config.N_GPU_LAYERS)
+
+        if job == "language_review":
+            from app.llm_task import run_language_review
+            send(("result", run_language_review(pickle.loads(payload), language, token)))
+            return
 
         if payload is not None:
             doc_obj, patched = pickle.loads(payload)
@@ -392,7 +397,7 @@ class _Outcome:
         self.kind, self.value, self.detail = kind, value, detail
 
 
-def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_token):
+def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_token, job="analysis"):
     """Run the AI part in a child process once. Returns an _Outcome: result / error / crash. Raises on a cancel."""
     import multiprocessing
 
@@ -402,7 +407,7 @@ def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_toke
     stderr_path = str(stderr_log_path())
     process = ctx.Process(
         target=_child_main, name="llm-worker",
-        args=(sender, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path),
+        args=(sender, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job),
     )
     process.start()
     sender.close()              # only the child writes: the pipe reports EOF once the child is gone
@@ -469,6 +474,22 @@ def _failure(stage, error, hint, crashed):
     failure = {"stage": stage, "error": error, "hint": hint, "crashed": crashed,
                "log": str(stderr_log_path())}
     return {"analysis_error": failure}, None, t("llm_error.summary")
+
+
+def run_language_review_isolated(matches, language="pl", cancel_token=None):
+    """app.llm_task.run_language_review in a separate process. When that process fails all the findings stay."""
+    from analysis.modules.llm import config
+
+    outcome = _run_once(pickle.dumps(matches, protocol=pickle.HIGHEST_PROTOCOL), "", language, False, config.N_GPU_LAYERS,
+                        cancel_token, job="language_review")
+    if outcome.kind == "result":
+        return outcome.value
+    if outcome.kind == "crash":
+        logger.error("The review of the language findings crashed: exit code %s. All the findings stay in the report.\n"
+                     "Last lines of %s:\n%s", describe_exit_code(outcome.value), stderr_log_path(), read_tail(stderr_log_path()))
+    else:
+        logger.error("The review of the language findings failed, all of them stay in the report: %s\n%s", outcome.value, outcome.detail)
+    return matches
 
 
 def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):

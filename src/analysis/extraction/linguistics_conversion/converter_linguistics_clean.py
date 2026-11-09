@@ -71,7 +71,7 @@ class PDFMapper:
         re.IGNORECASE,
     )
     TAB_PATTERN = re.compile(
-        r"^(tabela|tab\.|table)\s*(?:\d+|[IVX]+)", re.IGNORECASE
+        r"^(tabela\.?|tab\.|table\.?)\s*(?:\d+|[IVX]+)", re.IGNORECASE
     )
 
     def _use_geom(self) -> bool:

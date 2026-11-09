@@ -191,6 +191,7 @@ class UpdateDialog(QDialog):
         self.main_btn.setEnabled(True)
 
     def _on_failed(self, code, params):
+        logger.warning("The update failed: %s %s", code, params)
         self._set_busy(False)
         self.bar.setVisible(False)
         self.status.setVisible(False)
