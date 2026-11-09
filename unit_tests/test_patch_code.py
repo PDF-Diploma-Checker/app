@@ -76,6 +76,13 @@ class NeedsFullBuildTest(unittest.TestCase):
     def test_module_built_into_python_can_be_patched(self):
         self.assertEqual(self.reasons([("A", "src/ui/a.py")], new="import itertools\n"), [])
 
+    def test_changed_text_file_can_be_patched(self):
+        self.assertEqual(self.reasons([("M", "src/analysis/modules/linguistics/word_whitelist.txt")]), [])
+
+    def test_new_or_removed_text_file_needs_a_build(self):
+        changes = [("A", "src/analysis/new.txt"), ("D", "src/analysis/old.txt")]
+        self.assertEqual(len(self.reasons(changes)), 2)
+
     def test_build_and_data_files_need_a_build(self):
         changes = [("M", "DiplomaChecker.spec"), ("M", patch_code.LAUNCHER), ("A", "src/ui/assets/logo.png")]
         self.assertEqual(len(self.reasons(changes)), 3)

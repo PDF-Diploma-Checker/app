@@ -77,6 +77,8 @@ def needs_full_build(since, changes):
             if any(line[0] in "+-" and not line.startswith(("+++", "---", "+version = ", "-version = "))
                    for line in lines if line):
                 reasons.append(f"{path}: more than the version changed")
+        elif status == "M" and path.startswith("src/") and path.endswith(".txt"):
+            continue                    # a list of words: the build reads the file, a new copy just replaces it
         elif not path.startswith("src/") or path == LAUNCHER or not path.endswith(".py"):
             reasons.append(path)
         elif status != "D":
