@@ -319,7 +319,7 @@ class Installer:
         for variant in core.VARIANTS:
             if variant in sizes:
                 self.cards[variant] = Card(self.card_list, self.fonts, self.texts[variant], self.texts[variant + "_desc"],
-                                           size_text(sizes[variant]),
+                                           size_text(sizes[variant]) if sizes[variant] else "",   # archives come later
                                            self.texts["recommended"] if variant == recommended else "",
                                            lambda v=variant: self.pick(v))
                 self.cards[variant].pack(fill="x", pady=(0, 8))
