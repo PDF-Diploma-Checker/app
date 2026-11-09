@@ -464,26 +464,12 @@ def is_index(word, line_font_size) -> bool:
     
     return False
 
-def ends_with_lead_in(combined_words):
-    """
-    True, gdy akapit kończy się dwukropkiem (np. "...przypisane im:", "...poprzez:"), czyli ostatni
-    wiersz wprowadza wzór albo listę. Taki wiersz jest krótki lub leży sam na początku strony tylko
-    dlatego, że zaraz po nim następuje wzór/lista, więc nie jest typograficzną wdową ani bękartem.
-    """
-    if not combined_words:
-        return False
-    return combined_words[-1].text.rstrip().endswith(":")
-
-
 def is_widow_func(combined_words):
     """
     Detects typographical 'widows' within a paragraph. A widow is defined here as
     a very short final line of a paragraph (consisting of 1 or 2 isolated words).
-    A paragraph ending with a colon (lead-in to a formula or list) is not a widow.
     """
     if not combined_words or getattr(combined_words[-1], "is_index", False):
-        return 0
-    if ends_with_lead_in(combined_words):
         return 0
 
     lines = []
@@ -550,11 +536,8 @@ def is_bekart_func(combined_words):
 
     Returns:
         int: The number of words in the isolated line on the new page, or 0 if no bastard is detected.
-        A paragraph ending with a colon (lead-in to a formula or list) is not a bastard.
     """
     if not combined_words or getattr(combined_words[-1], "is_index", False):
-        return 0
-    if ends_with_lead_in(combined_words):
         return 0
     is_bekart = 0
 

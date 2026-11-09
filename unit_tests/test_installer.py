@@ -4,7 +4,7 @@ What the installer decides and how it replaces the files. No network and no wind
 import sys
 import tempfile
 import unittest
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from unittest import mock
 
 sys.path[:0] = [str(Path(__file__).resolve().parents[1] / "tools" / "installer"),
@@ -133,7 +133,7 @@ class FolderTest(unittest.TestCase):
 class ShortcutTest(unittest.TestCase):
     def test_the_menu_entry_quotes_the_path(self):
         with mock.patch.object(sys, "platform", "linux"):
-            entry = core._desktop_entry(PurePosixPath("/home/a b/DiplomaChecker"))
+            entry = core._desktop_entry(Path("/home/a b/DiplomaChecker"))
         self.assertIn('Exec="/home/a b/DiplomaChecker/DiplomaChecker"', entry)
         self.assertIn("/_internal/ui/assets/logo.png", entry)
 
