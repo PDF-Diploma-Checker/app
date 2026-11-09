@@ -1,6 +1,7 @@
-"""Raise the last number of the version by one: 0.4.2 -> 0.4.3. Prints the new version.
+"""Keep the version one above the newest release: 0.4.2 released -> 0.4.3. Prints the version when it changed.
 
-.github/workflows/bump_version.yml runs it after each merge to main, with the commits before and after the merge.
+.github/workflows/bump_version.yml runs it after each merge to main, with the commits before and after the merge and
+the tag of the newest release. Merges before the next release share one version, so numbers are not used up.
 A merge that changes the version itself keeps it: 0.5.0 set for a full build must not become 0.5.1.
 """
 
@@ -23,6 +24,13 @@ def next_version(version):
     return f"{major}.{minor}.{int(patch) + 1}"
 
 
+def target_version(current, latest):
+    """The version after release `latest`. A higher first or second number was set for a full build and waits for it."""
+    if [int(n) for n in current.split(".")[:2]] > [int(n) for n in latest.split(".")[:2]]:
+        return current
+    return next_version(latest)
+
+
 def version_at(commit, root=ROOT):
     """The version in a commit, None when git does not know the commit (the first push of a branch)."""
     shown = subprocess.run(["git", "show", f"{commit}:src/common/version.py"], cwd=root, capture_output=True,
@@ -37,9 +45,10 @@ def set_by_hand(before, after, root=ROOT):
     return old is not None and old != version_at(after, root)
 
 
-def bump(root=ROOT):
-    """Write the next version to every place that holds it and return it. The places must agree."""
-    edits, found = {}, set()
+def bump(latest, root=ROOT):
+    """Write the version after release `latest` to every place that holds it and return it, None when it is already
+    there. The places must agree."""
+    matches, found = {}, set()
     for name, pattern in PLACES.items():
         path = Path(root) / name
         text = path.read_text(encoding="utf-8")
@@ -47,15 +56,19 @@ def bump(root=ROOT):
         if not match:
             sys.exit(f"No version found in {name}")
         found.add(match.group(1))
-        edits[path] = text[:match.start(1)] + next_version(match.group(1)) + text[match.end(1):]
+        matches[path] = (text, match)
     if len(found) != 1:
         sys.exit(f"The files hold different versions: {sorted(found)}")
-    for path, text in edits.items():
-        path.write_text(text, encoding="utf-8", newline="\n")
-    return next_version(found.pop())
+    current = found.pop()
+    target = target_version(current, latest.lstrip("vV"))
+    if target == current:
+        return None
+    for path, (text, match) in matches.items():
+        path.write_text(text[:match.start(1)] + target + text[match.end(1):], encoding="utf-8", newline="\n")
+    return target
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 3 and set_by_hand(*sys.argv[1:]):
-        sys.exit(0)
-    print(bump())
+    before, after, newest = sys.argv[1:]
+    if not set_by_hand(before, after):
+        print(bump(newest) or "")
