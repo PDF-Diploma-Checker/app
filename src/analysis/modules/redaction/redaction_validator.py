@@ -415,22 +415,6 @@ class RedactionValidator:
                         continue
 
                     if len(text_clean) == 1 and text_clean.lower() in CONJUCTIONS:
-                        prev_span = None
-                        seen_last = False
-                        for sp in line.spans[::-1]:
-                            if sp is last_span:
-                                seen_last = True
-                                continue
-                            if seen_last and sp.text.strip() != "":
-                                prev_span = sp
-                                break
-                        if prev_span is None:
-                            continue
-                        prev_text = prev_span.text.strip()
-                        if (len(prev_text) == 1 and prev_text.isalnum()) or (
-                            prev_span.size < last_span.size * 0.85
-                        ):
-                            continue
                         font_lower = getattr(last_span, "font", "").lower()
                         if any(mf in font_lower for mf in MATH_FONTS):
                             continue
