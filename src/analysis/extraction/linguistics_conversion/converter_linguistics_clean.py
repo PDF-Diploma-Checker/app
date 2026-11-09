@@ -32,6 +32,7 @@ from analysis.extraction.main_extractor import (
 )
 from analysis.extraction.linguistics_conversion.schema import (
     PageArtifact,
+    _LINK,
     is_acronym,
     is_index,
     ends_with_link,
@@ -531,6 +532,19 @@ class PDFMapper:
         if space_density > 0.3:
             return 1
 
+        # A line of running text whose only math-font words are plain numbers (e.g. "wynosić 6,00 mm," or
+        # "0,40 mm do 0,48 mm.") is a continuation of a sentence, not a formula: it holds at least two ordinary
+        # words (also short ones like units). Variables and symbols (v, ∈, =) keep the line a formula.
+        math_words = [w for w in words if any(mf in (w.font or "").lower() for mf in math_font_names)]
+        plain_words = [
+            w for w in words
+            if w not in math_words
+            and sum(c.isalpha() for c in w.text) >= 2
+            and all(c.isalpha() or c in ",.;:" for c in w.text)
+        ]
+        if len(plain_words) >= 2 and all(re.fullmatch(r"[\d.,]+", w.text) for w in math_words):
+            return 0
+
         math_font_count = sum(
             1
             for w in words
@@ -646,13 +660,20 @@ class PDFMapper:
             elif i > 0:
                 if combined_content.rstrip().endswith("-"):
                     separator = ""
-                    removed_hyphen = True
+                    if (
+                        combined_words
+                        and data["words"]
+                        and self._is_cross_line_soft_hyphen(combined_words[-1], data["words"][0])
+                    ):
+                        removed_hyphen = True
                 else:
                     separator = " "
 
             if removed_hyphen:
                 combined_content = combined_content.rstrip()[:-1]
                 current_offset = len(combined_content)
+                if combined_words:
+                    combined_words[-1].end_char = current_offset
 
             for word in data["words"]:
                 shift = current_offset + len(separator)
@@ -768,12 +789,16 @@ class PDFMapper:
         """
         item = data["item"]
         words = item.words
+        marker_word = None
         if len(words) > 1 and words[0].start_char == 0 and words[0].end_char == 0:
+            if words[0].text == "-":
+                marker_word = words[0]
             words = words[1:]
         return ParagraphBlock(
             block_id=data["block_id"],
             content=item.text,
             words=words,
+            marker_word=marker_word,
         )
 
     def _empty_list_buffer(self, reason: str = ""):
@@ -1292,11 +1317,11 @@ class PDFMapper:
         self._tag_special_lists(old_doc)
         self._tag_visual_descriptions(new_doc)
         self._pair_descriptions_with_visuals(new_doc)
+        self._fix_offsets()
         self._verify_bibliography_references()
         self._flag_bibliography_widows()
         self._flag_lonely_citations()
         self._verify_caption_sources(new_doc)
-        self._fix_offsets()
         self._assign_unique_ids()
 
         new_doc.metadata["main_font"] = old_doc.get_most_common_font()
@@ -2860,6 +2885,65 @@ class PDFMapper:
                     else:
                         visual.incorrect_caption = 0
 
+    @classmethod
+    def _is_word_monospace(cls, word) -> bool:
+        font = (getattr(word, "font", "") or "").lower()
+        return any(mono in font for mono in cls.MONOSPACE_FONTS)
+
+    @classmethod
+    def _is_same_line_url_split(cls, target, word) -> bool:
+        if abs(target.bbox[1] - word.bbox[1]) > 3.0 or word.bbox[0] < target.bbox[0] - 1.0:
+            return False
+        gap = word.bbox[0] - target.bbox[2]
+        max_size = max(getattr(target, "size", 0) or 0, getattr(word, "size", 0) or 0, 1.0)
+        if gap >= 0.45 * max_size:
+            return False
+        if cls._is_word_monospace(target) and cls._is_word_monospace(word):
+            url_punct = ":/.-_,%?=&#~"
+            if target.text[-1:] in url_punct or word.text[:1] in url_punct:
+                return True
+        t_low = target.text.lower()
+        if t_low.endswith(("http", "https", "ftp")) and word.text.startswith(":"):
+            return True
+        if t_low.endswith(("http:", "https:", "ftp:")) and word.text.startswith("//"):
+            return True
+        return False
+
+    @classmethod
+    def _is_cross_line_url_continuation(cls, w1, w2, in_url: bool = False) -> bool:
+        t1, t2 = w1.text, w2.text
+        if not t1 or not t2:
+            return False
+        t1_low = t1.lower()
+        if t1_low in ("doi:", "doı:"):
+            return False
+        both_mono = cls._is_word_monospace(w1) and cls._is_word_monospace(w2)
+        is_url_start = in_url or bool(_LINK.search(t1)) or t1_low in ("http:", "https:", "ftp:")
+        is_mono_url_part = both_mono and any(ch in t1 or ch in t2 for ch in ("/", "_", "%"))
+        if not (is_url_start or is_mono_url_part):
+            return False
+        if t1.endswith(("/", ":", "_", "%", "-", "=", "&", "?", "#", "~")):
+            return True
+        if t2.startswith(("//", "/", "_", "%", "?", "=", "&", "#")):
+            return True
+        if t1.endswith(".") and (both_mono or is_url_start):
+            if "/" in t2 or "_" in t2 or re.search(r"\.(?:pdf|html?|jpg|jpeg|png|svg|xml|zip)\.?", t2, re.I):
+                return True
+        return False
+
+    @classmethod
+    def _is_cross_line_soft_hyphen(cls, w1, w2, in_url: bool = False) -> bool:
+        if in_url or cls._is_word_monospace(w1) or cls._is_word_monospace(w2):
+            return False
+        t1, t2 = w1.text, w2.text
+        if not t1 or not t2 or _LINK.search(t1) or _LINK.search(t2):
+            return False
+        if not re.match(r"^[(\[{„\"'«]*[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż]+-$", t1):
+            return False
+        if not re.match(r"^[a-ząćęłńóśźż]", t2):
+            return False
+        return True
+
     def _fix_offsets(self):
         """
         Post-processing for wrongly seperated words. Function takes full blocks content, searches for 
@@ -2868,11 +2952,17 @@ class PDFMapper:
         for block in self.logical_blocks:
             original_words = list(getattr(block, "words", []))
             removed = []
+            text_changed = False
 
             if isinstance(block, ListBlock):
                 for item in block.items:
-                    item.text, item_removed = self._merge_split_words(item.text, item.words)
+                    new_text, item_removed = self._merge_split_words(item.text, item.words)
+                    if new_text != item.text:
+                        text_changed = True
+                    item.text = new_text
                     removed.extend(item_removed)
+                if text_changed or removed:
+                    block.content = "\n".join(item.text for item in block.items)
             elif isinstance(block, ParagraphBlock):
                 block.content, removed = self._merge_split_words(block.content, block.words)
 
@@ -2883,31 +2973,42 @@ class PDFMapper:
             if isinstance(block, ListBlock):
                 for item in block.items:
                     item.words[:] = [w for w in item.words if id(w) not in removed_ids]
-                block.content = "\n".join(item.text for item in block.items)
             block.words[:] = [w for w in block.words if id(w) not in removed_ids]
             self._shift_word_indices(original_words, removed_ids)
 
 
     def _merge_split_words(self, text, words):
         """
-        Glues every word starting with ą/ę to the preceding word when there is space befere them on the same line.
+        Glues words split on the same line (Polish ą/ę or same-line URL tokens) and
+        removes line-break spaces in multi-line URLs and soft line-break hyphens in text.
         """
-        split_spaces = {m.start() for m in self.SPLIT_POLISH_SIGNS_RE.finditer(text)}
-        if not split_spaces:
+        if not text or len(words) < 2:
             return text, []
+
+        split_spaces = {m.start() for m in self.SPLIT_POLISH_SIGNS_RE.finditer(text)}
 
         removed = []
         deleted_spaces = []
         target = None
         for word in words:
+            if word.start_char == 0 and word.end_char == 0:
+                continue
             space = word.start_char - 1
+            can_merge = False
             if (
                 target is not None
-                and space in split_spaces
+                and 0 <= space < len(text)
+                and text[space] == " "
                 and target.end_char == space
                 and text[word.start_char:word.start_char + 1] == word.text[:1]
-                and (target.page_number, target.line) == (word.page_number, word.line)
+                and target.page_number == word.page_number
             ):
+                if space in split_spaces and target.line == word.line:
+                    can_merge = True
+                elif self._is_same_line_url_split(target, word):
+                    can_merge = True
+
+            if can_merge:
                 target.text += word.text
                 target.end_char = word.end_char
                 target.bbox = [
@@ -2925,19 +3026,68 @@ class PDFMapper:
             else:
                 target = word
 
-        if not removed:
-            return text, []
-
         removed_ids = {id(w) for w in removed}
-        for word in words:
-            if id(word) in removed_ids:
-                continue
-            word.start_char -= sum(space_place < word.start_char for space_place in deleted_spaces)
-            word.end_char -= sum(space_place < word.end_char for space_place in deleted_spaces)
+        if deleted_spaces:
+            for word in words:
+                if id(word) in removed_ids or (word.start_char == 0 and word.end_char == 0):
+                    continue
+                word.start_char -= sum(space_place < word.start_char for space_place in deleted_spaces)
+                word.end_char -= sum(space_place < word.end_char for space_place in deleted_spaces)
 
-        deleted = set(deleted_spaces)
-        new_text = "".join(char for i, char in enumerate(text) if i not in deleted)
-        return new_text, removed
+            deleted = set(deleted_spaces)
+            text = "".join(char for i, char in enumerate(text) if i not in deleted)
+
+        active_words = [
+            w for w in words
+            if id(w) not in removed_ids and not (w.start_char == 0 and w.end_char == 0)
+        ]
+        cross_line_deleted = []
+        in_url = False
+        for w1, w2 in zip(active_words, active_words[1:]):
+            is_line_break = (
+                w1.page_number != w2.page_number
+                or abs(w1.bbox[1] - w2.bbox[1]) > 3.0
+                or w2.bbox[0] < w1.bbox[0] - 5.0
+            )
+            if not is_line_break:
+                in_url = bool(_LINK.search(w2.text))
+                continue
+
+            if (
+                w2.start_char == w1.end_char + 1
+                and 0 <= w1.end_char < len(text)
+                and text[w1.end_char] == " "
+                and self._is_cross_line_url_continuation(w1, w2, in_url=in_url)
+            ):
+                cross_line_deleted.append(w1.end_char)
+                in_url = True
+            elif (
+                w2.start_char == w1.end_char
+                and (in_url or bool(_LINK.search(w1.text)) or (self._is_word_monospace(w1) and self._is_word_monospace(w2)))
+            ):
+                in_url = True
+            elif (
+                w1.end_char > w1.start_char
+                and w1.end_char <= len(text)
+                and text[w1.end_char - 1] == "-"
+                and w2.start_char in (w1.end_char, w1.end_char + 1)
+                and self._is_cross_line_soft_hyphen(w1, w2, in_url=in_url)
+            ):
+                cross_line_deleted.append(w1.end_char - 1)
+                if w2.start_char == w1.end_char + 1 and w1.end_char < len(text) and text[w1.end_char] == " ":
+                    cross_line_deleted.append(w1.end_char)
+                in_url = False
+            else:
+                in_url = False
+
+        if cross_line_deleted:
+            for word in active_words:
+                word.start_char -= sum(pos < word.start_char for pos in cross_line_deleted)
+                word.end_char -= sum(pos < word.end_char for pos in cross_line_deleted)
+            deleted = set(cross_line_deleted)
+            text = "".join(char for i, char in enumerate(text) if i not in deleted)
+
+        return text, removed
 
 
     def _shift_word_indices(self, words, removed_ids):

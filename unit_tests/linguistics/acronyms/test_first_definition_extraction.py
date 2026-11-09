@@ -116,10 +116,13 @@ class TestFirstDefinitionExtraction(unittest.TestCase):
         self.assertEqual([m for m in undef_matches if m.content == "IRW"], [])
 
     def test_acronym_first_in_parentheses_variants(self):
-        # "pol." instead of "ang." and a semicolon instead of a comma
+        # "pol." instead of "ang.", semicolon instead of comma, and optional "z " before "ang."
         cases = [
             ("ZSD", "Wdrożono system (ZSD, pol. Zintegrowany System Decyzyjny) w firmie.", "Zintegrowany System Decyzyjny"),
             ("IRW", "Zastosowano model (IRW; ang. Integrated Random Walk) do opisu ceny.", "Integrated Random Walk"),
+            ("NVDA", "Wykorzystano czytnik ekranu NVDA (z ang. NonVisual Desktop Access) w badaniu.", "NonVisual Desktop Access"),
+            ("NVDA", "Wykorzystano czytnik ekranu (NVDA z ang. NonVisual Desktop Access) w badaniu.", "NonVisual Desktop Access"),
+            ("NVDA", "Wykorzystano czytnik ekranu (NVDA, z ang. NonVisual Desktop Access) w badaniu.", "NonVisual Desktop Access"),
         ]
         for acronym, text, expected in cases:
             with self.subTest(acronym=acronym):
