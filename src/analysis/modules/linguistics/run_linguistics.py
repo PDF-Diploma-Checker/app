@@ -1,5 +1,5 @@
 from analysis.modules.linguistics.language_error_extractor import *
-from analysis.modules.linguistics.decimal_point_extractor import decimal_check
+from analysis.modules.linguistics.decimal_point_extractor import decimal_check, decimal_check_in_figures
 from analysis.modules.linguistics.dash_check import dash_check, abbreviation_space_check
 from analysis.modules.linguistics.exeptions_check import *
 from analysis.modules.linguistics.list_check import check_coherence_in_list
@@ -74,7 +74,7 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     # extract_errors_to_json(blocks, "document.json")
     # with open("document_before.json", "w", encoding="utf-8") as json_file:
     #     json.dump(asdict(raw_blocks), json_file,  ensure_ascii=False, indent=4)
-    chapter_nums = extract_chapter_numbers(blocks)
+    chapter_nums = extract_chapter_numbers(blocks, raw_blocks)
     logger.info("Extracted %d chapter numbers", len(chapter_nums))
 
     extracted_acronyms = raw_blocks.reference_sections.acronyms
@@ -85,6 +85,8 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     acronym_matches, proper_names = check_if_was_defined(blocks, acronyms_with_definitions, proper_names)
     check_cancelled(cancel_token)
     decimal_matches = decimal_check(blocks, chapter_nums)
+    document_language = Counter(getattr(b.block, "language", None) or "pl" for b in blocks).most_common(1)[0][0] if blocks else "pl"
+    figure_decimal_matches = decimal_check_in_figures(raw_blocks, document_language)
     main_font = raw_blocks.metadata.get("main_font")
     dash_matches = dash_check(blocks, main_font)
     abbreviation_matches = abbreviation_space_check(blocks, main_font=main_font)
@@ -104,6 +106,9 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     before_image_filter = len(matches)
     matches = remove_errors_inside_images(matches, raw_blocks)
     logger.info("Image overlap filter removed %d matches", before_image_filter - len(matches))
+    # Findings in the text of figures come after the image filter, which would remove all of them.
+    matches += figure_decimal_matches
+    sources.append(("decimal_figure_check", figure_decimal_matches))
     report_sources(sources, matches, blocks)
 
     category_counts = Counter(m.category for m in matches)
