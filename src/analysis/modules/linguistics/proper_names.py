@@ -56,6 +56,8 @@ def get_proper_names(blocks):
                 text = nlp(block.contents)
                 for ent in text.ents:
                     ent_text = ent.text.strip("(),.:;[]\n\t ")
+                    if len(ent_text) < 2:
+                        continue
                     if block_type == "list" and is_bib:
                         if not ent.label_ or ent.label_ not in BIB_LABELS_PL:
                             continue
@@ -65,7 +67,7 @@ def get_proper_names(blocks):
                             bibliography["places"].add(ent_text)
                         elif ent.label_ == "orgName":
                             bibliography["organizations"].add(ent_text)
-                    if not ent.label_ or ent.label_ in SKIP_LABEL_PL or len(ent_text) < 2:
+                    if not ent.label_ or ent.label_ in SKIP_LABEL_PL:
                         continue
                     if is_lowercase_typo(ent_text):
                         continue
@@ -86,6 +88,8 @@ def get_proper_names(blocks):
                 text = nlp(block.contents)
                 for ent in text.ents:
                     ent_text = ent.text.strip("(),.:;[]\n\t ")
+                    if len(ent_text) < 2:
+                        continue
                     if block_type == "list" and is_bib:  
                         if not ent.label_ or ent.label_ not in BIB_LABELS_EN:
                             continue
@@ -97,7 +101,7 @@ def get_proper_names(blocks):
                             bibliography["organizations"].add(ent_text)
                         elif ent.label_ == "WORK_OF_ART":
                             bibliography["work"].add(ent_text)   
-                    if not ent.label_ or ent.label_ in SKIP_LABELS_EN or len(ent_text) < 2:
+                    if not ent.label_ or ent.label_ in SKIP_LABELS_EN:
                         continue
                     if is_lowercase_typo(ent_text):
                         continue
