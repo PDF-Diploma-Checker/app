@@ -157,10 +157,18 @@ def executable(target):
 
 
 def _desktop_entry(target):
-    path = str(executable(target)).replace("\\", "\\\\").replace('"', '\\"')
+    target_path = Path(target)
+    exec_path = executable(target_path).as_posix().replace('"', '\\"')
+    icon_path = (target_path / "_internal" / "ui" / "assets" / "logo.png").as_posix()
+
     return (
-        "[Desktop Entry]\nType=Application\nName=DiplomaChecker\nComment=PDF thesis checker\n"
-        f'Exec="{path}"\nIcon={Path(target) / "_internal" / "ui" / "assets" / "logo.png"}\nTerminal=false\n'
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=DiplomaChecker\n"
+        "Comment=PDF thesis checker\n"
+        f'Exec="{exec_path}"\n'
+        f"Icon={icon_path}\n"
+        "Terminal=false\n"
         "Categories=Office;Education;\n"
     )
 
