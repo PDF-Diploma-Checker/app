@@ -288,14 +288,28 @@ def add_match(content, block_id, page_start, page_end, word_idxs, error_coordina
                 error_coordinate= error_coordinate
             )
 
-def extract_chapter_numbers(blocks):
-    '''Parses through table of content, tables of references to save chapter and listing numbers.'''
+NUMBER_PATTERN = r'\b\d{1,3}\.\d{1,3}(?:\.\d{1,3})*\b'
+# Numer na początku nagłówka lub numer kolejnego nagłówka sklejonego z poprzednim ("3.1. DOBÓR 3.2. RUCH").
+HEADING_NUMBER_PATTERN = r'(?:^|(?<=\s))(\d{1,3}(?:\.\d{1,3})+)\.?(?=\s)'
+
+
+def extract_chapter_numbers(blocks, raw_blocks=None):
+    '''Numbers of chapters, figures, tables and listings, which the text refers to ("na schemacie 2.1", "na grafice 5.2").
+    Taken from the table of contents and the lists of figures and tables, from the headings and from the captions.
+    raw_blocks - the whole document, its visual elements hold captions that are not in any block.'''
     chapter_nums = []
     for block in blocks:
         if block.block.type in {'toc', 'tof', 'tot'}:
-            chapter_nums.extend(re.findall(r'\b\d{1,3}\.\d{1,3}(?:\.\d{1,3})*\b', block.contents))
-        if block.block.type in {'img_description', 'table_description'}:
-            match = (re.search(r'\b\d{1,3}\.\d{1,3}(?:\.\d{1,3})*\b', block.contents))
+            chapter_nums.extend(re.findall(NUMBER_PATTERN, block.contents))
+        if block.block.type in {'image_description', 'table_description'}:
+            match = re.search(NUMBER_PATTERN, block.contents)
+            if match:
+                chapter_nums.append(match.group(0))
+        if block.block.type == 'heading':
+            chapter_nums.extend(re.findall(HEADING_NUMBER_PATTERN, block.contents))
+    if raw_blocks is not None:
+        for element in raw_blocks.floating_elements.visual_elements:
+            match = re.search(NUMBER_PATTERN, (element.caption or {}).get('text') or '')
             if match:
                 chapter_nums.append(match.group(0))
     chapter_nums = set(chapter_nums)
