@@ -35,6 +35,11 @@ class VariantTest(unittest.TestCase):
         ]
         self.assertEqual(core.variant_sizes({"assets": assets}, "linux"), {"gpu": 120, "base": 7})
 
+    def test_a_release_without_archives_yet_has_no_size(self):
+        assets = [{"name": "DiplomaChecker-linux-base.manifest.json", "size": 5},
+                  {"name": "DiplomaChecker-linux-base.pack.003", "size": 70}]
+        self.assertEqual(core.variant_sizes({"assets": assets}, "linux"), {"base": 0})
+
 
 class LanguageTest(unittest.TestCase):
     def test_polish_on_a_polish_system(self):
