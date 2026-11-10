@@ -61,6 +61,12 @@ class TestDescribedAcronyms(unittest.TestCase):
         later = "Uogólniona estymacja funkcji korzyści (GAE) jest sumą ważoną błędów różnicy czasowej."
         self.assertNotIn("GAE", reported([first_use, later]))
 
+    def test_polish_description_matches_second_definition(self):
+        first_use = "W algorytmie stanowi fundament uogólnionego estymatora korzyści GAE (podrozdz. 2.6)."
+        english = "Metoda GAE (ang. Generalized Advantage Estimation) jest sumą ważoną błędów."
+        polish = "Uogólniona estymacja funkcji korzyści (GAE) jest sumą ważoną błędów różnicy czasowej."
+        self.assertNotIn("GAE", reported([first_use, english, polish]))
+
     def test_unrelated_words_before_acronym_defined_later(self):
         first_use = "Wyniki porównano z metodą GAE w kolejnym rozdziale."
         later = "Uogólniona estymacja funkcji korzyści (GAE) jest sumą ważoną błędów różnicy czasowej."
