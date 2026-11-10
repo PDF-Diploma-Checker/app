@@ -492,6 +492,26 @@ class PDFMapper:
         return False
 
     @staticmethod
+    def _is_formula_like_math_block(text: str, words: list[WordInfo]) -> bool:
+        """Determines if an intercepted math block is a true formula (e.g. equation) rather than prose or bullets."""
+        has_relation = bool(re.search(r"[=≈≠≤≥<>∈∉⊂⊆∪∩∫∬∭∮∑∏√±×÷→⇒⇔∀∃]", text))
+        has_true_math_font = any(
+            any(mf in (w.font or "").lower() for mf in ("math", "cmmi", "cmsy", "msbm"))
+            for w in words
+        )
+        if not (has_relation or has_true_math_font):
+            return False
+        if re.search(
+            r"\b(roku|r\.|lat|lata|zgonów|emisji|dystansu|odcinki|tys\.|proc\.|godz\.)\b",
+            text,
+            re.IGNORECASE,
+        ):
+            return False
+        if re.search(r"^[–—\-−•·\s]*[a-ząćęłńóśźż]{3,}", text, re.IGNORECASE) and not has_relation:
+            return False
+        return True
+
+    @staticmethod
     def is_math(words: list[WordInfo]) -> bool:
         """
         Evaluates a sequence of words to determine if it represents a mathematical expression.
@@ -1199,9 +1219,18 @@ class PDFMapper:
                     and current_gap < 0.12 * max(getattr(span, "size", 0) or 0, 1.0)
                 )
 
+                glued_hyphen_suffix = bool(
+                    len(word_text) > 1
+                    and word_text[0] == "-"
+                    and word_text[1].isalnum()
+                    and prev_span_text
+                    and prev_span_text[-1].isalnum()
+                    and current_gap < 0.12 * max(getattr(span, "size", 0) or 0, 1.0)
+                )
+
                 if not (
-                    full_text.rstrip().endswith("-")
-                    and abs(line_x1 - span.bbox[2]) < 50
+                    (re.search(r"\S-$", full_text.rstrip()) and abs(line_x1 - span.bbox[2]) < 50)
+                    or glued_hyphen_suffix
                 ):
                     full_text += " "
 
@@ -1545,6 +1574,11 @@ class PDFMapper:
                         block.block_id,
                         temp_text[:40],
                     )
+                    if (
+                        not self.paragraph_buffer
+                        and block.bbox[1] >= self.list_buffer[-1]["item"].bbox[1] - 5
+                    ):
+                        self.list_buffer[-1]["item"].ends_with_formula = True
                 new_doc.floating_elements.page_artifacts.append(
                     PageArtifact(
                         artifact_id=f"eq_{block.block_id}",
@@ -1668,6 +1702,7 @@ class PDFMapper:
                             last_item_data["item"].text += connector + full_text.strip()
                             last_item_data["original_text"] += connector + full_text.strip()
                             last_item_data["item"].words.extend(words_info)
+                            last_item_data["item"].ends_with_formula = False
 
                             b = list(block.bbox)
                             last_item_data["item"].bbox = [
@@ -1807,6 +1842,12 @@ class PDFMapper:
                                 )
                             )
                             self._carry_formula_period(full_text)
+                            if (
+                                self.list_buffer
+                                and not self.paragraph_buffer
+                                and self._is_formula_like_math_block(full_text, words_info)
+                            ):
+                                self.list_buffer[-1]["item"].ends_with_formula = True
                         else:
                             prev_type, prev_marker = self._classify_block_content(
                                 full_text, current_marker
@@ -1890,6 +1931,12 @@ class PDFMapper:
                     )
                 )
                 self._carry_formula_period(full_text)
+                if (
+                    self.list_buffer
+                    and not self.paragraph_buffer
+                    and self._is_formula_like_math_block(full_text, words_info)
+                ):
+                    self.list_buffer[-1]["item"].ends_with_formula = True
                 continue
 
             is_hdr = self.is_header(words_info)
@@ -1983,6 +2030,7 @@ class PDFMapper:
                 last_item_data["item"].text += connector + full_text
                 last_item_data["original_text"] += connector + full_text.strip()
                 last_item_data["item"].words.extend(words_info)
+                last_item_data["item"].ends_with_formula = False
                 b = list(block.bbox)
                 last_item_data["item"].bbox = [
                     min(last_item_data["item"].bbox[0], b[0]),

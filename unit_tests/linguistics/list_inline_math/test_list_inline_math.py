@@ -17,9 +17,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, ListItem, WordInfo
+from analysis.extraction.linguistics_conversion.schema import ParagraphBlock, ListBlock, ListItem, WordInfo
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
+from analysis.extraction.raw_extraction.text_extractor import TextLine, TextSpan
 from analysis.modules.linguistics.dash_check import dash_check
+from analysis.modules.linguistics.list_check import check_coherence_in_list
 from analysis.modules.linguistics.linguistics_types import Block_context
 
 
@@ -57,6 +59,81 @@ class TestMarkerHyphen(unittest.TestCase):
         matches = dash_check([context])
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0].content, "-")
+
+    def test_standalone_hyphen_span_preserves_trailing_space_on_short_line(self):
+        mapper = PDFMapper()
+        spans = [
+            TextSpan(span_id=1, text="•", font="Symbol", size=11.0, bold=False, italic=False, color=0, bbox=[70.0, 200.0, 74.0, 211.0]),
+            TextSpan(span_id=2, text="data", font="Arial", size=11.0, bold=False, italic=False, color=0, bbox=[85.0, 200.0, 105.0, 211.0]),
+            TextSpan(span_id=3, text="-", font="Arial", size=11.0, bold=False, italic=False, color=0, bbox=[109.0, 200.0, 113.0, 211.0]),
+            TextSpan(span_id=4, text="bufor", font="Arial", size=11.0, bold=False, italic=False, color=0, bbox=[117.0, 200.0, 140.0, 211.0]),
+            TextSpan(span_id=5, text="wejściowy", font="Arial", size=11.0, bold=False, italic=False, color=0, bbox=[144.0, 200.0, 190.0, 211.0]),
+        ]
+        line = TextLine(bbox=[70.0, 200.0, 190.0, 211.0], baseline=210.0, spans=spans)
+        full_text, _, _ = mapper._extract_words_with_spacing(line, "", [], 27, 0, spans[-1].bbox[2])
+        self.assertIn("data - bufor wejściowy", full_text)
+
+    def test_glued_hyphen_suffix_after_math_symbol_has_no_space(self):
+        mapper = PDFMapper()
+        spans = [
+            TextSpan(span_id=1, text="Transformatą", font="LMREgular", size=11.0, bold=False, italic=False, color=0, bbox=[70.0, 300.0, 135.0, 311.0]),
+            TextSpan(span_id=2, text="Fouriera", font="LMRegular", size=11.0, bold=False, italic=False, color=0, bbox=[139.0, 300.0, 180.0, 311.0]),
+            TextSpan(span_id=3, text="(𝔽", font="MSBM10", size=11.0, bold=False, italic=False, color=0, bbox=[184.0, 300.0, 196.0, 311.0]),
+            TextSpan(span_id=4, text="-transformatą)", font="LMRegular", size=11.0, bold=False, italic=False, color=0, bbox=[196.2, 300.0, 265.0, 311.0]),
+        ]
+        line = TextLine(bbox=[70.0, 300.0, 265.0, 311.0], baseline=310.0, spans=spans)
+        full_text, words_info, _ = mapper._extract_words_with_spacing(line, "", [], 15, 0, spans[-1].bbox[2])
+        self.assertIn("(𝔽-transformatą)", full_text)
+        block = ParagraphBlock(block_id=1, content=full_text, words=words_info)
+        block.language = "pl"
+        ctx = Block_context(block=block, contents=block.content, language="pl")
+        self.assertEqual(dash_check([ctx]), [])
+
+    def test_definition_list_with_glued_hyphen_and_formula_ending_item(self):
+        def make_item(idx, text, marker="bullet", ends_with_formula=False):
+            ws = []
+            pos = 0
+            for wi, tok in enumerate(text.split(" ")):
+                ws.append(word(tok, index=wi, start=pos))
+                pos += len(tok) + 1
+            return ListItem(
+                item_id=idx, marker_type=marker, text=text,
+                bbox=[70.0, 200.0 + idx * 15, 250.0, 212.0 + idx * 15],
+                words=ws, ends_with_formula=ends_with_formula,
+            )
+
+        # Case 1: Definition list where one item has a glued hyphen ("data -bufor wejściowy")
+        def_items = [
+            make_item(0, "crc - rejestr wynikowy"),
+            make_item(1, "i - iteracja po każdym bajcie"),
+            make_item(2, "data -bufor wejściowy"),
+            make_item(3, "length - długość bufora"),
+            make_item(4, "j - iteracja po bitach"),
+        ]
+        def_block = ListBlock(
+            block_id="list_def", content="\n".join(it.text for it in def_items),
+            bbox=[70.0, 200.0, 250.0, 280.0], items=def_items,
+            words=[w for it in def_items for w in it.words], type="list"
+        )
+        def_block.language = "pl"
+        ctx1 = Block_context(block=def_block, contents=def_block.content, language="pl")
+        self.assertEqual(check_coherence_in_list([ctx1], proper_names=[], acronyms={}), [])
+
+        # Case 2: Numbered list where item 2 ends with a display math formula
+        math_items = [
+            make_item(0, "f jest funkcją przedziałami monotoniczną, tzn. przedział (a, b) można podzielić na skończoną liczbę podprzedziałów takich, że wewnątrz każdego z nich f jest monotoniczna,", marker="number_dot"),
+            make_item(1, "f jest funkcją ciągłą na przedziale (a, b) z wyjątkiem skończonej liczby punktów nieciągłości pierwszego rodzaju, przy czym jeżeli t 0 jest takim punktem, to", marker="number_dot", ends_with_formula=True),
+            make_item(2, "jest bezwzględnie całkowalna na przedziale (-∞; +∞), tzn. dla t ∈ R funkcję f można przedstawić następująco:", marker="number_dot"),
+        ]
+        math_block = ListBlock(
+            block_id="list_math", content="\n".join(it.text for it in math_items),
+            bbox=[70.0, 300.0, 450.0, 420.0], items=math_items,
+            words=[w for it in math_items for w in it.words], type="list"
+        )
+        math_block.language = "pl"
+        ctx2 = Block_context(block=math_block, contents=math_block.content, language="pl")
+        matches = check_coherence_in_list([ctx2], proper_names=[], acronyms={})
+        self.assertEqual([m for m in matches if m.category == "LIST_ENDING"], [])
 
 
 if __name__ == "__main__":

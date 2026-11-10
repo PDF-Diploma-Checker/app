@@ -59,6 +59,7 @@ class ListItem:
     bbox: List[float]
     words: List[WordInfo] = field(default_factory=list)
     is_widow: int = 0                  # words of a too short last line (used for bibliography entries)
+    ends_with_formula: bool = False
 
 
 @dataclass
