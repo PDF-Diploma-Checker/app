@@ -5,6 +5,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+MODEL_NUMBER = re.compile(r'^\d[\d.]*[,;:.)]?$')
+
+def is_model_name(next_text):
+    """
+    Checks if an all-caps word is followed by a model or version number ('RTX 5060'), so it is a part of
+    a product name, not an abbreviation that needs expanding.
+    """
+
+    return next_text is not None and bool(MODEL_NUMBER.match(next_text))
+
 def potential_acronym(text):
     """
     Check if a given string matches the criteria for being a potential acronym.
@@ -84,7 +94,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                 continue 
             prev_word = block.words[0]
             content = normalize_math_letters(block.content)
-            for word in block.words:
+            for idx, word in enumerate(block.words):
                 text = normalize_math_letters(word.text)
                 clean_text = text.strip("|():;,.!?[]\n\t \"„”«»“‟‘’")
                 if any(c in quote_marks for c in text):
@@ -103,6 +113,10 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                     prev_word = word
                     continue
                 if prev_word.italic and not is_math_font(prev_word.font) and normalize_math_letters(prev_word.text) != text:
+                    prev_word = word
+                    continue
+                next_word = block.words[idx + 1] if idx + 1 < len(block.words) else None
+                if is_model_name(next_word.text if next_word else None):
                     prev_word = word
                     continue
                 if roman_numeral.match(clean_text):
