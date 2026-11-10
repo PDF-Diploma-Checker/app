@@ -11,6 +11,10 @@ DEFINITION_CONNECTORS = {
     "of", "and", "for", "the", "a", "an", "in", "on", "to", "by", "with", "de",
 }
 MAX_EXTRA_DEFINITION_WORDS = 3
+MIN_SHARED_STEMS = 2
+STEM_LENGTH = 5
+DOUBLE_PARENTHESIS = re.compile(r'\(\s*\(')
+BARE_ACRONYM = re.compile(r'(?<![\w\-(])([A-Z]{2,10})(?![\w\-(])')
 
 def add_definition_words(words, proper_names, lemma_language):
     """
@@ -188,6 +192,80 @@ def sequence_match(acronym, initials):
     return idx == len(acronym)
 
 
+def phrase_words_before(text, end):
+    """
+    Returns the lowercase words standing right before position end in the same sentence,
+    stopping at punctuation or at a word that is not a plain lowercase word.
+    """
+
+    phrase = []
+    for word in reversed(text[:end].split()):
+        if not word.isalpha() or not word.islower():
+            break
+        phrase.insert(0, word)
+        if len(phrase) == MAX_EXTRA_DEFINITION_WORDS * 2:
+            break
+    return phrase
+
+def stems(words):
+    """
+    Returns rough stems of the content words, so inflected forms like 'estymatora' and 'estymacja' meet.
+    """
+
+    result = set()
+    for word in words:
+        clean = word.strip(string.punctuation + string.whitespace).lower()
+        if len(clean) >= 4 and clean not in DEFINITION_CONNECTORS:
+            result.add(clean[:STEM_LENGTH])
+    return result
+
+def phrase_matches_definition(phrase, definition):
+    """
+    Checks if a phrase before the acronym shares enough content words with its definition found elsewhere.
+    """
+
+    return len(stems(phrase) & stems(definition.split())) >= MIN_SHARED_STEMS
+
+def phrase_before_acronym(text, words, block_id, proper_names, lemma_language, acronyms_with_definitions):
+    """
+    Finds acronyms written right after their Polish description, like 'sztucznej inteligencji SI'.
+    Registers the ones whose initials match the description and returns the rest as candidates
+    (acronym, phrase, words, block_id) to compare with a definition found elsewhere in the document.
+    """
+
+    candidates = []
+    for m in BARE_ACRONYM.finditer(text):
+        acronym = m.group(1)
+        if not potential_acronym(acronym):
+            continue
+        phrase = phrase_words_before(text, m.start())
+        if not phrase:
+            continue
+        matched = trailing_definition_words(acronym, phrase)
+        if matched:
+            proper_names.append((acronym, acronym))
+            add_definition_words(matched, proper_names, lemma_language)
+            check_position_if_new(acronym, " ".join(matched), words, block_id, acronyms_with_definitions)
+        else:
+            candidates.append((acronym, phrase, words, block_id))
+    return candidates
+
+def accept_described_acronyms(candidates, acronyms_with_definitions):
+    """
+    Moves the definition of an acronym to its first use when that use stands right after a description
+    sharing words with the definition, e.g. 'estymatora korzyści GAE' before 'estymacja korzyści (GAE)'.
+    """
+
+    for acronym, phrase, words, block_id in candidates:
+        known = acronyms_with_definitions.get(acronym)
+        if known is None or known[1] == "official_list" or not phrase_matches_definition(phrase, known[0]):
+            continue
+        position = check_position_if_new(acronym, " ".join(phrase), words, block_id, {})
+        if acronym in position and (position[acronym][2], position[acronym][3][1], position[acronym][3][0]) < (known[2], known[3][1], known[3][0]):
+            acronyms_with_definitions[acronym] = position[acronym]
+    return acronyms_with_definitions
+
+
 def check_position_if_new(new_acronym, definition, words, block_id, acronyms_with_definitions):
     """
     Determines the location of a newly found acronym definition and add it to the tracking dictionary.
@@ -258,6 +336,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     logger.info("Starting first definition check")
     acronyms_with_definitions = {}
     italic_matches = []
+    phrase_candidates = []
     bibliography_re = re.compile(r"^\[\d+\]")
     list_acronyms = re.compile(r'^[A-Z]{2,}\s+[\u2013\u2014\-\u2212:]\s|^((\S+\s){1,4})[\u2013\u2014\-\u2212:]\s')
     paragraph_def_first = re.compile(r'(?<![A-Za-z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c])([A-Z\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b][a-zA-Z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*\(([A-Z]{2,})\)(?=[,\s\.\)\;]|$)',re.UNICODE)
@@ -322,6 +401,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                 continue
             if block.type == "paragraph":
                 text = normalize_math_letters(block.content)
+                phrase_candidates.extend(phrase_before_acronym(text, words, block.block_id, proper_names, b.language, acronyms_with_definitions))
                 for acronym, definition, foreign_definition in paragraph_acr_dash_def.findall(text):
                     if not potential_acronym(acronym):
                         continue
@@ -331,16 +411,17 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                             break
             if '(' in block.content or ')' in block.content:
                 text = normalize_math_letters(block.content)
-                new_acronyms = paragraph_acr_first.findall(text)
-                new_acronyms.extend(paragraph_acr_in_paren_ang.findall(text))
-                new_acronyms.extend(paragraph_acr_then_expansion.findall(text))
-                new_acronyms.extend(paragraph_ang_pattern.findall(text))
-                new_acronyms.extend(paragraph_ang_pol_pattern.findall(text))
-                new_acronyms.extend(paragraph_acr_quoted.findall(text))
-                new_acronyms.extend(broken_parenthesis_ang.findall(text))
-                new_acronyms.extend(broken_parenthesis_acr_dash.findall(text))
-                new_acronyms.extend(broken_no_parenthesis_svm.findall(text))
-                new_acronyms.extend(paragraph_acr_expansion_suffix.findall(text))
+                def_text = DOUBLE_PARENTHESIS.sub("(", text)
+                new_acronyms = paragraph_acr_first.findall(def_text)
+                new_acronyms.extend(paragraph_acr_in_paren_ang.findall(def_text))
+                new_acronyms.extend(paragraph_acr_then_expansion.findall(def_text))
+                new_acronyms.extend(paragraph_ang_pattern.findall(def_text))
+                new_acronyms.extend(paragraph_ang_pol_pattern.findall(def_text))
+                new_acronyms.extend(paragraph_acr_quoted.findall(def_text))
+                new_acronyms.extend(broken_parenthesis_ang.findall(def_text))
+                new_acronyms.extend(broken_parenthesis_acr_dash.findall(def_text))
+                new_acronyms.extend(broken_no_parenthesis_svm.findall(def_text))
+                new_acronyms.extend(paragraph_acr_expansion_suffix.findall(def_text))
                 for new_acronym in new_acronyms:
                     if initials_match(new_acronym[0], new_acronym[1], proper_names, block, lang=b.language, anchor="start"):
                         acronyms_with_definitions = check_position_if_new(new_acronym[0], new_acronym[1], words, block.block_id, acronyms_with_definitions)
@@ -348,7 +429,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                         def_words = new_acronym[1].strip().split()
                         if def_words:
                             rescue_single_word(new_acronym[0], def_words[0], proper_names, b.language)
-                for acronym, definition in paragraph_def_then_ang.findall(text):
+                for acronym, definition in paragraph_def_then_ang.findall(def_text):
                     if acronym in acronyms_with_definitions:
                         continue
                     if initials_match(acronym, definition, proper_names, block, lang=b.language, anchor="start"):
@@ -357,14 +438,14 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                         def_words = definition.strip().split()
                         if def_words:
                             rescue_single_word(acronym, def_words[0], proper_names, b.language)
-                for before_phrase, inside_phrase in paragraph_ang_phrase.findall(text):
+                for before_phrase, inside_phrase in paragraph_ang_phrase.findall(def_text):
                     before_words = before_phrase.strip().split()[-1:]
                     before_words = [w for w in before_words if w.strip(string.punctuation).lower() not in DEFINITION_CONNECTORS]
                     add_definition_words(before_words + inside_phrase.strip().split(), proper_names, b.language)
-                new_acronyms = paragraph_def_first.findall(text)
-                new_acronyms.extend(paragraph_def_with_comma.findall(text))
-                new_acronyms.extend(paragraph_def_first_lower.findall(text))
-                new_acronyms.extend(parenthesis_def_dash_acr.findall(text))
+                new_acronyms = paragraph_def_first.findall(def_text)
+                new_acronyms.extend(paragraph_def_with_comma.findall(def_text))
+                new_acronyms.extend(paragraph_def_first_lower.findall(def_text))
+                new_acronyms.extend(parenthesis_def_dash_acr.findall(def_text))
                 for new_acronym in new_acronyms:
                     if initials_match(new_acronym[1], new_acronym[0], proper_names, block, lang=b.language, anchor="end"):
                         acronyms_with_definitions = check_position_if_new(new_acronym[1], new_acronym[0], words, block.block_id, acronyms_with_definitions)
@@ -373,20 +454,20 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                         if def_words:
                             rescue_single_word(new_acronym[1], def_words[-1], proper_names, b.language)
 
-                for definition, acronym in paragraph_ang_def_acr.findall(text):
+                for definition, acronym in paragraph_ang_def_acr.findall(def_text):
                     if potential_acronym(acronym):
                         add_trailing_definition(acronym, definition, proper_names, b.language)
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions)
 
-                for definition, acronym in simple_paren_acronym.findall(text):
+                for definition, acronym in simple_paren_acronym.findall(def_text):
                     def_words = definition.strip().split()
                     if potential_acronym(acronym) and len(def_words) >= 2:
                         add_trailing_definition(acronym, definition, proper_names, b.language)
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions)
                 
-                for m in paragraph_ang_pattern.finditer(text):
+                for m in paragraph_ang_pattern.finditer(def_text):
                     acronym, definition = m.group(1), m.group(2)
                     if potential_acronym(acronym):
                         proper_names.append((acronym, acronym))
@@ -396,6 +477,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                     italic_match = check_italic_def(m.group(1), block, m.start(1), m.end(1) - m.start(1), b.language)
                     if italic_match:
                         italic_matches.append(italic_match)
+    acronyms_with_definitions = accept_described_acronyms(phrase_candidates, acronyms_with_definitions)
     logger.info("First definition check complete: %d acronyms with definitions found, %d proper names",
                 len(acronyms_with_definitions), len(proper_names))
 
