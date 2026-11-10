@@ -11,7 +11,7 @@ import logging
 import string
 
 from analysis.modules.linguistics.decision_log import confirmed_by_model, not_reviewed, rejected_by_model
-from analysis.modules.linguistics.helpers import morf
+from analysis.modules.linguistics.helpers import morf, nlp_pl
 from analysis.modules.linguistics.language_error_extractor import typo_check
 from analysis.modules.llm import config
 from analysis.modules.llm.llama_factory import make_llama
@@ -96,10 +96,16 @@ def _is_polish(word):
     return any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word))
 
 
+def _is_common(word):
+    """True for a word of ordinary texts: spaCy has vectors for the 500 000 most frequent ones. Morfeusz also accepts
+    forms nobody writes ("odległoościowe", "rabotycznych"), which do not show a typo."""
+    return nlp_pl.vocab.has_vector(word)
+
+
 def _one_letter_from_polish(match):
-    """The Polish word this unknown one becomes with one letter fixed ("przbiega": "przebiega"), None when there is none.
-    The model calls such a word a technical term. A capital is only ignored at the start of a sentence, elsewhere it
-    is a name."""
+    """The common Polish word this unknown one becomes with one letter fixed ("przbiega": "przebiega"), None when there
+    is none. The model calls such a word a technical term. A capital is only ignored at the start of a sentence,
+    elsewhere it is a name."""
     word = match.content.strip(string.punctuation + string.whitespace)
     before = match.context.partition("«")[0].rstrip()
     if word.istitle() and (not before or before[-1] in ".!?:"):
@@ -113,7 +119,8 @@ def _one_letter_from_polish(match):
         (left + right[1:] for left, right in splits if right),
         (left + letter + right[1:] for left, right in splits if right for letter in _ALPHABET),
     )
-    return next((candidate for candidate in candidates if candidate != word and _is_polish(candidate)), None)
+    return next((candidate for candidate in candidates
+                 if candidate != word and _is_polish(candidate) and _is_common(candidate)), None)
 
 
 def _why_not_asked(match, language):

@@ -511,3 +511,7 @@ th
 wb
 mt
 gs
+więz
+więzu
+więzem
+więzie
