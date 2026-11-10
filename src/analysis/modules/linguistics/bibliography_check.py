@@ -1,6 +1,7 @@
 import re
 from .linguistics_types import Bibliography_context, Bib_item_context
 from .exeptions_check import check_quotes
+from .helpers import morf
 from .iso_and_bibtex_check import check_coherence_iso, check_missing_fields
 import logging
 from collections import Counter
@@ -96,19 +97,24 @@ URL_PATTERN = re.compile(r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+')
 
 UPPER_CASE = r'[A-ZĄĆĘŁŃÓŚŹŻÀ-ÖØ-öø-ÿĀ-ž]'
 LOWER_CASE = r'[a-ząćęłńóśźżà-öø-ÿā-ž]'
-SPECIAL_CHARS = r"[-–']"
+SPECIAL_CHARS = r"[-–'’]"
 SURNAME_PATTERN = rf'{UPPER_CASE}{LOWER_CASE}+(?:(?:{SPECIAL_CHARS}\s*|{UPPER_CASE}){LOWER_CASE}*)*'
+ALLCAPS_SURNAME_PATTERN = rf'{UPPER_CASE}{{2,}}(?:{SPECIAL_CHARS}{UPPER_CASE}{{2,}})*'
 FULLNAME_PATTERN = SURNAME_PATTERN
 SHORT_NAME_PATTERN = rf'(?<!\w){UPPER_CASE}\.?(?!\w)'
-SEPARATOR_PATTERNS = r'(?:\s*(?:,|[Aa]nd\b|[Ii]\b|&)\s*)+'
+SHORT_NAME_DOT_PATTERN = rf'(?<!\w){UPPER_CASE}\.(?!\w)'
+SEPARATOR_PATTERNS = r'(?:\s*(?:,|;|[Aa]nd\b|[Ii]\b|&)\s*)+'
 END_AUTHOR_PATTERNS = r'(?i)\s*(?:et al\.|i inni|i in\.?)\s*'
+ALLCAPS_FULLNAME_RE = re.compile(rf'^({ALLCAPS_SURNAME_PATTERN}(?:\s+{ALLCAPS_SURNAME_PATTERN}){{1,2}})(?=\s*[.,;:])')
 
 AUTHOR_PATTERNS = {
     rf'{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*\s{SURNAME_PATTERN}': 'J. Nowak',
+    rf'{SHORT_NAME_DOT_PATTERN}(?:[\s-]*{SHORT_NAME_DOT_PATTERN})*\s{ALLCAPS_SURNAME_PATTERN}': 'J. Nowak',
     rf'{FULLNAME_PATTERN}(?:\s(?:{FULLNAME_PATTERN}|{SHORT_NAME_PATTERN}))*\s{SURNAME_PATTERN}': 'Jan Nowak',
-    rf'{SURNAME_PATTERN},\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*\s*': 'Nowak, J.',
-    rf'{SURNAME_PATTERN},\s{FULLNAME_PATTERN}(?:\s(?:{FULLNAME_PATTERN}|{SHORT_NAME_PATTERN}))*': 'Nowak, Jan',
-    rf'{SURNAME_PATTERN}\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*': 'Nowak J.'
+    rf'(?:{SURNAME_PATTERN}|{ALLCAPS_SURNAME_PATTERN}),\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*\s*': 'Nowak, J.',
+    rf'(?:{SURNAME_PATTERN}|{ALLCAPS_SURNAME_PATTERN}),\s{FULLNAME_PATTERN}(?:\s(?:{FULLNAME_PATTERN}|{SHORT_NAME_PATTERN}))*': 'Nowak, Jan',
+    rf'{SURNAME_PATTERN}\s{SHORT_NAME_PATTERN}(?:[\s-]*{SHORT_NAME_PATTERN})*': 'Nowak J.',
+    rf'{ALLCAPS_SURNAME_PATTERN}\s{SHORT_NAME_DOT_PATTERN}(?:[\s-]*{SHORT_NAME_DOT_PATTERN})*': 'Nowak J.'
 }
 
 def check_bibliography(blocks, producer, bibliography_dict):
@@ -327,6 +333,19 @@ def mask_spans(content, spans):
     return ''.join(content_list)
 
 
+def is_allcaps_person_name(phrase):
+    """Checks via Morfeusz2 whether an all-caps phrase represents a personal name (First Last)
+    rather than an organization or corporate author."""
+    if ORG_KEYWORDS.search(phrase):
+        return False
+    words = [w.strip(".,;:") for w in phrase.split() if w.strip(".,;:")]
+    if len(words) < 2:
+        return False
+    first_cats = {c for a in morf.analyse(words[0].capitalize()) for c in a[2][3]}
+    last_cats = {c for a in morf.analyse(words[-1].capitalize()) for c in a[2][3]}
+    return 'imię' in first_cats and ('nazwisko' in last_cats or 'imię' in last_cats)
+
+
 def extract_authors(masked, content, authors):
     """Finds the author segment at the start of an entry by matching name patterns, then finds other authors 
     matching to the same pattern. Returns the author text, its format label, and the offset"""
@@ -337,6 +356,7 @@ def extract_authors(masked, content, authors):
     best_other = None
     best_fallback = None
 
+    authors = {a for a in authors if len(a.strip()) >= 2}
     authors_lower = {a.lower() for a in authors}
 
     for pattern, fmt in AUTHOR_PATTERNS.items():
@@ -354,6 +374,18 @@ def extract_authors(masked, content, authors):
             else:
                 if best_start_other is None or match.end() > best_start_other[0]:
                     best_start_other = candidate
+
+    if not (best_start_known or best_start_other or best_start_fallback):
+        allcaps_match = ALLCAPS_FULLNAME_RE.match(masked)
+        if allcaps_match and not check_quotes(allcaps_match.start(), allcaps_match.end(), content):
+            phrase = content[allcaps_match.start():allcaps_match.end()]
+            if is_allcaps_person_name(phrase):
+                allcaps_pattern = rf'{ALLCAPS_SURNAME_PATTERN}(?:\s+{ALLCAPS_SURNAME_PATTERN}){{1,2}}'
+                candidate = (allcaps_match.end(), allcaps_match.start(), 'Jan Nowak', allcaps_pattern)
+                if phrase.strip().lower() in authors_lower:
+                    best_start_known = candidate
+                else:
+                    best_start_fallback = candidate
 
     best_direct = None
     if not (best_start_known or best_start_other or best_start_fallback):
