@@ -105,6 +105,15 @@ class ReviewTest(unittest.TestCase):
         self.assertIsNotNone(review._one_letter_from_polish(finding("Podaczas", context="Koniec. «Podaczas» pracy")))
         self.assertIsNone(review._one_letter_from_polish(finding("Podaczas", context="metoda «Podaczas» dalej")))
 
+    def test_a_form_nobody_writes_is_no_sign_of_a_typo(self):
+        # Morfeusz knows "rabotycznych" and "odległoościowe"
+        for word in ("robotycznych", "odległościowe"):
+            self.assertIsNone(review._one_letter_from_polish(finding(word, context=f"tekst «{word}» dalej")), word)
+
+    def test_the_constraint_of_mechanics_is_a_word(self):
+        for word in ("więz", "więzu", "więzem", "więzie"):
+            self.assertTrue(review.typo_check(word), word)
+
     def test_short_words_and_terms_are_still_asked_about(self):
         for word in ("stdio", "hermitowskiej", "goldpin", "przebiega"):
             self.assertIsNone(review._one_letter_from_polish(finding(word, context=f"tekst «{word}» dalej")), word)
