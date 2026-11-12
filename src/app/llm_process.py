@@ -216,6 +216,11 @@ def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, g
         if crash_test:
             _simulate_crash(crash_test, send)
 
+        if job == "figures":
+            from app.llm_task import run_figures
+            send(("result", run_figures(doc_obj, pdf_path, language, token)))
+            return
+
         from app.llm_task import run_task_llm
         result = run_task_llm(doc_obj=doc_obj, pdf_path=pdf_path, language=language, use_llm=True,
                               check_images=check_images, cancel_token=token)
@@ -492,6 +497,32 @@ def run_language_review_isolated(matches, language="pl", cancel_token=None):
     return matches
 
 
+def run_figures_isolated(payload, pdf_path, language, layers, cancel_token=None):
+    """The figure checks in their own process, after the text. When it crashes they run once more with the model and
+    its projector on the processor: slower, but a card short of memory cannot abort them there. The results of the
+    text are kept either way."""
+    from app.llm_task import no_figure_checks
+    from ui.i18n import t
+
+    while True:
+        outcome = _run_once(payload, pdf_path, language, True, layers, cancel_token, job="figures")
+        if outcome.kind == "result":
+            return outcome.value
+        if outcome.kind == "error":
+            logger.error("The figure checks reported an error: %s\n%s", outcome.value, outcome.detail)
+            break
+        exit_text = describe_exit_code(outcome.value)
+        logger.error("The figure checks crashed: exit code %s, GPU layers %s, last status %r.\nLast lines of %s:\n%s",
+                     exit_text, layers, outcome.detail or "?", stderr_log_path(), read_tail(stderr_log_path()))
+        if not layers:
+            break
+        logger.warning("Checking the figures again with the model on the processor")
+        run_control.notify(t("llm_error.figures_on_cpu"))
+        layers = 0
+    _report("llm_error.title", t("llm_error.figures_failed", log=stderr_log_path()))
+    return no_figure_checks(language, failed=True)
+
+
 def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):
     """app.llm_task.run_task_llm in a separate process; a native crash there does not end the app."""
     if not use_llm:
@@ -509,7 +540,7 @@ def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_
     attempts = 0
     while True:
         attempts += 1
-        outcome = _run_once(payload, pdf_path, language, check_images, layers, cancel_token)
+        outcome = _run_once(payload, pdf_path, language, False, layers, cancel_token)    # the figures come apart
 
         if outcome.kind == "result":
             result = outcome.value
@@ -523,6 +554,8 @@ def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_
                                              error=error.get("error", "?")))
             elif attempts > 1:
                 _report("llm_error.title_recovered", t("llm_error.recovered", layers=_layers_text(layers)))
+            if isinstance(data, dict) and check_images and not data.get("analysis_error"):
+                data.update(run_figures_isolated(payload, pdf_path, language, layers, cancel_token))
             return tuple(result)
 
         if outcome.kind == "error":

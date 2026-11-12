@@ -15,16 +15,16 @@ STAGES = {
         "purpose": (55, "AI: wyszukiwanie celu pracy..."),
         "goal": (62, "AI: sprawdzanie realizacji celu..."),
         "summaries": (70, "AI: streszczanie rozdziałów i ocena treści..."),
-        "images": (80, "AI: analiza rysunków i wykresów..."),
-        "sota": (90, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
+        "sota": (80, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
+        "images": (90, "AI: analiza rysunków i wykresów..."),
         "language_review": (95, "AI: weryfikacja błędów językowych..."),
     },
     "en": {
         "purpose": (55, "AI: finding the thesis purpose..."),
         "goal": (62, "AI: checking whether the goal was met..."),
         "summaries": (70, "AI: summarising chapters and rating the content..."),
-        "images": (80, "AI: analysing figures and charts..."),
-        "sota": (90, "AI: rating the state-of-the-art chapter..."),
+        "sota": (80, "AI: rating the state-of-the-art chapter..."),
+        "images": (90, "AI: analysing figures and charts..."),
         "language_review": (95, "AI: verifying the language errors..."),
     },
 }
@@ -166,6 +166,116 @@ def run_language_review(matches, language="pl", cancel_token=None):
         cleanup_text_llm_instances()
 
 
+def no_figure_checks(language="pl", failed=False):
+    """The figure part of the result when the figures were not checked: switched off, or the checks failed."""
+    summary = build_image_summary([], language)
+    summary["analysis_failed"] = summary["analysis_failed"] or failed
+    return {"image_analysis": summary, "jakosc_obrazkow": [], "czcionki_obrazkow": [], "osie_wykresow": []}
+
+
+def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token=None):
+    """The figure part of the result: what the vision model found in the figures and charts."""
+    from analysis.modules.llm.results_log import log_results
+
+    _stage(language, "images", cancel_token)
+    analysis_failed = False
+
+    try:
+        from analysis.modules.llm.image_analysis.run_image import analyze_images
+
+        raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
+    except Exception:
+        logger.exception("Image consistency analysis failed")
+        raw_image_report = []
+        analysis_failed = True
+
+    image_summary_data = build_image_summary(raw_image_report, language)
+    check_cancelled(cancel_token)
+
+    cleanup_text_llm_instances()
+
+    try:
+        from analysis.modules.llm.image_analysis.image_quality_checker import (
+            get_full_image_quality_json,
+        )
+
+        quality_errors = get_full_image_quality_json(
+            doc_obj,
+            mapped_doc,
+            pdf_path,
+            verbose=False,
+            language=language,
+        )
+        quality_errors, failed = split_failed_checks(quality_errors or [])
+        analysis_failed = analysis_failed or failed
+    except Exception:
+        logger.exception("Image quality analysis failed")
+        quality_errors = []
+        analysis_failed = True
+
+    cleanup_text_llm_instances()
+    check_cancelled(cancel_token)
+
+    try:
+        from analysis.modules.llm.image_analysis.font_checker import (
+            get_font_consistency_report,
+        )
+
+        font_errors = get_font_consistency_report(
+            doc_obj,
+            mapped_doc,
+            verbose=False,
+            language=language,
+        )
+        font_errors, failed = split_failed_checks(font_errors or [])
+        analysis_failed = analysis_failed or failed
+    except Exception:
+        logger.exception("Image font analysis failed")
+        font_errors = []
+        analysis_failed = True
+
+    cleanup_text_llm_instances()
+    check_cancelled(cancel_token)
+
+    try:
+        from analysis.modules.llm.image_analysis.axis_checker import get_axis_report
+
+        axis_errors = get_axis_report(doc_obj, mapped_doc, language=language)
+        axis_errors, failed = split_failed_checks(axis_errors or [])
+        analysis_failed = analysis_failed or failed
+    except Exception:
+        logger.exception("Chart axis analysis failed")
+        axis_errors = []
+        analysis_failed = True
+
+    image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
+    cleanup_text_llm_instances()
+
+    log_results(
+        "Figures",
+        summary=image_summary_data,
+        quality_errors=quality_errors,
+        font_errors=font_errors,
+        axis_errors=axis_errors,
+    )
+    return {"image_analysis": image_summary_data, "jakosc_obrazkow": quality_errors,
+            "czcionki_obrazkow": font_errors, "osie_wykresow": axis_errors}
+
+
+def run_figures(doc_obj, pdf_path, language="pl", cancel_token=None):
+    """The figure checks alone, in their own AI process after the rest: when the vision model crashes there, the
+    results of the text are already safe."""
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
+
+    timer = StageTimer(logger, "LLM")
+    try:
+        timer.next("figures")
+        return run_figure_checks(doc_obj, PDFMapper().map_to_schema(doc_obj), pdf_path, language, cancel_token)
+    finally:
+        timer.finish()
+        cleanup_text_llm_instances()
+
+
 def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):
     """
     Run the LLM part of the analysis pipeline.
@@ -248,94 +358,6 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
 
         cleanup_text_llm_instances()
 
-        if check_images:
-            timer.next("figures")
-            _stage(language, "images", cancel_token)
-            analysis_failed = False
-
-            try:
-                from analysis.modules.llm.image_analysis.run_image import analyze_images
-
-                raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
-            except Exception:
-                logger.exception("Image consistency analysis failed")
-                raw_image_report = []
-                analysis_failed = True
-
-            image_summary_data = build_image_summary(raw_image_report, language)
-            check_cancelled(cancel_token)
-
-            cleanup_text_llm_instances()
-
-            try:
-                from analysis.modules.llm.image_analysis.image_quality_checker import (
-                    get_full_image_quality_json,
-                )
-
-                quality_errors = get_full_image_quality_json(
-                    doc_obj,
-                    mapped_doc,
-                    pdf_path,
-                    verbose=False,
-                    language=language,
-                )
-                quality_errors, failed = split_failed_checks(quality_errors or [])
-                analysis_failed = analysis_failed or failed
-            except Exception:
-                logger.exception("Image quality analysis failed")
-                quality_errors = []
-                analysis_failed = True
-
-            cleanup_text_llm_instances()
-            check_cancelled(cancel_token)
-
-            try:
-                from analysis.modules.llm.image_analysis.font_checker import (
-                    get_font_consistency_report,
-                )
-
-                font_errors = get_font_consistency_report(
-                    doc_obj,
-                    mapped_doc,
-                    verbose=False,
-                    language=language,
-                )
-                font_errors, failed = split_failed_checks(font_errors or [])
-                analysis_failed = analysis_failed or failed
-            except Exception:
-                logger.exception("Image font analysis failed")
-                font_errors = []
-                analysis_failed = True
-
-            cleanup_text_llm_instances()
-            check_cancelled(cancel_token)
-
-            try:
-                from analysis.modules.llm.image_analysis.axis_checker import get_axis_report
-
-                axis_errors = get_axis_report(doc_obj, mapped_doc, language=language)
-                axis_errors, failed = split_failed_checks(axis_errors or [])
-                analysis_failed = analysis_failed or failed
-            except Exception:
-                logger.exception("Chart axis analysis failed")
-                axis_errors = []
-                analysis_failed = True
-
-            image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
-            cleanup_text_llm_instances()
-        else:
-            image_summary_data = build_image_summary([])
-            quality_errors = []
-            font_errors = []
-            axis_errors = []
-
-        log_results(
-            "Figures",
-            summary=image_summary_data,
-            quality_errors=quality_errors,
-            font_errors=font_errors,
-            axis_errors=axis_errors,
-        )
         check_cancelled(cancel_token)
         timer.next("SOTA")
         _stage(language, "sota", cancel_token)
@@ -355,6 +377,12 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             r2=r2,
             r3=r3,
         )
+
+        if check_images:
+            timer.next("figures")
+            figures = run_figure_checks(doc_obj, mapped_doc, pdf_path, language, cancel_token)
+        else:
+            figures = no_figure_checks(language)
 
         score = get_overall_grade(
             purpose_score,
@@ -386,10 +414,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "r2": r2,
             "r3": r3,
             "content_grade": content_grade_dict,
-            "image_analysis": image_summary_data,
-            "jakosc_obrazkow": quality_errors,
-            "czcionki_obrazkow": font_errors,
-            "osie_wykresow": axis_errors,
+            **figures,
         }
 
         log_results("Final content grade", **content_grade_dict)
