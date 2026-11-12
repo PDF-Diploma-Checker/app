@@ -9,6 +9,7 @@ from PIL import Image
 
 from analysis.modules.llm import config
 from analysis.modules.llm.llama_factory import make_llama
+from common import gpu_check
 
 logger = logging.getLogger(__name__)
 
@@ -23,11 +24,42 @@ ALL_NUMBERS_PROMPT = "List all numbers printed anywhere in this image, separated
 PRINTED_MAX_TOKENS = 120
 LIST_MAX_TOKENS = 60
 MIN_READABLE_PIXELS = 150       # a shorter side below this holds no readable text, whatever the model says about it
+# Measured with Qwen2.5-VL 7B: 1.35 GB of projector weights and up to 1.4 GB more while it reads one image. llama.cpp
+# scales a big image down itself, so a smaller image hardly helps. A 4 GB card aborts the process.
+PROJECTOR_NEEDS_MB = 3000
 
 
 def too_small_to_read(image_bytes):
     with Image.open(io.BytesIO(image_bytes)) as image:
         return min(image.size) < MIN_READABLE_PIXELS
+
+
+class _ProjectorOnCpu:
+    """llama_cpp.mtmd_cpp for a handler whose projector stays on the processor. llama-cpp-python 0.3.16 always asks
+    for the GPU, also when the model itself runs on the processor."""
+
+    def __init__(self, module):
+        self._module = module
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+    def mtmd_init_from_file(self, path, model, params):
+        params.use_gpu = False
+        return self._module.mtmd_init_from_file(path, model, params)
+
+
+def _projector_place():
+    """Why the projector goes to the processor, None when it fits on the GPU. Asked once the model has loaded."""
+    if not config.N_GPU_LAYERS:
+        return "the model runs on the processor"
+    gpus = gpu_check.nvidia_gpus()
+    if not gpus:
+        return None                 # nvidia-smi does not answer: llama.cpp decides, as before
+    free_mb = gpus[0]["vram_gb"] * 1024 - gpus[0]["used_mb"]
+    if free_mb < PROJECTOR_NEEDS_MB:
+        return f"{free_mb:.0f} MB of video memory free, it needs {PROJECTOR_NEEDS_MB} MB"
+    return None
 
 
 class VisionEngine:
@@ -49,6 +81,11 @@ class VisionEngine:
                 n_gpu_layers=config.N_GPU_LAYERS,
                 verbose=False,
             )
+            on_cpu = _projector_place()
+            if on_cpu:
+                logger.info("%s: the image projector runs on the processor (%s): slower, but it does not abort",
+                            purpose, on_cpu)
+                self.chat_handler._mtmd_cpp = _ProjectorOnCpu(self.chat_handler._mtmd_cpp)
         except Exception as e:
             self.close()
             logger.exception("Failed to load the vision model from %s", model_path)
