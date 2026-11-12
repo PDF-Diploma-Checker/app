@@ -65,6 +65,53 @@ class DiagnosisTest(unittest.TestCase):
         self.assertEqual(llm_process._last_error_line(tail), "GGML_ASSERT(buf != NULL) failed")
 
 
+class FiguresApartTest(unittest.TestCase):
+    """The figures run in their own process after the text; a crash there costs only the figures."""
+
+    def setUp(self):
+        for name, value in (("_report", None), ("read_tail", ""), ("_gpu_facts", None)):
+            patcher = mock.patch.object(llm_process, name, return_value=value)
+            self.addCleanup(patcher.stop)
+            setattr(self, name, patcher.start())
+
+    def run_figures(self, outcomes, layers=8):
+        with mock.patch.object(llm_process, "_run_once", side_effect=outcomes) as run:
+            result = llm_process.run_figures_isolated(None, "x.pdf", "pl", layers)
+        return result, [call.args[4] for call in run.call_args_list]
+
+    def test_a_crash_is_checked_again_on_the_processor(self):
+        result, layers = self.run_figures([llm_process._Outcome("crash", -6, "Analiza obrazów"),
+                                           llm_process._Outcome("result", {"image_analysis": "ok"})])
+        self.assertEqual(result, {"image_analysis": "ok"})
+        self.assertEqual(layers, [8, 0])
+        self._report.assert_not_called()
+
+    def test_figures_that_crash_twice_are_marked_unchecked(self):
+        crash = llm_process._Outcome("crash", -6, "Analiza obrazów")
+        result, layers = self.run_figures([crash, crash])
+        self.assertTrue(result["image_analysis"]["analysis_failed"])
+        self.assertEqual(result["jakosc_obrazkow"], [])
+        self.assertEqual(layers, [8, 0])
+        self._report.assert_called_once()
+
+    def test_on_the_processor_there_is_no_second_attempt(self):
+        _, layers = self.run_figures([llm_process._Outcome("crash", -6, "")], layers=0)
+        self.assertEqual(layers, [0])
+
+    def test_the_text_keeps_its_results_and_gets_the_figures(self):
+        from types import SimpleNamespace
+
+        text = llm_process._Outcome("result", ({"content_grade": {"grade": 70}}, 70, "ok"))
+        figures = llm_process._Outcome("result", {"image_analysis": "checked"})
+        with mock.patch.object(llm_process, "_run_once", side_effect=[text, figures]) as run:
+            data, score, _ = llm_process.run_task_llm_isolated(SimpleNamespace(pages=[]), "x.pdf", "pl", True, True)
+        self.assertEqual(data, {"content_grade": {"grade": 70}, "image_analysis": "checked"})
+        self.assertEqual(score, 70)
+        first, second = run.call_args_list
+        self.assertFalse(first.args[3])                 # the text runs without the figures
+        self.assertEqual(second.kwargs["job"], "figures")
+
+
 @unittest.skipUnless(PDF.is_file(), "test PDF missing")
 class IsolationTest(unittest.TestCase):
     """Start the real child process and let it die like llama.cpp does."""
