@@ -39,11 +39,11 @@ def is_short_definition(text, text_language):
     Determines if the text has the structure of a short definition.
     """
 
-    if re.match(r'^[A-Z]{2,}\s+[–—\-−‐‑‒:]\s', text):
+    if re.match(r'^[A-Z]{2,}\s+[–—\-−‐‑‒:](?:\s|\s*(?=[^\W\d_]))', text):
         return True
     if re.match(r'^.{1,30}\s+to\s+', text):
         return True
-    match = re.match(r'^((\S+\s){1,4})[–—\-−‐‑‒:]\s', text)
+    match = re.match(r'^((\S+\s){1,4})[–—\-−‐‑‒:](?:\s|\s*(?=[^\W\d_]))', text)
     if match:
         prefix = match.group(1)
         return not has_verb(prefix, text_language)
@@ -59,7 +59,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
     quote_marks = {'"', '„', '”', '«', '»', '('}
     dash_chars = r'–—\-−‐‑‒'
     definition_search = re.compile(r'^[A-Z]+\s?\(.*?\)\s[' + dash_chars + r']\s')
-    definition_sep_pattern = re.compile(r'^(\S+(?:\s+\S+){0,3})\s+[' + dash_chars + r':]\s')
+    definition_sep_pattern = re.compile(r'^(\S+(?:\s+\S+){0,3})\s+[' + dash_chars + r':](?:\s|\s*(?=[^\W\d_]))')
     current_heading = ""
     list_count = 0
     for b in blocks:
@@ -161,10 +161,12 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                     lower_id.append(item.item_id)
                 else:
                     neutral_id.append(item.item_id)
-                end_char = item_text[-1]
-                if end_char in quote_close and len(item_text) >= 2:
-                    end_char = item_text[-2] if item_text[-2] not in quote_close else end_char
-                endings.append(end_char)
+                if not getattr(item, "ends_with_formula", False):
+                    end_char = item_text[-1]
+                    if end_char in quote_close and len(item_text) >= 2:
+                        end_char = item_text[-2] if item_text[-2] not in quote_close else end_char
+                    endings.append(end_char)
+            dominant_ending = None
             if endings:
                 dominant_ending = max(sorted(set(endings)), key=endings.count)
 
@@ -172,7 +174,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
             for item in block.items:
                 if item.item_id not in definition_id and item.item_id not in quote_id:
                     item_text = re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', item.text)).strip()
-                    has_separator = bool(re.search(r'\s[' + dash_chars + r':]\s', item_text))
+                    has_separator = bool(re.search(r'\s[' + dash_chars + r':](?:\s|\s*(?=[^\W\d_]))', item_text))
                     if not has_separator:
                         all_definition_like = False
                         break
@@ -237,6 +239,8 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                 if item.item_id in inconsistent_list_ids:
                     continue
                 if item.item_id in marker_error_ids:
+                    continue
+                if getattr(item, "ends_with_formula", False):
                     continue
                 last_item = False
                 second_to_last = False

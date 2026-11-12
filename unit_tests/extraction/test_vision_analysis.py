@@ -150,5 +150,35 @@ class MemoryTest(unittest.TestCase):
         handler._exit_stack.close.assert_called_once()
 
 
+class ProjectorPlaceTest(unittest.TestCase):
+    def load(self, layers=8, gpus=()):
+        handler = MagicMock()
+        with patch.object(vision_engine, "Qwen25VLChatHandler", return_value=handler), \
+                patch.object(vision_engine, "make_llama", return_value=MagicMock()), \
+                patch.object(vision_engine.config, "N_GPU_LAYERS", layers), \
+                patch.object(vision_engine.gpu_check, "nvidia_gpus", return_value=list(gpus)):
+            vision_engine.VisionEngine("test")
+        return isinstance(handler._mtmd_cpp, vision_engine._ProjectorOnCpu)
+
+    def test_a_small_card_keeps_the_projector_on_the_processor(self):
+        # an RTX 3050 Laptop with the model loaded: about 2 GB of 4 GB free
+        self.assertTrue(self.load(gpus=[{"vram_gb": 4.0, "used_mb": 2000}]))
+
+    def test_a_big_card_takes_the_projector(self):
+        self.assertFalse(self.load(gpus=[{"vram_gb": 16.0, "used_mb": 2000}]))
+
+    def test_the_processor_keeps_it_when_the_model_is_there(self):
+        self.assertTrue(self.load(layers=0, gpus=[{"vram_gb": 16.0, "used_mb": 0}]))
+
+    def test_without_nvidia_smi_llama_cpp_decides(self):
+        self.assertFalse(self.load(gpus=[]))
+
+    def test_the_projector_is_asked_for_without_the_gpu(self):
+        module, params = MagicMock(), MagicMock(use_gpu=True)
+        vision_engine._ProjectorOnCpu(module).mtmd_init_from_file(b"mmproj", "model", params)
+        self.assertFalse(params.use_gpu)
+        module.mtmd_init_from_file.assert_called_once_with(b"mmproj", "model", params)
+
+
 if __name__ == "__main__":
     unittest.main()
