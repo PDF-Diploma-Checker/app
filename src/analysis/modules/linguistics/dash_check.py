@@ -274,8 +274,7 @@ def dash_check(blocks, main_font=None):
         #daty i zakresy
         if text_language == 'en':
             # en: półpauza bez spacji (1990–2000).
-            # (?<!\w): liczba nie może być doklejona do litery/cyfry (SG90-30 to oznaczenie, nie zakres)
-            date_error_regex = r'(?<!\w)(\d+\s*[–-]\s*\d+|\d+-\d+)'
+            date_error_regex = r'(?<![^\s(\[„"“\'])(\d+(?:[.,]\d+)*\s*[–-]\s*\d+(?:[.,]\d+)*)(?=[\s.,;:!?)\]%”"\']|$)(?![.,]\d)'
             for m in re.finditer(date_error_regex, text):
                 content = m.group()
                 if '-' in content or ' ' in content:
