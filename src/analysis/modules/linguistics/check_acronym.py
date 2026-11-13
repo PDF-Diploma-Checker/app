@@ -122,7 +122,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                 if roman_numeral.match(clean_text):
                     prev_word = word
                     continue
-                if typo_check(clean_text):
+                if typo_check(clean_text, use_whitelist=False):
                         prev_word = word
                         continue
                 if block.type == "heading":

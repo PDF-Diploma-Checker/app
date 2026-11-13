@@ -5,7 +5,7 @@ from pathlib import Path
 import language_tool_python
 from .linguistics_types import Error_type
 from analysis.extraction.linguistics_conversion.schema import *
-from .helpers import get_match_info, morf, spell, nlp_pl
+from .helpers import get_match_info, morf, spell, nlp_pl, WHITELIST_ONLY_WORDS
 from .decision_log import dropped
 import re
 import string
@@ -249,13 +249,21 @@ MIN_LOANWORD_STEM = 4
 SHORT_LOANWORD_STEM = 5
 MIN_SHORT_STEM_FREQUENCY = 1000
 
-def is_known_word(word):
+def in_english_dictionary(word, use_whitelist=True):
+    '''Checks if lowercase word is in the English (pyspellchecker) dictionary. With use_whitelist=False
+    words added only by word_whitelist.txt are treated as unknown.'''
+    return word in spell and (use_whitelist or word not in WHITELIST_ONLY_WORDS)
+
+def is_known_word(word, use_whitelist=True):
     '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
     if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
         return True
-    return not spell.unknown(word.lower().split())
+    words = word.lower().split()
+    if not use_whitelist and any(w in WHITELIST_ONLY_WORDS for w in words):
+        return False
+    return not spell.unknown(words)
 
-def is_polish_inflected_loanword(word):
+def is_polish_inflected_loanword(word, use_whitelist=True):
     '''Checks if word is a known English word with a Polish ending, e.g. "rankowania", "transformerowym".
     Stems are checked only in the English dictionary - Polish forms are already recognized by Morfeusz,
     and Polish stems would accept typos (e.g. "progam" + "owania").'''
@@ -271,7 +279,7 @@ def is_polish_inflected_loanword(word):
             if len(candidate) < SHORT_LOANWORD_STEM:
                 if spell[candidate] >= MIN_SHORT_STEM_FREQUENCY:
                     return True
-            elif candidate in spell:
+            elif in_english_dictionary(candidate, use_whitelist):
                 return True
     return False
 
@@ -306,9 +314,10 @@ def predicative_adjective_reason(message, contents, offset, length):
         return "coordinated with an adjective"
     return None
 
-def typo_check(typo_text):
-    '''Double check typos found by language analysis with Polish and English dictionaries.'''
+def typo_check(typo_text, use_whitelist=True):
+    '''Double check typos found by language analysis with Polish and English dictionaries.
+    use_whitelist=False ignores word_whitelist.txt (used by check_acronym).'''
     # Każde słowo osobno - Morfeusz dla całej frazy zwraca interpretacje każdego słowa,
     # więc jedno znane słowo ukrywałoby literówkę w pozostałych
     words = typo_text.split()
-    return bool(words) and all(is_known_word(w) or is_polish_inflected_loanword(w) for w in words)
+    return bool(words) and all(is_known_word(w, use_whitelist) or is_polish_inflected_loanword(w, use_whitelist) for w in words)
