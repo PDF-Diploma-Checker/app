@@ -112,6 +112,7 @@ _TEXTS = {
         "details": "Szczegóły",
         "unknown": "Nieznany",
         "blurry": "Model wizyjny uznał, że obraz jest niewyraźny lub rozmazany.",
+        "unverified_values": "Nie potwierdzono wartości odczytanych z rysunku; nie oceniono zgodności z tekstem.",
         "unreadable_figure": "Rysunek jest zbyt nieczytelny, by porównać go z tekstem.",
         "mismatch": "{element}: w tekście {text}, na rysunku {image}",
         "fonts_inconsistent": "Niespójne wielkości czcionek na wykresie/obrazku.",
@@ -134,6 +135,7 @@ _TEXTS = {
         "details": "Details",
         "unknown": "Unknown",
         "blurry": "The vision model found the image blurry or unclear.",
+        "unverified_values": "The values read from the figure could not be verified; consistency with the text was not assessed.",
         "unreadable_figure": "The figure is too unclear to compare it with the text.",
         "mismatch": "{element}: {text} in the text, {image} in the figure",
         "fonts_inconsistent": "Inconsistent font sizes in the chart/image.",
@@ -218,7 +220,7 @@ def scale_problem(ticks, is_bar_chart):
 def consistency_verdict(verification):
     """Normalize the consistency model's answer to 'True', 'False', or 'Error' when it gave no usable verdict."""
     value = str(verification.get("poprawnosc_danych", "")).strip().lower()
-    return {"true": "True", "false": "False"}.get(value, "Error")
+    return {"true": "True", "false": "False", "unreadable": "Unreadable"}.get(value, "Error")
 
 
 def _area(img):

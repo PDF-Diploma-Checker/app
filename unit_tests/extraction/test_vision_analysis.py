@@ -51,7 +51,7 @@ class VerdictTest(unittest.TestCase):
     def test_value_not_printed_in_the_figure_is_no_mismatch(self):
         """A chart without values: the model made up 100 when reading it, and the text gives 40 GB."""
         answer = {"niezgodnosci": [{"element": "A", "w_tekscie": "40 GB", "na_rysunku": "100"}]}
-        self.assertEqual(verdict_from_answer(answer, printed=[])["poprawnosc_danych"], "True")
+        self.assertEqual(verdict_from_answer(answer, printed=[])["poprawnosc_danych"], "Unreadable")
 
     def test_printed_value_stays_a_mismatch(self):
         answer = {"niezgodnosci": [{"element": "tekst", "w_tekscie": "40%", "na_rysunku": "70%"},
@@ -81,15 +81,15 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(self._verdict("0,4–0,6", "0.8"), "False")
 
     def test_words_are_not_values(self):
-        self.assertEqual(self._verdict("odrzucone", "0.8"), "True")
+        self.assertEqual(self._verdict("odrzucone", "0.8"), "Unreadable")
 
     def test_value_the_paragraph_does_not_give_is_no_mismatch(self):
-        self.assertEqual(self._verdict("75%", "68%", paragraph="Rysunek 1: zstd osiągnął 68%."), "True")
+        self.assertEqual(self._verdict("75%", "68%", paragraph="Rysunek 1: zstd osiągnął 68%."), "Unreadable")
         self.assertEqual(self._verdict("75%", "68%", paragraph="Rysunek 1: zstd osiągnął 75%."), "False")
 
     def test_number_of_an_axis_scale_is_not_a_printed_value(self):
         printed = [0, 5000, 10000, 15000, 20000, 0, 0.2, 0.4, 0.6, 0.8, 1.0]
-        self.assertEqual(self._verdict("0.7", "1.0", printed=printed), "True")
+        self.assertEqual(self._verdict("0.7", "1.0", printed=printed), "Unreadable")
 
     def test_chart_read_from_its_labels_is_compared(self):
         self.assertTrue(values_are_printed("Czas\ngzip: 180 ms\nlz4: 20 ms", [180, 70, 20]))
@@ -100,6 +100,20 @@ class VerdictTest(unittest.TestCase):
 
     def test_no_list_of_numbers_keeps_the_comparison(self):
         self.assertTrue(values_are_printed("A: 1", None))
+
+    def test_ratio_is_not_compared_as_a_count(self):
+        self.assertEqual(self._verdict("37/80", "35"), "Unreadable")
+
+    def test_hallucinated_figure_value_is_not_a_discrepancy(self):
+        self.assertEqual(self._verdict("0.81", "0", paragraph="Wynik 0.81", image_data="kontakt: 0.8"), "Unreadable")
+
+    def test_unverified_reading_is_not_reported_as_correct(self):
+        from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
+        checker = object.__new__(ConsistencyChecker)
+        checker.llm = MagicMock()
+        result = checker.check("Wynik 0.7", "A: 0.8", printed=[])
+        self.assertEqual(result["poprawnosc_danych"], "Unreadable")
+        checker.llm.create_chat_completion.assert_not_called()
 
     def test_answer_without_the_list_is_an_error(self):
         self.assertEqual(verdict_from_answer({"cos": 1})["poprawnosc_danych"], "Error")
