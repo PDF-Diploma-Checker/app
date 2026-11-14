@@ -25,7 +25,7 @@ VERSION_FILE = ROOT / "src" / "common" / "version.py"
 VARIANTS = ("base", "cpu", "gpu")
 OWN_PACKAGES = ("analysis", "app", "common", "ui")
 LAUNCHER = "src/app/launcher.py"
-IGNORED = ("tools/", "unit_tests/", "docs/", ".github/", "README.md", "setup_guide.md")
+IGNORED = ("dictionary_service/", "tools/", "unit_tests/", "docs/", ".github/", "README.md", "setup_guide.md")
 VERSION_ONLY = ("pyproject.toml", "uv.lock")
 
 

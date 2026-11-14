@@ -9,7 +9,8 @@ Checks that:
   ("serwer–klient", "maj–czerwiec", "1990–2000") nor in chains ("serwer–klient–ESP32"),
 - em dash without spaces is flagged also next to Polish letters ("był—wtedy"),
 - hyphen in a word range ("maj-czerwiec", "pon-pt") is flagged, hyphen in a compound word is not,
-- date/number ranges glued to a letter ("SG90-30", "SG90 - 30") are not flagged, plain ones still are,
+- date/number ranges glued to a letter ("SG90-30", "SG90 - 30") or inside a model name ("Llama-2-70B")
+  are not flagged, plain ones still are and decimal ranges are flagged whole ("0.5-1.5"),
 - TestGeneratedPdfs verifies full pipeline run (extraction -> analysis) on test PDFs
   built by different LaTeX compilers (pdflatex, xelatex, lualatex).
 
@@ -220,6 +221,16 @@ class TestDateRangeGluedToLetter(unittest.TestCase):
     def test_en_plain_range_flagged(self):
         matches = run_check("Data were collected in 1990-2000 in Poland.", language="en")
         self.assertEqual(with_message(matches, MSG_DATE_EN), ["1990-2000"])
+
+    def test_en_model_name_with_dashes_not_flagged(self):
+        # before a2ab56a the regex took "2-70" and "5-7" out of the model names as ranges
+        matches = run_check("We fine-tuned Llama-2-70B and Qwen-2.5-7B models.", language="en")
+        self.assertEqual(with_message(matches, MSG_DATE_EN), [])
+
+    def test_en_decimal_range_flagged_whole(self):
+        # before a2ab56a only "5-1" was flagged, the error now covers the whole decimal range
+        matches = run_check("The voltage was 0.5-1.5 V.", language="en")
+        self.assertEqual(with_message(matches, MSG_DATE_EN), ["0.5-1.5"])
 
 
 class TestGeneratedPdfs(unittest.TestCase):

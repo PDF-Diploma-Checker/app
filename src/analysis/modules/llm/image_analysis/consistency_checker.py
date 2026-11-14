@@ -18,7 +18,7 @@ Akapit z pracy:
 Sprawdź każdą wartość liczbową podaną w akapicie dla elementu, który występuje też w danych z rysunku.
 Niezgodność to tylko sytuacja, gdy ten sam element ma w akapicie inną wartość niż na rysunku.
 Nie jest niezgodnością: informacja, której nie ma na rysunku, wniosek, opis zależności, zaokrąglenie ani inna kolejność.
-Zwróć JSON z kluczem "niezgodnosci": lista obiektów {"element": nazwa, "w_tekscie": wartość z akapitu razem z jednostką, "na_rysunku": wartość z rysunku razem z jednostką}, pusta gdy wszystko się zgadza.""",
+Zwróć JSON z kluczem "niezgodnosci": lista obiektów {"element": nazwa, "w_tekscie": wartość z akapitu razem z jednostką, "na_rysunku": wartość z rysunku razem z jednostką}, pusta gdy wszystko się zgadza. Do każdej niezgodności dodaj text_quote oraz image_quote: dosłowne fragmenty odpowiednio akapitu i danych z rysunku, zawierające nazwę elementu i jego wartość. Nie porównuj wartości z różnych elementów, serii, osi ani jednostek.""",
     "en": """Data read from the figure:
 {image_data}
 
@@ -28,7 +28,7 @@ Paragraph from the thesis:
 Check every numeric value the paragraph gives for an item that also appears in the data from the figure.
 A mismatch is only when the same item has a different value in the paragraph than in the figure.
 These are not mismatches: information missing from the figure, a conclusion, a description of a trend, rounding, a different order.
-Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_tekscie": value from the paragraph with its unit, "na_rysunku": value from the figure with its unit}, empty when everything agrees.""",
+Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_tekscie": value from the paragraph with its unit, "na_rysunku": value from the figure with its unit}, empty when everything agrees. Include text_quote and image_quote for each mismatch: verbatim excerpts from the paragraph and figure data respectively, containing the item name and its value. Never compare different items, series, axes or units.""",
 }
 
 
@@ -74,7 +74,7 @@ def _same_value(in_text, in_image):
     if len(image_numbers) != 1:
         return False
     image, image_places = image_numbers[0]
-    if len(text_numbers) == 2:
+    if len(text_numbers) == 2 and re.search(r"\d\s*[–—-]\s*\d", str(in_text)):
         low, high = sorted(number for number, _ in text_numbers)
         return low <= image <= high
     if len(text_numbers) != 1:
@@ -116,15 +116,29 @@ def values_are_printed(image_data, printed):
     return sum(number in labels for number in read) * 2 > len(read)
 
 
-def _is_comparable(mismatch, paragraph):
+def _is_comparable(mismatch, paragraph, image_data=None):
     """Both values must be numbers and the one from the text must really be in the paragraph."""
     in_text, in_image = _numbers(mismatch.get("w_tekscie", "")), _numbers(mismatch.get("na_rysunku", ""))
     if not in_text or not in_image:
         return False
+    # A pair such as 37/80 is a ratio, not a range or a single measured value.
+    if len(in_image) != 1 or (len(in_text) != 1 and not re.search(r"\d\s*[–—-]\s*\d", str(mismatch.get("w_tekscie", "")))):
+        return False
+    if image_data is not None:
+        # The model must point to evidence on both sides, rather than borrow an
+        # unrelated number from another series or the surrounding paragraph.
+        for key, source, numbers in (("text_quote", paragraph, in_text), ("image_quote", image_data, in_image)):
+            quote = mismatch.get(key)
+            if not isinstance(quote, str) or not quote.strip() or source is None:
+                return False
+            if " ".join(quote.split()).casefold() not in " ".join(str(source).split()).casefold():
+                return False
+            if not {n for n, _ in numbers} <= {n for n, _ in _numbers(quote)}:
+                return False
     return paragraph is None or {n for n, _ in in_text} <= {n for n, _ in _numbers(paragraph)}
 
 
-def verdict_from_answer(answer, language="pl", printed=None, paragraph=None):
+def verdict_from_answer(answer, language="pl", printed=None, paragraph=None, image_data=None):
     """Turn the model's answer into {poprawnosc_danych, bledy}. The model also lists items whose two values are equal,
     so the verdict is decided here from the values and not taken from the model. `printed` holds the numbers printed
     in the image: a chart without values gets values made up when it is read, and those prove nothing against the text."""
@@ -133,7 +147,7 @@ def verdict_from_answer(answer, language="pl", printed=None, paragraph=None):
         return {"poprawnosc_danych": "Error", "bledy": "None"}
     real = [
         m for m in mismatches
-        if isinstance(m, dict) and _is_comparable(m, paragraph)
+        if isinstance(m, dict) and _is_comparable(m, paragraph, image_data)
         and not _same_value(m.get("w_tekscie", ""), m.get("na_rysunku", ""))
     ]
     guessed = [m for m in real if not _is_printed(m.get("na_rysunku", ""), printed)]
@@ -141,6 +155,8 @@ def verdict_from_answer(answer, language="pl", printed=None, paragraph=None):
         logger.info("Dropped mismatches with values not printed in the figure: %r", guessed)
     real = [m for m in real if m not in guessed]
     if not real:
+        if guessed or any(isinstance(m, dict) and not _is_comparable(m, paragraph, image_data) for m in mismatches):
+            return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}
         return {"poprawnosc_danych": "True", "bledy": "None"}
     lines = [
         image_text(language, "mismatch", element=m.get("element", "?"), text=m.get("w_tekscie", "?"), image=m.get("na_rysunku", "?"))
@@ -171,7 +187,7 @@ class ConsistencyChecker:
     def check(self, paragraph, image_data, language="pl", printed=None):
         if not values_are_printed(image_data, printed):
             logger.info("Figure not compared, its values are not printed in it: %r", image_data)
-            return {"poprawnosc_danych": "True", "bledy": "None"}
+            return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}
 
         template = _PROMPTS.get(language, _PROMPTS["pl"])
         prompt = template.replace("{image_data}", str(image_data)).replace("{paragraph}", str(paragraph))
@@ -193,7 +209,7 @@ class ConsistencyChecker:
         result_text = response["choices"][0]["message"]["content"]
 
         try:
-            return verdict_from_answer(json.loads(result_text), language, printed, paragraph)
+            return verdict_from_answer(json.loads(result_text), language, printed, paragraph, image_data)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
             return {"poprawnosc_danych": "Error", "bledy": "None"}

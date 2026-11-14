@@ -1,3 +1,4 @@
+from common import shared_dictionary
 import atexit
 import os
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 import language_tool_python
 from .linguistics_types import Error_type
 from analysis.extraction.linguistics_conversion.schema import *
-from .helpers import get_match_info, morf, spell, nlp_pl
+from .helpers import get_match_info, morf, spell, nlp_pl, WHITELIST_ONLY_WORDS
 from .decision_log import dropped
 import re
 import string
@@ -162,36 +163,34 @@ def language_tool_analisys(blocks):
                         continue
                     elif match.category == "SYNTAX" and len(word.split()) > 1:
                         # a misspelled verb looks like a sentence without one, and this finding hides the typo itself
-                        other_tool, messages = (tool_en, polish_messages) if text_language == 'pl' else (tool_pl, english_messages)
-                        typos = [m for m in other_tool.check(word) if m.category == "TYPOS" and not typo_check(m.matched_text)]
-                        for typo in typos:
-                            typo.sentence = match.sentence
-                            typo.offset += match.offset
-                            typo.message = messages["TYPOS"]
+                        primary_tool = tool_pl if text_language == 'pl' else tool_en
+                        other_tool = tool_en if text_language == 'pl' else tool_pl
+                        typos = []
+                        span = contents[match.offset:match.offset + match.error_length]
+                        for token in re.finditer(r"[^\W\d_]+(?:[-’'][^\W\d_]+)*", span):
+                            if typo_check(token.group()):
+                                continue
+                            for typo in primary_tool.check(token.group()):
+                                if typo.category != "TYPOS":
+                                    continue
+                                if not other_tool.check(typo.matched_text):
+                                    continue
+                                typo.sentence = match.sentence
+                                typo.offset += match.offset + token.start()
+                                typos.append(typo)
                         new_matches.extend(typos)
                         if not typos:
                             dropped("a whole sentence without a misspelled word", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
-                    elif text_language == 'pl':
-                        en_matches = tool_en.check(word)
-                        for en_match in en_matches:
-                            en_match.sentence = match.sentence
-                            en_match.offset += match.offset
-                            en_match.message = match.message
-                        new_matches.extend(en_matches)
-                        if not en_matches:
-                            dropped("correct in English", match.category, match.rule_id, contents, match.offset, match.error_length, block)
-                        continue
                     else:
-                        pl_matches = tool_pl.check(word)
-                        for pl_match in pl_matches:
-                            pl_match.sentence = match.sentence
-                            pl_match.offset += match.offset
-                            pl_match.message = match.message
-                        new_matches.extend(pl_matches)
-                        if not pl_matches:
-                            dropped("correct in Polish", match.category, match.rule_id, contents, match.offset, match.error_length, block)
-                        continue
+                        # The other language is a veto for intentional foreign words, not
+                        # the source of a replacement diagnosis or its suggestions.
+                        other_tool = tool_en if text_language == 'pl' else tool_pl
+                        if not other_tool.check(word):
+                            other_language = "English" if text_language == 'pl' else "Polish"
+                            dropped(f"correct in {other_language}", match.category, match.rule_id,
+                                    contents, match.offset, match.error_length, block)
+                            continue
                 new_matches.append(match)
 
             for m in new_matches:
@@ -249,13 +248,23 @@ MIN_LOANWORD_STEM = 4
 SHORT_LOANWORD_STEM = 5
 MIN_SHORT_STEM_FREQUENCY = 1000
 
-def is_known_word(word):
+def in_english_dictionary(word, use_whitelist=True):
+    '''Checks if lowercase word is in the English (pyspellchecker) dictionary. With use_whitelist=False
+    words added only by word_whitelist.txt are treated as unknown.'''
+    return word in spell and (use_whitelist or word not in WHITELIST_ONLY_WORDS)
+
+def is_known_word(word, use_whitelist=True):
     '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
+    if shared_dictionary.contains(word):
+        return True
     if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
         return True
-    return not spell.unknown(word.lower().split())
+    words = word.lower().split()
+    if not use_whitelist and any(w in WHITELIST_ONLY_WORDS for w in words):
+        return False
+    return not spell.unknown(words)
 
-def is_polish_inflected_loanword(word):
+def is_polish_inflected_loanword(word, use_whitelist=True):
     '''Checks if word is a known English word with a Polish ending, e.g. "rankowania", "transformerowym".
     Stems are checked only in the English dictionary - Polish forms are already recognized by Morfeusz,
     and Polish stems would accept typos (e.g. "progam" + "owania").'''
@@ -271,7 +280,7 @@ def is_polish_inflected_loanword(word):
             if len(candidate) < SHORT_LOANWORD_STEM:
                 if spell[candidate] >= MIN_SHORT_STEM_FREQUENCY:
                     return True
-            elif candidate in spell:
+            elif in_english_dictionary(candidate, use_whitelist):
                 return True
     return False
 
@@ -306,9 +315,10 @@ def predicative_adjective_reason(message, contents, offset, length):
         return "coordinated with an adjective"
     return None
 
-def typo_check(typo_text):
-    '''Double check typos found by language analysis with Polish and English dictionaries.'''
+def typo_check(typo_text, use_whitelist=True):
+    '''Double check typos found by language analysis with Polish and English dictionaries.
+    use_whitelist=False ignores word_whitelist.txt (used by check_acronym).'''
     # Każde słowo osobno - Morfeusz dla całej frazy zwraca interpretacje każdego słowa,
     # więc jedno znane słowo ukrywałoby literówkę w pozostałych
     words = typo_text.split()
-    return bool(words) and all(is_known_word(w) or is_polish_inflected_loanword(w) for w in words)
+    return bool(words) and all(is_known_word(w, use_whitelist) or is_polish_inflected_loanword(w, use_whitelist) for w in words)
