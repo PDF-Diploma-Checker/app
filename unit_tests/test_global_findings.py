@@ -11,7 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_OPENGL", "software")
 
 import fitz
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QToolButton
 from common.findings import NUMBERING_CATEGORIES, finding_kind
 from ui.i18n import set_locale
 from ui.report_panel import build_report_panel
@@ -42,6 +43,11 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Page orientation is incorrect"}), "page")
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Używany rozmiar czcionki (10)"}), "global")
 
+    def test_word_level_config_findings_mentioning_fonts_stay_on_page(self):
+        for comment in ("Incorrect font for this word", "Niepoprawna czcionka w tym słowie"):
+            with self.subTest(comment=comment):
+                self.assertEqual(finding_kind({"category": "config_file", "comment": comment}), "page")
+
     def test_all_numbering_categories_are_global(self):
         for category in NUMBERING_CATEGORIES:
             with self.subTest(category=category):
@@ -51,12 +57,16 @@ class GlobalFindingsTest(unittest.TestCase):
         original = copy.deepcopy(self.errors)
         panel, _ = build_report_panel({}, lambda: None, self.errors)
         details = next(label for label in panel.findChildren(QLabel) if "Example <Book>" in label.text())
-        toggle = next(button for button in panel.findChildren(QPushButton) if button.isCheckable())
+        toggle = next(button for button in panel.findChildren(QToolButton) if button.isCheckable())
         self.assertTrue(details.isHidden())
+        self.assertEqual(toggle.toolButtonStyle(), Qt.ToolButtonTextBesideIcon)
+        self.assertEqual(toggle.arrowType(), Qt.RightArrow)
         toggle.click()
         self.assertFalse(details.isHidden())
+        self.assertEqual(toggle.arrowType(), Qt.DownArrow)
         toggle.click()
         self.assertTrue(details.isHidden())
+        self.assertEqual(toggle.arrowType(), Qt.RightArrow)
         texts = [button.text() for button in panel.findChildren(QPushButton)]
         self.assertTrue(any("1 (1)" in text for text in texts))
         self.assertFalse(any("4 (1)" in text for text in texts))

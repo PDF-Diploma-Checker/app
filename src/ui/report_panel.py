@@ -13,7 +13,7 @@ from common.findings import finding_kind, finding_text
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import icons, styles
@@ -297,7 +297,10 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
             root.addWidget(_section(t("main." + key)))
             card, lay = _card()
             if kind == "bibliography":
-                toggle = QPushButton(t("main.bibliography_details"))
+                toggle = QToolButton()
+                toggle.setText(t("main.bibliography_details"))
+                toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+                toggle.setArrowType(Qt.RightArrow)
                 toggle.setCheckable(True)
                 toggle.setCursor(Qt.PointingHandCursor)
                 lay.addWidget(toggle)
@@ -307,6 +310,9 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                 details.setTextInteractionFlags(Qt.TextSelectableByMouse)
                 details.hide()
                 toggle.toggled.connect(details.setVisible)
+                toggle.toggled.connect(
+                    lambda expanded, button=toggle: button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+                )
                 lay.addWidget(details)
             else:
                 for item in items:
