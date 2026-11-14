@@ -35,7 +35,21 @@ class ErrorMarker(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(styles.ERROR_MARKER_STYLE)
         self.setText("!")
+        if self.data.get("category") == "TYPOS":
+            self.setToolTip("Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo")
         self.clicked.connect(self.show_details)
+        if self.data.get("category") == "TYPOS":
+            self.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.customContextMenuRequested.connect(self.proposal_menu)
+
+    def proposal_menu(self, position):
+        if self.data.get("category") != "TYPOS":
+            return
+        from .dictionary_proposal import ProposalDialog, TEXT
+        menu = QMenu(self)
+        action = menu.addAction(TEXT.get(self.lang, TEXT['pl'])[0])
+        action.triggered.connect(lambda: ProposalDialog(self, self.lang).exec())
+        menu.exec(self.mapToGlobal(position))
 
     def show_details(self):
         """Displays a formatted tooltip with details about the error"""
@@ -51,6 +65,8 @@ class ErrorMarker(QPushButton):
         if tekst and str(tekst).strip() not in ["[Brak tekstu]", "[No text]", ""]:
             info += f"<b>{t['refers']}</b> <i>{tekst}</i>"
 
+        if self.data.get("category") == "TYPOS":
+            info += "<br><b>" + ("Right-click this marker to propose a correct word." if self.lang == "en" else "Kliknij znacznik prawym przyciskiem, aby zaproponować poprawne słowo.") + "</b>"
         QToolTip.showText(self.mapToGlobal(QPoint(20, 0)), info)
 
 class CommentMarker(QPushButton):

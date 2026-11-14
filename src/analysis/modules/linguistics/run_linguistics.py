@@ -52,6 +52,8 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
     '''Starting point of linguistic analysis. This function runs all of the linguistics functions,
       returns matches list and senetence analysis statistics.'''
     
+    from common import shared_dictionary
+    shared_dictionary.sync()
     logger.info("Starting linguistic analysis")
     check_first_person = True
     check_bibtex = True

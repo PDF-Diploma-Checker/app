@@ -1,3 +1,4 @@
+from common import shared_dictionary
 import atexit
 import os
 from pathlib import Path
@@ -254,6 +255,8 @@ def in_english_dictionary(word, use_whitelist=True):
 
 def is_known_word(word, use_whitelist=True):
     '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
+    if shared_dictionary.contains(word):
+        return True
     if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
         return True
     words = word.lower().split()
