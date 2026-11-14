@@ -18,7 +18,7 @@ Akapit z pracy:
 Sprawdź każdą wartość liczbową podaną w akapicie dla elementu, który występuje też w danych z rysunku.
 Niezgodność to tylko sytuacja, gdy ten sam element ma w akapicie inną wartość niż na rysunku.
 Nie jest niezgodnością: informacja, której nie ma na rysunku, wniosek, opis zależności, zaokrąglenie ani inna kolejność.
-Zwróć JSON z kluczem "niezgodnosci": lista obiektów {"element": nazwa, "w_tekscie": wartość z akapitu razem z jednostką, "na_rysunku": wartość z rysunku razem z jednostką}, pusta gdy wszystko się zgadza.""",
+Zwróć JSON z kluczem "niezgodnosci": lista obiektów {"element": nazwa, "w_tekscie": wartość z akapitu razem z jednostką, "na_rysunku": wartość z rysunku razem z jednostką}, pusta gdy wszystko się zgadza. Do każdej niezgodności dodaj text_quote oraz image_quote: dosłowne fragmenty odpowiednio akapitu i danych z rysunku, zawierające nazwę elementu i jego wartość. Nie porównuj wartości z różnych elementów, serii, osi ani jednostek.""",
     "en": """Data read from the figure:
 {image_data}
 
@@ -28,7 +28,7 @@ Paragraph from the thesis:
 Check every numeric value the paragraph gives for an item that also appears in the data from the figure.
 A mismatch is only when the same item has a different value in the paragraph than in the figure.
 These are not mismatches: information missing from the figure, a conclusion, a description of a trend, rounding, a different order.
-Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_tekscie": value from the paragraph with its unit, "na_rysunku": value from the figure with its unit}, empty when everything agrees.""",
+Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_tekscie": value from the paragraph with its unit, "na_rysunku": value from the figure with its unit}, empty when everything agrees. Include text_quote and image_quote for each mismatch: verbatim excerpts from the paragraph and figure data respectively, containing the item name and its value. Never compare different items, series, axes or units.""",
 }
 
 
@@ -124,8 +124,17 @@ def _is_comparable(mismatch, paragraph, image_data=None):
     # A pair such as 37/80 is a ratio, not a range or a single measured value.
     if len(in_image) != 1 or (len(in_text) != 1 and not re.search(r"\d\s*[–—-]\s*\d", str(mismatch.get("w_tekscie", "")))):
         return False
-    if image_data is not None and not {n for n, _ in in_image} <= {n for n, _ in _numbers(image_data)}:
-        return False
+    if image_data is not None:
+        # The model must point to evidence on both sides, rather than borrow an
+        # unrelated number from another series or the surrounding paragraph.
+        for key, source, numbers in (("text_quote", paragraph, in_text), ("image_quote", image_data, in_image)):
+            quote = mismatch.get(key)
+            if not isinstance(quote, str) or not quote.strip() or source is None:
+                return False
+            if " ".join(quote.split()).casefold() not in " ".join(str(source).split()).casefold():
+                return False
+            if not {n for n, _ in numbers} <= {n for n, _ in _numbers(quote)}:
+                return False
     return paragraph is None or {n for n, _ in in_text} <= {n for n, _ in _numbers(paragraph)}
 
 
