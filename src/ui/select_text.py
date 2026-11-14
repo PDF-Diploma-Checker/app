@@ -7,6 +7,8 @@ from PySide6.QtPdfWidgets import QPdfView
 import os
 import sys
 
+from common.findings import finding_kind
+
 from . import styles
 from .i18n import t
 
@@ -118,6 +120,8 @@ class SelectablePdfView(QPdfView):
         self.highlight_boxes = new_boxes
 
         for err in errors_list:
+            if finding_kind(err) != "page":
+                continue
             marker = ErrorMarker(err, self.viewport(), lang=lang)
             self.markers.append(marker)
             coords = err.get("coords", err.get("wspolrzedne", {}))

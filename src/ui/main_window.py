@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 
 from common.path import resource_path
 
+from common.findings import finding_kind
+
 from . import icons, report_panel, report_pdf, styles
 from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
@@ -530,6 +532,8 @@ class PDFReader(QMainWindow):
             errors_do_zapisu = self.manager.get_errors(self.current_pdf_path)
 
             for err in errors_do_zapisu:
+                if finding_kind(err) != "page":
+                    continue
                 try:
                     page_num = int(err.get("page", err.get("strona", 1)))
                     if 0 <= page_num < len(doc):
@@ -667,6 +671,7 @@ class PDFReader(QMainWindow):
                 font_regular=resource_path(os.path.join("ui", "assets", "Roboto-Regular.ttf")),
                 font_bold=resource_path(os.path.join("ui", "assets", "Roboto-Bold.ttf")),
                 logo_path=resource_path(os.path.join("ui", "assets", "logo.png")),
+                findings=self.manager.get_errors(self.current_pdf_path),
             )
             MessageBox.information(self, texts["success"], texts["rep_success_saved"].format(save_path))
 

@@ -9,6 +9,8 @@ the rest is in the detailed report.
 
 from collections import Counter
 
+from common.findings import finding_kind, finding_text
+
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
@@ -102,6 +104,7 @@ class _FlowLayout(QLayout):
 
 def _label(text, style, wrap=True):
     lbl = QLabel(text)
+    lbl.setTextFormat(Qt.PlainText)
     lbl.setWordWrap(wrap)
     lbl.setStyleSheet(style)
     return lbl
@@ -234,7 +237,8 @@ def _findings_section(root, errors, on_page):
     """How many findings the text has and where: the markers on the pages alone do not tell it."""
     root.addWidget(_section(t("main.findings_header")))
     card, lay = _card()
-    pages = Counter(int(error.get("page", 0)) for error in errors if isinstance(error, dict))
+    pages = Counter(int(error.get("page", 0)) for error in errors
+                    if isinstance(error, dict) and finding_kind(error) == "page")
     if pages:
         lay.addWidget(_note(t("main.findings_count", count=sum(pages.values()), pages=len(pages)), "bad"))
         lay.addWidget(_label(t("main.findings_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
@@ -284,6 +288,30 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         root.addWidget(_note(t("main.ai_gpu_fallback", layers=data["gpu_layers_fallback"]), "warn"))
     if errors is not None and report_data is not None:
         _findings_section(root, errors, on_page)
+
+    if errors is not None:
+        for kind, key in (("global", "global_findings"), ("bibliography", "bibliography_summary")):
+            items = [error for error in errors if isinstance(error, dict) and finding_kind(error) == kind]
+            if not items:
+                continue
+            root.addWidget(_section(t("main." + key)))
+            card, lay = _card()
+            if kind == "bibliography":
+                toggle = QPushButton(t("main.bibliography_details"))
+                toggle.setCheckable(True)
+                toggle.setCursor(Qt.PointingHandCursor)
+                lay.addWidget(toggle)
+                details = _label("\n\n".join(finding_text(item) for item in items),
+                                 f"font-size: 13px; color: {styles.TEXT}; {TRANSPARENT}")
+                details.setTextFormat(Qt.PlainText)
+                details.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                details.hide()
+                toggle.toggled.connect(details.setVisible)
+                lay.addWidget(details)
+            else:
+                for item in items:
+                    lay.addWidget(_note(finding_text(item), "warn"))
+            root.addWidget(card)
 
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
