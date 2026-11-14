@@ -120,6 +120,15 @@ class VerdictTest(unittest.TestCase):
 
 
 class UnreadableFigureTest(unittest.TestCase):
+    def test_unverified_paragraph_is_not_overridden_by_a_correct_one(self):
+        from app.llm_task import build_image_summary
+        for statuses in (("True", "Unreadable"), ("Unreadable", "True")):
+            with self.subTest(statuses=statuses):
+                summary = build_image_summary([{"obrazek": "Rys. 1", "poprawnosc_danych": status} for status in statuses])
+                self.assertEqual(summary["good_count"], 0)
+                self.assertEqual(summary["bad_count"], 0)
+                self.assertEqual(summary["total"], 1)
+
     def test_unreadable_figure_is_listed_but_is_not_a_failure_or_an_error_in_the_thesis(self):
         from app.llm_task import build_image_summary
 
