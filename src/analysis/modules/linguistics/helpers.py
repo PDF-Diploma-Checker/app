@@ -26,7 +26,10 @@ os.environ["LTP_PATH"] = LT_DATA_DIR
 
 morf = morfeusz2.Morfeusz()
 spell = SpellChecker()
-spell.word_frequency.load_text_file(resource_path(os.path.join("analysis", "modules", "linguistics", "word_whitelist.txt")))
+WORD_WHITELIST_PATH = resource_path(os.path.join("analysis", "modules", "linguistics", "word_whitelist.txt"))
+with open(WORD_WHITELIST_PATH, encoding="utf-8") as whitelist_file:
+    WHITELIST_ONLY_WORDS = {w for w in spell.word_frequency.tokenize(whitelist_file.read()) if w not in spell}
+spell.word_frequency.load_text_file(WORD_WHITELIST_PATH)
 languages = [Language.ENGLISH, Language.POLISH]
 language_detector = LanguageDetectorBuilder.from_languages(*languages).build()
 

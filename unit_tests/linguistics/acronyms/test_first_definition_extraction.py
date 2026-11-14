@@ -95,7 +95,8 @@ class TestFirstDefinitionExtraction(unittest.TestCase):
 
     def test_defined_acronym_resolves_undefined_check(self):
         block1 = make_block("Użyto modelu LLM (ang. Large Language Model) w projekcie.", block_id=1)
-        block2 = make_block("Model LLM poradził sobie znakomicie z tym zadaniem.", block_id=2)
+        # Na kolejnej stronie - make_words daje obu blokom ten sam y, a "LLM" w block2 ma mniejsze x niż definicja
+        block2 = make_block("Model LLM poradził sobie znakomicie z tym zadaniem.", block_id=2, page=2)
         proper_names = []
         acronyms_with_defs, proper_names, _ = check_first_definition([block1, block2], proper_names, [])
         undef_matches, _ = check_if_was_defined([block1, block2], acronyms_with_defs, proper_names)
