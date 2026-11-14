@@ -38,6 +38,38 @@ def _comparable_toc_title(text):
 
 VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
 
+MONOSPACE_FONTS = (
+    "courier", "consolas", "mono", "code", "typewriter", "menlo", "inconsolata", "cmtt", "sftt", "t1xtt", "txtt",
+)
+# TeX fonts keep the style in the name (CMBX12 = bold CMR12), so they are mapped to one family
+TEX_FONT_FAMILIES = {
+    "cmr": "cm", "cmbx": "cm", "cmti": "cm", "cmsl": "cm", "cmcsc": "cm", "cmb": "cm",
+    "sfrm": "ec", "sfbx": "ec", "sfti": "ec", "sfsl": "ec", "sfcc": "ec", "sfbi": "ec",
+}
+SMALL_MARK_RATIO = 0.7      # text this much smaller than the main size is a mark (listing line number), not running text
+
+# errors of running text, not reported in lists (TOC/TOF/TOT), images, tables and the acronym list (redaction_info.md);
+# the names are the categories the checks give their errors
+TYPOGRAPHY_CATEGORIES = ("orphan", "widow", "bastard", "shoemaker", "corridor", "justification")
+
+
+def _font_family(font):
+    """Font name without style, size and subset prefix (TimesNewRomanPS-BoldMT -> timesnewromanps, CMBX12 -> cm),
+    so that bold and italic of the main font count as the main font. Same rule as font_family in linguistics/helpers.py,
+    which is not imported here because that module loads spaCy."""
+    name = (font or "").split("+")[-1]
+    name = re.split(r"[-,]", name, maxsplit=1)[0]
+    tex = re.fullmatch(r"([a-z]+)\d*", name.lower())
+    if tex and tex.group(1) in TEX_FONT_FAMILIES:
+        return TEX_FONT_FAMILIES[tex.group(1)]
+    name = re.sub(r"MT$", "", name)
+    name = re.sub(r"(bold|italic|ital|oblique)$", "", name, flags=re.IGNORECASE)
+    return re.sub(r"\d+$", "", name).lower()
+
+
+def _is_monospace(font):
+    return any(mono in (font or "").lower() for mono in MONOSPACE_FONTS)
+
 
 def _footer_number(page):
     """The page number printed in the footer of a page, None when there is none."""
@@ -250,6 +282,32 @@ class RedactionValidator:
         self.module = Module.REDACTION
         self.id_counter = 0
         self.errors = []
+        self._main_font = None
+
+    def _main_font_and_size(self):
+        if getattr(self, "_main_font", None) is None:
+            self._main_font = (
+                self.document_data.get_most_common_font(),
+                self.document_data.get_most_common_font_size(),
+            )
+        return self._main_font
+
+    def _in_other_font(self, words):
+        """
+        True when the words flagged by a typographic check (orphan, widow, bastard, shoemaker) are not set in the
+        main text font.
+        """
+        main_font, main_size = self._main_font_and_size()
+        words = [w for w in words if (getattr(w, "text", "") or "").strip()]
+        if not main_font or not words:
+            return False
+        regular = [w for w in words if not main_size or (getattr(w, "size", 0) or 0) >= main_size * SMALL_MARK_RATIO]
+        if not regular:
+            return True
+        if all(_is_monospace(getattr(w, "font", "")) for w in regular):
+            return True
+        main_family = _font_family(main_font)
+        return all(_font_family(getattr(w, "font", "")) != main_family for w in regular)
 
     def _get_next_id(self):
         id = f"ERR_RED_{self.id_counter}"
@@ -264,6 +322,7 @@ class RedactionValidator:
     ):
         self.errors.clear()
         self.id_counter = 0
+        self._main_font = None
         # --------------------config check
         if self.config is not None and config_ckeck:
             self.check_interline_spacing(self.document_data)
@@ -385,13 +444,12 @@ class RedactionValidator:
         else:
             tot_pages = []
 
-        errors_excluded = ["orphan", "corridor", "widow", "shoe_maker", "justification"]
         errors_fixed = []
         for error in self.errors:
             is_in_toc = error.page_number in toc_pages
             is_in_tof = error.page_number in tof_pages
             is_in_tot = error.page_number in tot_pages
-            is_exluded = error.category in errors_excluded
+            is_exluded = error.category in TYPOGRAPHY_CATEGORIES
 
             if (is_in_toc or is_in_tof or is_in_tot) and is_exluded:
                 continue
@@ -408,13 +466,12 @@ class RedactionValidator:
                 and error_bbox[3] <= image_bbox[3] + 10
             )
 
-        errors_excluded = ["orphan", "corridor", "widow", "shoe_maker", "justification"]
         filtered_errors = []
 
         for error in self.errors:
             error_to_remove = False
 
-            if error.category in errors_excluded:
+            if error.category in TYPOGRAPHY_CATEGORIES:
                 for page in self.document_data.pages:
                     if error.page_number == page.number:
                         for image in page.images:
@@ -437,13 +494,12 @@ class RedactionValidator:
                 and error_bbox[3] <= table_bbox[3] + 10
             )
 
-        errors_excluded = ["orphan", "corridor", "widow", "shoe_maker", "justification"]
         filtered_errors = []
 
         for error in self.errors:
             error_to_remove = False
 
-            if error.category in errors_excluded:
+            if error.category in TYPOGRAPHY_CATEGORIES:
                 for page in self.document_data.pages:
                     if error.page_number == page.number:
                         for table in page.tables:
@@ -465,11 +521,10 @@ class RedactionValidator:
         if pages is None:
             pages = []
 
-        errors_excluded = ["orphan", "corridor", "widow", "shoe_maker", "justification"]
         errors_fixed = []
         for error in self.errors:
             is_in_acronyms = error.page_number in pages
-            is_exluded = error.category in errors_excluded
+            is_exluded = error.category in TYPOGRAPHY_CATEGORIES
 
             if is_in_acronyms and is_exluded:
                 continue
@@ -542,6 +597,8 @@ class RedactionValidator:
                             continue
 
                         if last_span.size < most_common_size * 0.88:
+                            continue
+                        if self._in_other_font([last_span]):
                             continue
 
                         rect = (
@@ -820,6 +877,8 @@ class RedactionValidator:
             return
 
         widow_words = block.words[-widow_which:]
+        if self._in_other_font(widow_words):
+            return
         first_word = widow_words[0]
         last_word = widow_words[-1]
         found_text = " ".join([w.text for w in widow_words])
@@ -885,6 +944,8 @@ class RedactionValidator:
             return
 
         bekart_words = block.words[-bekart_which:]
+        if self._in_other_font(bekart_words):
+            return
         first_word = bekart_words[0]
         last_word = bekart_words[-1]
         found_text = " ".join([w.text for w in bekart_words])
@@ -948,6 +1009,8 @@ class RedactionValidator:
             return
 
         szewc_words = block.words[:szewc_which]
+        if self._in_other_font(szewc_words):
+            return
         first_word = szewc_words[0]
         last_word = szewc_words[-1]
         found_text = " ".join([w.text for w in szewc_words])
