@@ -21,6 +21,8 @@ from common.resource_monitor import ResourceMonitor
 from common import crash_log
 from common.cancellation import AnalysisCancelled, CancelToken
 
+from common.findings import finding_kind
+
 from . import icons, styles
 from .ai_setup_dialog import AiSetupDialog
 from .i18n import t
@@ -263,9 +265,11 @@ class PipelineWorker(QThread):
                                 "coords": {"x": x1, "y": y1, "w": max(x2 - x1, 1.0), "h": max(y2 - y1, 1.0)},
                             })
 
+                scope = finding_kind({"category": str(category), "comment": str(comment)})
                 ui_report.append({
                     "page": page_nr,
                     "category": str(category),
+                    "scope": scope,
                     "found_text": str(text),
                     "comment": str(comment),
                     "coords": {"x": x, "y": y, "w": w, "h": h},
