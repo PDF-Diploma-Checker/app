@@ -122,16 +122,18 @@ def build_image_summary(raw_image_report, language="pl"):
 
         if is_correct == "Error":
             failed = True
-            worst_status.setdefault(img_id, "failed")
+            if worst_status.get(img_id) != "bad":
+                worst_status[img_id] = "failed"
             status = "failed"
         elif is_correct == "Unreadable":
-            worst_status.setdefault(img_id, "failed")
+            if worst_status.get(img_id) != "bad":
+                worst_status[img_id] = "failed"
             status = "failed"
         elif is_correct == "False" or is_correct is False:
             worst_status[img_id] = "bad"
             status = "bad"
         else:
-            if worst_status.get(img_id) != "bad":
+            if img_id not in worst_status:
                 worst_status[img_id] = "good"
             status = "good"
 
