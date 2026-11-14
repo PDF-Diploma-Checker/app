@@ -96,7 +96,22 @@ class DictionaryWorkflowTest(unittest.TestCase):
             app.processEvents()
             self.assertFalse(dialog.worker.isRunning())
 
-        with patch('ui.dictionary_admin.service_url', return_value=self.url):
+        request_threads = []
+        real_get, real_post = requests.get, requests.post
+
+        def worker_get(*args, **kwargs):
+            request_threads.append(threading.current_thread())
+            return real_get(*args, **kwargs)
+
+        def worker_post(*args, **kwargs):
+            request_threads.append(threading.current_thread())
+            self.assertEqual(kwargs['auth'], ('moderator', 'password'))
+            self.assertEqual(kwargs['headers']['X-Dictionary-Review'], '1')
+            return real_post(*args, **kwargs)
+
+        with patch('ui.dictionary_admin.service_url', return_value=self.url), \
+                patch('ui.dictionary_admin.requests.get', side_effect=worker_get), \
+                patch('ui.dictionary_admin.requests.post', side_effect=worker_post):
             self.assertFalse(dialog.approve.isEnabled())
             self.assertEqual(dialog.password.text(), '')
             dialog.user.setText('moderator')
@@ -112,6 +127,26 @@ class DictionaryWorkflowTest(unittest.TestCase):
             self.assertEqual(dialog.queue.count(), 2)
             dialog.queue.setCurrentRow(0)
             self.assertTrue(dialog.approve.isEnabled())
+            # Failed authentication on a review must never approve locally or on the server.
+            dialog.password.setText('wrong')
+            dialog.request()
+            finish()
+            self.assertEqual(self.store.words(), [])
+            self.assertFalse(dialog.approve.isEnabled())
+            dialog.password.setText('password')
+            dialog.request()
+            finish()
+            dialog.queue.setCurrentRow(0)
+            with patch('ui.dictionary_admin.requests.post') as failed_review:
+                failed_review.return_value.status_code = 409
+                dialog.approve.click()
+                finish()
+            self.assertEqual(self.store.words(), [])
+            self.assertEqual(len(self.store.queue()), 2)
+            self.assertFalse(dialog.approve.isEnabled())
+            dialog.request()
+            finish()
+            dialog.queue.setCurrentRow(0)
             dialog.approve.click()
             finish()
             self.assertEqual(self.store.words(), ['approveword'])
@@ -122,6 +157,8 @@ class DictionaryWorkflowTest(unittest.TestCase):
             self.assertEqual(dialog.queue.count(), 0)
             self.assertEqual(self.store.words(), ['approveword'])
             self.assertIsNone(dialog.worker.credentials)
+            self.assertTrue(request_threads)
+            self.assertTrue(all(thread is not threading.main_thread() for thread in request_threads))
 
     def test_rate_limit_survives_restart(self):
         for _ in range(30):
