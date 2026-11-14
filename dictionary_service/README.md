@@ -1,16 +1,23 @@
 # Moderated shared dictionary
 
-This is a new, standalone service implementation, **not a deployed service**. The existing desktop bug-report client points to a Cloudflare Worker in `src/common/report_config.py`; this repository contains neither that backend nor an admin API. Its address is not reused or assumed to implement dictionary endpoints.
+The production dictionary API is deployed on Cloudflare Workers with D1:
+`https://diploma-checker-dictionary.diplomachecker.workers.dev`.
+It is separate from the existing bug-report service. Thesis analysis stays local;
+this service receives voluntarily submitted words and connection metadata only.
 
 Users right-click a **TYPOS** error marker and choose “Propose a correct word”. The error detail tooltip explains this action. The dialog starts empty, shows the recipient service, and requires an unchecked-by-default voluntary submission checkbox before enabling Send. It explains that the service sees connection metadata (such as an IP address), that approved words are shared with other users, and that thesis analysis stays local. Closing the dialog or leaving the checkbox unchecked sends nothing. It submits only the explicitly entered word, never the finding, surrounding text, thesis, path, or logs. A successful submission reports pending, already approved, or previously rejected status. It does not immediately suppress an error.
 
 ## Administrator application mode
 
-Start the desktop executable with `--dictionary-admin`, or from source run `python src/app/main.py --dictionary-admin`. This opens a dedicated Qt moderation window without starting analysis or downloading models. Set `DIPLOMACHECKER_DICTIONARY_URL=https://dictionary.example.org` in its environment first. Enter the server-configured administrator username and password in the window; no credentials are packaged, persisted, or sent in CLI arguments. Sign in / refresh loads the oldest 200 pending requests. Select a word and approve or reject it; the queue reloads after the decision. Refresh to process the next batch. Login, queue loading, and moderation use worker threads, keeping the GUI responsive. Closing during an active request is deferred until it finishes. After an uncertain connection failure, refresh before retrying a decision.
+Start the desktop executable with `--dictionary-admin`, or from source run `python src/app/main.py --dictionary-admin`. This opens a dedicated Qt moderation window without starting analysis or downloading models. The application uses the deployed service by default. `DIPLOMACHECKER_DICTIONARY_URL` can override it; an explicit empty value disables remote dictionary access. Enter the server-configured administrator username and password in the window; no credentials are packaged, persisted, or sent in CLI arguments. Sign in / refresh loads the oldest 200 pending requests. Select a word and approve or reject it; the queue reloads after the decision. Refresh to process the next batch. Login, queue loading, and moderation use worker threads, keeping the GUI responsive. Closing during an active request is deferred until it finishes. After an uncertain connection failure, refresh before retrying a decision.
 
-This mode needs a configured and deployed API to receive requests. Launching it alone does not provision an admin account or make a service available. An optional browser interface is also available at `/admin` after deployment, protected by the same HTTP Basic authentication. Use HTTPS for both interfaces.
+The Cloudflare service uses the dedicated native administrator window. It has no browser admin page. Use the administrator credentials provisioned by the deployment owner. They are not included in the app or this repository. The optional Python fallback has its own browser interface and credentials.
 
-## Deployment configuration still required
+## Cloudflare deployment
+
+See [Cloudflare setup and operations](cloudflare/README.md) for the Worker, D1 schema, authentication and deployment commands. The native desktop mode is the production moderation interface.
+
+## Alternative self-hosted Python backend
 
 The service uses Python's standard library and SQLite. Deploy it separately from the desktop app, with a persistent writable SQLite volume and an HTTPS reverse proxy. Bind the Python process to loopback or a private container interface, never expose its plain HTTP port publicly. Configure request/connection limits at the proxy, including stricter limits on administrator authentication; the built-in threaded server is intended to sit behind that proxy. Public proposal submissions are anonymous and limited to 30 per connecting address per UTC day. Behind a proxy this is the proxy address: configure public client rate limits there; the service deliberately does not trust forwarded address headers. No CORS access is enabled.
 
@@ -36,7 +43,7 @@ Supply these through your deployment's protected environment configuration:
 
 Run `python3 -m dictionary_service.server` from the repository root under a supervised service account. Back up the database using SQLite's backup API; preserve its volume across process/container upgrades. Review records retain decision, timestamp, and administrator identity. Decisions are final through the API; duplicate words reuse their existing status. Credentials can be rotated by changing the deployment environment and restarting. Multiple instances require a shared SQLite-safe filesystem or a future database adaptation; do not put independent databases behind a load balancer.
 
-Configure `DIPLOMACHECKER_DICTIONARY_URL` in **each client/admin app environment** to the deployed HTTPS origin. It is intentionally unset by default. No deployed URL or credentials are shipped in this PR. A service placed under a URL prefix needs the proxy to strip that prefix; the optional web UI assumes the origin root.
+To use this alternative backend, override `DIPLOMACHECKER_DICTIONARY_URL` in each client/admin app environment with its HTTPS origin. Otherwise clients use the Cloudflare service. No credentials are shipped in the application. A service placed under a URL prefix needs the proxy to strip that prefix; the optional web UI assumes the origin root.
 
 ## Synchronization and API
 
@@ -47,7 +54,7 @@ Before each linguistic analysis, on the analysis worker, clients fetch the full 
 - `GET /admin/queue`: Basic-authenticated pending requests, oldest first, up to 200.
 - `POST /admin/review`: Basic authentication, `X-Dictionary-Review: 1`, JSON `id` and `decision` (`approved` or `rejected`). Atomic pending-only transitions; repeated/conflicting decisions return `409`.
 
-The desktop application has no admin credential embedded. The custom review header and absence of CORS block cross-origin form moderation in the optional browser interface. HTTPS termination, persistent storage, supervisor, proxy limits, account provisioning, backups, and distributing the configured client URL remain operator responsibilities and have not been deployed here.
+The desktop application has no admin credential embedded. The custom review header and absence of CORS block cross-origin form moderation in the optional browser interface. For this Python fallback, HTTPS termination, persistent storage, supervisor, proxy limits, account provisioning and backups remain operator responsibilities. This fallback has not been deployed; the Cloudflare service is the production deployment.
 
 ## Opening the administrator window from this checkout (Linux)
 
@@ -58,10 +65,8 @@ cd /path/to/app
 python src/app/main.py --dictionary-admin
 ```
 
-This opens the window even before deployment, but login and queue loading require
-the service URL and an administrator account provisioned on that service. Once
-an actual HTTPS service has been deployed, set its address in the same terminal
-before launching (replace the placeholder with that real address):
+The built-in Cloudflare address is used automatically. For an alternative
+installation, set its actual HTTPS address in the same terminal before launching:
 
 ```sh
 export DIPLOMACHECKER_DICTIONARY_URL="https://YOUR-DICTIONARY-HOST"

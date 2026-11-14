@@ -58,3 +58,14 @@ jobs:
 
       - name: unittest
         run: uv run --no-sync python -m unittest discover -s unit_tests -t . -v
+
+  dictionary-worker:
+    name: dictionary worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: test dictionary service
+        run: npm test --prefix dictionary_service/cloudflare

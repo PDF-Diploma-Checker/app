@@ -1,0 +1,13 @@
+name = "diploma-checker-dictionary"
+main = "worker.mjs"
+compatibility_date = "2026-11-14"
+account_id = "c33f9d914f83e60050e14e44fd6b8b16"
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "diploma-checker-dictionary"
+database_id = "31afb11b-ca1e-4eb1-90ea-804b9d0c314f"
+
+[observability]
+enabled = false

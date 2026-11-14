@@ -72,7 +72,7 @@ class AdminDialog(QDialog):
         buttons.addWidget(self.approve)
         buttons.addWidget(self.reject_button)
         layout.addLayout(buttons)
-        self.status = QLabel('Service deployment and client URL configuration are required.')
+        self.status = QLabel('Sign in to load pending word proposals.')
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         self.user.textChanged.connect(self.invalidate)
