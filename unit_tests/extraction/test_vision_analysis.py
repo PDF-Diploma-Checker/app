@@ -107,6 +107,15 @@ class VerdictTest(unittest.TestCase):
     def test_hallucinated_figure_value_is_not_a_discrepancy(self):
         self.assertEqual(self._verdict("0.81", "0", paragraph="Wynik 0.81", image_data="kontakt: 0.8"), "Unreadable")
 
+    def test_mismatch_requires_literal_evidence_from_both_sources(self):
+        mismatch = {"element": "gzip", "w_tekscie": "40 ms", "na_rysunku": "70 ms",
+                    "text_quote": "gzip: 40 ms", "image_quote": "gzip: 70 ms"}
+        answer = {"niezgodnosci": [mismatch]}
+        args = {"paragraph": "Rysunek 1, gzip: 40 ms", "image_data": "gzip: 70 ms", "printed": [70]}
+        self.assertEqual(verdict_from_answer(answer, **args)["poprawnosc_danych"], "False")
+        mismatch["image_quote"] = "gzip: 80 ms"
+        self.assertEqual(verdict_from_answer(answer, **args)["poprawnosc_danych"], "Unreadable")
+
     def test_unverified_reading_is_not_reported_as_correct(self):
         from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
         checker = object.__new__(ConsistencyChecker)
