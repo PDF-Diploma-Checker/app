@@ -63,6 +63,10 @@ class NeedsFullBuildTest(unittest.TestCase):
     def test_code_alone_can_be_patched(self):
         self.assertEqual(self.reasons([("M", "src/ui/a.py"), ("M", "unit_tests/t.py")], "import os\n", "import os\n"), [])
 
+    def test_standalone_dictionary_service_does_not_require_client_rebuild(self):
+        changes = [("A", "dictionary_service/server.py"), ("M", "dictionary_service/admin.html")]
+        self.assertEqual(self.reasons(changes, new="import unbundled_backend_dependency\n"), [])
+
     def test_import_of_our_code_can_be_patched(self):
         self.assertEqual(self.reasons([("A", "src/ui/a.py")], new="from analysis.modules import x\n"), [])
 
