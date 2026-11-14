@@ -83,6 +83,16 @@ class ReviewTest(unittest.TestCase):
             self.assertEqual(review.review_findings(matches), matches)
         make.assert_not_called()
 
+    def test_decimal_format_findings_cannot_be_rejected_by_the_model(self):
+        for language, values in (("pl", ("0.6", "0.5", "1.6", "1.3")), ("en", ("0,6",))):
+            with self.subTest(language=language):
+                matches = [finding(value, source="decimal_check", context=f"wartość «{value}»") for value in values]
+                for match in matches:
+                    match.category = "DECIMAL"
+                with patch.object(review, "make_llama") as make:
+                    self.assertEqual(review.review_findings(matches, language), matches)
+                make.assert_not_called()
+
     def test_a_word_known_with_polish_letters_is_a_typo_for_certain(self):
         with patch.object(review, "typo_check", side_effect=lambda word: word == "często"), patch.object(review, "make_llama") as make:
             match = finding("czesto")

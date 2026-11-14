@@ -26,7 +26,9 @@ def block(sentence):
 class SentenceWideMatchTest(unittest.TestCase):
     def analyse(self, sentence):
         polish, english = MagicMock(), MagicMock()
-        polish.check.return_value = [lt_match(sentence, "SYNTAX", "PCON_VERB")]
+        polish.check.side_effect = lambda text: (
+            [lt_match(sentence, "SYNTAX", "PCON_VERB")] if text == sentence else
+            [lt_match(text, "TYPOS", "MORFOLOGIK_RULE_PL")] if text == "uwzgędniono" else [])
         english.check.side_effect = lambda text: [lt_match(text, "TYPOS", "MORFOLOGIK_RULE_EN_GB", word) for word in text.split()]
         with patch.object(extractor, "_TOOL_PL", polish), patch.object(extractor, "_TOOL_EN", english), \
                 patch.object(extractor, "_init_language_tools"), patch.object(extractor, "dropped") as dropped, \
@@ -37,12 +39,25 @@ class SentenceWideMatchTest(unittest.TestCase):
         errors, _ = self.analyse("Badając silnik uwzgędniono jego stany")
         self.assertEqual([error.content for error in errors], ["uwzgędniono"])
         self.assertEqual(errors[0].category, "TYPOS")
-        self.assertNotEqual(errors[0].message, "komunikat")
+        self.assertEqual(errors[0].rule, "MORFOLOGIK_RULE_PL")
 
     def test_the_finding_is_dropped_without_a_misspelled_word(self):
         errors, dropped = self.analyse("Badając silnik sprawdzono jego stany")
         self.assertEqual(errors, [])
         dropped.assert_called_once()
+
+    def test_english_dictionary_cannot_invent_polish_typos_from_syntax(self):
+        with patch.object(extractor, "typo_check", return_value=False):
+            errors, dropped = self.analyse("Badając model sprawdzono amplitudy")
+        self.assertEqual(errors, [])
+        dropped.assert_called_once()
+
+    def test_recovered_typo_keeps_absolute_offset_and_polish_rule(self):
+        sentence = "Badając silnik uwzgędniono jego stany"
+        errors, _ = self.analyse(sentence)
+        self.assertEqual(errors[0].offset, sentence.index("uwzgędniono"))
+        self.assertEqual(errors[0].error_length, len("uwzgędniono"))
+        self.assertEqual(errors[0].rule, "MORFOLOGIK_RULE_PL")
 
 
 if __name__ == "__main__":
