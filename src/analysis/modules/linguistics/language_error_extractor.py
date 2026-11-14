@@ -1,3 +1,4 @@
+from common import shared_dictionary
 import atexit
 import os
 from pathlib import Path
@@ -251,6 +252,8 @@ MIN_SHORT_STEM_FREQUENCY = 1000
 
 def is_known_word(word):
     '''Checks if word is in the Polish (Morfeusz) or English (pyspellchecker) dictionary.'''
+    if shared_dictionary.contains(word):
+        return True
     if any(interpretation[2][2] != "ign" for interpretation in morf.analyse(word)):
         return True
     return not spell.unknown(word.lower().split())

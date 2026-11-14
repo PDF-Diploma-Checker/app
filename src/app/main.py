@@ -19,11 +19,9 @@ if multiprocessing.current_process().name == "MainProcess":     # not in the AI 
 logger = logging.getLogger(__name__)
 
 from PySide6.QtWidgets import QApplication, QMessageBox
-from analysis.modules.llm.config import check_and_download_requirements, java_available, llm_runtime_available
 from common import crash_log, process_guard
 from ui import error_dialog, styles
 from ui.license_dialog import ensure_accepted
-from ui.main_window import PDFReader
 
 SMOKE_MODULES = [
     "ui.main_window", "ui.settings", "ui.report_bug", "ui.log_window", "ui.analysis_dialog",
@@ -38,6 +36,8 @@ SMOKE_MODULES = [
 def smoke_test():
     """Import everything, load spaCy models, build the main window. Exit code 0 = OK."""
     import importlib
+    from analysis.modules.llm.config import llm_runtime_available
+    from ui.main_window import PDFReader
     failures = []
 
     modules = list(SMOKE_MODULES)
@@ -104,6 +104,8 @@ def _show_update_result(result):
 
 
 def main():
+    from analysis.modules.llm.config import check_and_download_requirements, java_available
+    from ui.main_window import PDFReader
     app = QApplication(sys.argv)
     styles.apply_global_style(app)
     crash_log.enable()
@@ -133,6 +135,9 @@ def main():
 
 
 def run():
+    if "--dictionary-admin" in sys.argv:
+        from ui.dictionary_admin import launch
+        sys.exit(launch())
     if "--smoke-test" in sys.argv:
         sys.exit(smoke_test())
     if "--analysis-test" in sys.argv:
