@@ -45,6 +45,16 @@ class ExtraRectsExportTest(unittest.TestCase):
                 mock.patch.object(main_window, "MessageBox"):
             main_window.PDFReader.export_pdf_with_annotations(reader)
 
+    def test_global_findings_and_summary_are_not_pdf_annotations(self):
+        self.export([
+            {"page": 0, "category": "bibliography_summary", "found_text": "[1] Book"},
+            {"page": 0, "category": "config_file", "comment": "The font used (Arial) is incorrect"},
+            {"page": 1, "category": "No_footer", "coords": rect_coords(50, 100)},
+            {"page": 0, "category": "SPELLING", "coords": rect_coords(50, 100)},
+        ])
+        with fitz.open(self.target) as doc:
+            self.assertEqual([len(list(page.annots() or [])) for page in doc], [1, 0])
+
     def highlights(self):
         """Per page, the vertical middle and the stroke colour of each highlight in the saved PDF."""
         doc = fitz.open(self.target)

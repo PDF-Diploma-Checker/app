@@ -45,6 +45,9 @@ jobs:
   unittest:
     name: unit tests
     runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+      QT_OPENGL: software
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +55,9 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
+
+      - name: install Qt runtime
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libopengl0
 
       - name: install dependencies
         run: uv sync --frozen --no-dev

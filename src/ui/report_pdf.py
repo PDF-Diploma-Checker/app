@@ -465,7 +465,7 @@ class _Writer:
 
 
 def build_report_pdf(report_data, document_name, lang, save_path, font_regular=None, font_bold=None, logo_path=None,
-                     today=None):
+                     today=None, findings=None):
     """Write the report for one document to `save_path`."""
     s = STRINGS.get(lang, STRINGS["pl"])
     report_data = report_data or {}
@@ -473,6 +473,15 @@ def build_report_pdf(report_data, document_name, lang, save_path, font_regular=N
     w = _Writer(pdf, s, document_name, today or datetime.date.today(), font_regular, font_bold, logo_path)
     try:
         _content(w, s, report_data)
+        from common.findings import finding_kind, finding_text
+        for kind, title in (("global", "Global findings" if lang == "en" else "Uwagi ogólne"),
+                            ("bibliography", "Bibliography" if lang == "en" else "Bibliografia")):
+            items = [item for item in (findings or []) if finding_kind(item) == kind]
+            if items:
+                w.heading(title)
+                for item in items:
+                    lines = w.wrap(finding_text(item), 10.5, CONTENT_W - 2 * PAD)
+                    w.card([w.r_text(line) for line in lines])
         w.finish()
         pdf.set_metadata({"title": f"{s['rep_main_title']} - {document_name}", "producer": "DiplomaChecker"})
         pdf.save(save_path, deflate=True, garbage=3)
