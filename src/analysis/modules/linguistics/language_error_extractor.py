@@ -162,36 +162,34 @@ def language_tool_analisys(blocks):
                         continue
                     elif match.category == "SYNTAX" and len(word.split()) > 1:
                         # a misspelled verb looks like a sentence without one, and this finding hides the typo itself
-                        other_tool, messages = (tool_en, polish_messages) if text_language == 'pl' else (tool_pl, english_messages)
-                        typos = [m for m in other_tool.check(word) if m.category == "TYPOS" and not typo_check(m.matched_text)]
-                        for typo in typos:
-                            typo.sentence = match.sentence
-                            typo.offset += match.offset
-                            typo.message = messages["TYPOS"]
+                        primary_tool = tool_pl if text_language == 'pl' else tool_en
+                        other_tool = tool_en if text_language == 'pl' else tool_pl
+                        typos = []
+                        span = contents[match.offset:match.offset + match.error_length]
+                        for token in re.finditer(r"[^\W\d_]+(?:[-’'][^\W\d_]+)*", span):
+                            if typo_check(token.group()):
+                                continue
+                            for typo in primary_tool.check(token.group()):
+                                if typo.category != "TYPOS":
+                                    continue
+                                if not other_tool.check(typo.matched_text):
+                                    continue
+                                typo.sentence = match.sentence
+                                typo.offset += match.offset + token.start()
+                                typos.append(typo)
                         new_matches.extend(typos)
                         if not typos:
                             dropped("a whole sentence without a misspelled word", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
-                    elif text_language == 'pl':
-                        en_matches = tool_en.check(word)
-                        for en_match in en_matches:
-                            en_match.sentence = match.sentence
-                            en_match.offset += match.offset
-                            en_match.message = match.message
-                        new_matches.extend(en_matches)
-                        if not en_matches:
-                            dropped("correct in English", match.category, match.rule_id, contents, match.offset, match.error_length, block)
-                        continue
                     else:
-                        pl_matches = tool_pl.check(word)
-                        for pl_match in pl_matches:
-                            pl_match.sentence = match.sentence
-                            pl_match.offset += match.offset
-                            pl_match.message = match.message
-                        new_matches.extend(pl_matches)
-                        if not pl_matches:
-                            dropped("correct in Polish", match.category, match.rule_id, contents, match.offset, match.error_length, block)
-                        continue
+                        # The other language is a veto for intentional foreign words, not
+                        # the source of a replacement diagnosis or its suggestions.
+                        other_tool = tool_en if text_language == 'pl' else tool_pl
+                        if not other_tool.check(word):
+                            other_language = "English" if text_language == 'pl' else "Polish"
+                            dropped(f"correct in {other_language}", match.category, match.rule_id,
+                                    contents, match.offset, match.error_length, block)
+                            continue
                 new_matches.append(match)
 
             for m in new_matches:
