@@ -2,7 +2,7 @@
 
 This is a new, standalone service implementation, **not a deployed service**. The existing desktop bug-report client points to a Cloudflare Worker in `src/common/report_config.py`; this repository contains neither that backend nor an admin API. Its address is not reused or assumed to implement dictionary endpoints.
 
-Users right-click a **TYPOS** error marker and choose “Propose a correct word”. The error detail tooltip explains this action. The dialog starts empty and submits only the explicitly entered word, never the finding, surrounding text, thesis, path, or logs. A successful submission reports pending, already approved, or previously rejected status. It does not immediately suppress an error.
+Users right-click a **TYPOS** error marker and choose “Propose a correct word”. The error detail tooltip explains this action. The dialog starts empty, shows the recipient service, and requires an unchecked-by-default voluntary submission checkbox before enabling Send. It explains that the service sees connection metadata (such as an IP address), that approved words are shared with other users, and that thesis analysis stays local. Closing the dialog or leaving the checkbox unchecked sends nothing. It submits only the explicitly entered word, never the finding, surrounding text, thesis, path, or logs. A successful submission reports pending, already approved, or previously rejected status. It does not immediately suppress an error.
 
 ## Administrator application mode
 
@@ -48,3 +48,28 @@ Before each linguistic analysis, on the analysis worker, clients fetch the full 
 - `POST /admin/review`: Basic authentication, `X-Dictionary-Review: 1`, JSON `id` and `decision` (`approved` or `rejected`). Atomic pending-only transitions; repeated/conflicting decisions return `409`.
 
 The desktop application has no admin credential embedded. The custom review header and absence of CORS block cross-origin form moderation in the optional browser interface. HTTPS termination, persistent storage, supervisor, proxy limits, account provisioning, backups, and distributing the configured client URL remain operator responsibilities and have not been deployed here.
+
+## Opening the administrator window from this checkout (Linux)
+
+With the existing development Python environment, no rebuild or GPU is needed:
+
+```sh
+cd /path/to/app
+python src/app/main.py --dictionary-admin
+```
+
+This opens the window even before deployment, but login and queue loading require
+the service URL and an administrator account provisioned on that service. Once
+an actual HTTPS service has been deployed, set its address in the same terminal
+before launching (replace the placeholder with that real address):
+
+```sh
+export DIPLOMACHECKER_DICTIONARY_URL="https://YOUR-DICTIONARY-HOST"
+python src/app/main.py --dictionary-admin
+```
+
+Use the administrator credentials configured on the service, not a GitHub or
+Gmail password. Click **Sign in / refresh queue**, select a word, then **Approve**
+or **Reject**. Ordinary users never need these credentials. A future packaged
+application containing this PR supports `./DiplomaChecker --dictionary-admin`.
+The currently installed older application may not contain that command yet.
