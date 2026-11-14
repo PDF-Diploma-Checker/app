@@ -178,6 +178,8 @@ class DictionaryWorkflowTest(unittest.TestCase):
             self.assertEqual(json.loads(client.cache_path().read_text()), {'words': ['approved']})
 
     def test_configuration_and_payload_privacy(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(client.service_url(), client.DEFAULT_SERVICE_URL)
         with patch.dict(os.environ, {'DIPLOMACHECKER_DICTIONARY_URL': ''}):
             with self.assertRaises(ValueError):
                 client.propose('valid')

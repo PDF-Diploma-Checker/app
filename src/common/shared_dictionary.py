@@ -14,6 +14,7 @@ from common.path import DATA_DIR
 logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _words = frozenset()
+DEFAULT_SERVICE_URL = "https://diploma-checker-dictionary.diplomachecker.workers.dev"
 
 
 def normalize_word(value):
@@ -26,8 +27,8 @@ def normalize_word(value):
 
 
 def service_url():
-    # Intentionally unconfigured until an operator deploys the service.
-    url = os.environ.get('DIPLOMACHECKER_DICTIONARY_URL', '').rstrip('/')
+    # An explicit empty override disables remote dictionary requests.
+    url = os.environ.get('DIPLOMACHECKER_DICTIONARY_URL', DEFAULT_SERVICE_URL).rstrip('/')
     parts = urlsplit(url)
     if parts.scheme != 'https' or not parts.netloc or parts.username or parts.password or parts.query or parts.fragment:
         raise ValueError('Shared dictionary is not configured. Contact the application administrator.')
