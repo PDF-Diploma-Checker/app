@@ -70,12 +70,7 @@ DATE_PATTERNS = {
 ORG_KEYWORDS = re.compile(
     r'\b(politechnika|uniwersytet|instytut|katedra|wydział|ministerstwo|urząd|stowarzyszenie|fundacja|'
     r'association|university|institute|department|society|ministry|agency|foundation|corporation|'
-    r'committee|council|laboratory|lab|centre|center|dokumentacja|organization|docuemntation|organization)\b', re.IGNORECASE)
-
-# Names without an institutional keyword can otherwise look exactly like First Last.
-KNOWN_CORPORATE_AUTHORS = {
-    'boston dynamics', 'google deepmind', 'open robotics', 'newton physics',
-}
+    r'committee|council|laboratory|centre|center|dokumentacja|organization|docuemntation|organization)\b', re.IGNORECASE)
 
 PAGES_PATTERNS = {
     r'(?<![\d\.\w])pp\.[\s\:]*\d+(?:\s*[-–]\s*\d+)?': 'pp. 2 - 4',
@@ -152,7 +147,7 @@ def check_bibliography(blocks, producer, bibliography_dict):
                 url_span = (url.start(), url.end()) if url else None
                 bib_item.url = {re.sub(r'\s+', '', url.group(0)).rstrip('.,;)'): 'url'} if url else None
 
-                authors_text, author_fmt, start_idx, authors_end = extract_authors(masked, content, authors, bibliography_dict["organizations"])
+                authors_text, author_fmt, start_idx, authors_end = extract_authors(masked, content, authors)
                 if authors_text is not None:
                     bib_item.authors = {authors_text: author_fmt}
 
@@ -351,25 +346,9 @@ def is_allcaps_person_name(phrase):
     return 'imię' in first_cats and ('nazwisko' in last_cats or 'imię' in last_cats)
 
 
-def extract_authors(masked, content, authors, organizations=()):
+def extract_authors(masked, content, authors):
     """Finds the author segment at the start of an entry by matching name patterns, then finds other authors 
     matching to the same pattern. Returns the author text, its format label, and the offset"""
-    # Keep NER organization labels separate from personal-name hints. Only match
-    # the leading author, with a boundary, never a corporate name in the title.
-    corporate_names = KNOWN_CORPORATE_AUTHORS | {
-        a.strip().casefold() for a in organizations
-        if a.strip() and not re.search(r'[:;]', a)
-    }
-    leading = re.match(r'[^:.;]+', masked)
-    if leading:
-        phrase = leading.group().strip()
-        if ORG_KEYWORDS.search(phrase):
-            corporate_names.add(phrase.casefold())
-    for name in sorted(corporate_names, key=len, reverse=True):
-        match = re.match(re.escape(name) + r'(?=\s*[:.,;(]|$)', masked, re.IGNORECASE)
-        if match and not check_quotes(0, match.end(), content):
-            return content[:match.end()], 'organization', 0, match.end()
-
     best_start_known = None
     best_start_other = None
     best_start_fallback = None

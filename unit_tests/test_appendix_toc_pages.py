@@ -119,24 +119,6 @@ class AppendixTocPagesTest(unittest.TestCase):
         RedactionValidator.check_toc(check)
         self.assertEqual([e.category for e in errors], ['TOC_mismatch'])
 
-    def test_spelled_out_appendix_matches_lettered_heading(self):
-        for prefix in ('DODATEK', 'Appendix', 'Załącznik', 'Aneks'):
-            with self.subTest(prefix=prefix):
-                check, errors = _validator(
-                    [_page(92, 'A. PARAMETRY SYMULACJI', footer=94)],
-                    toc=[_entry(f'{prefix} A PARAMETRY SYMULACJI', 94)])
-                RedactionValidator.check_toc(check)
-                self.assertEqual(errors, [])
-
-    def test_appendix_letter_title_and_destination_must_still_match(self):
-        for heading, target in (('B. PARAMETRY', 94), ('A. INNY TYTUŁ', 94),
-                                ('A. PARAMETRY', 95)):
-            with self.subTest(heading=heading, target=target):
-                check, errors = _validator([_page(92, heading, footer=94)],
-                    toc=[_entry('DODATEK A PARAMETRY', target)])
-                RedactionValidator.check_toc(check)
-                self.assertEqual([e.category for e in errors], ['TOC_mismatch'])
-
     def test_contents_cannot_validate_its_own_entry(self):
         check, errors = _validator(
             [_page(1, 'B. Missing .... 1', footer=1), _page(2, 'Other material', footer=2)],

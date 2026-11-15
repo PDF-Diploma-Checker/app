@@ -141,30 +141,6 @@ def values_are_printed(image_data, printed):
     return sum(number in labels for number in read) * 2 > len(read)
 
 
-def confirmed_reading(image_data, printed):
-    """Keep independently confirmed values even if other rows were estimated.
-
-    Axis ticks cannot confirm a value. Keep headings for context, but never
-    pass an unconfirmed numeric row to the comparison model.
-    """
-    if printed is None:
-        return str(image_data), False
-    labels = set(_without_axes(printed))
-    kept, confirmed, omitted = [], False, False
-    for line in str(image_data).splitlines():
-        value = _READ_VALUE.search(line)
-        numbers = _numbers(value.group(1)) if value else []
-        if numbers:
-            if all(number in labels for number, _ in numbers):
-                confirmed = True
-                kept.append(line)
-            else:
-                omitted = True
-        elif not _numbers(line):
-            kept.append(line)
-    return ("\n".join(kept) if confirmed else ""), omitted
-
-
 def _literal_quote(quote, source):
     """A quote may not truncate a numeric token (A: 0 from A: 0.81)."""
     quote = " ".join(quote.split()).casefold()
@@ -286,8 +262,7 @@ class ConsistencyChecker:
         self.llm.close()
 
     def check(self, paragraph, image_data, language="pl", printed=None):
-        image_data, omitted = confirmed_reading(image_data, printed)
-        if not image_data:
+        if not values_are_printed(image_data, printed):
             logger.info("Figure not compared, its values are not printed in it: %r", image_data)
             return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}
 
@@ -311,10 +286,7 @@ class ConsistencyChecker:
         result_text = response["choices"][0]["message"]["content"]
 
         try:
-            result = verdict_from_answer(json.loads(result_text), language, printed, paragraph, image_data)
-            if omitted and result["poprawnosc_danych"] == "True":
-                result = {"poprawnosc_danych": "Partial", "bledy": image_text(language, "partial_values")}
-            return result
+            return verdict_from_answer(json.loads(result_text), language, printed, paragraph, image_data)
         except json.JSONDecodeError:
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
             return {"poprawnosc_danych": "Error", "bledy": "None"}

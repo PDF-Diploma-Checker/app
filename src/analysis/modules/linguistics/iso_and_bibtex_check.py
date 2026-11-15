@@ -208,25 +208,6 @@ def detail(block, expected, found):
     return f" (oczekiwano: „{expected}”, znaleziono: „{found}”)"
 
 
-AUTHOR_FORMAT_LABELS = {
-    'en': {
-        'J. Nowak': 'initials + surname', 'Jan Nowak': 'full given name + surname',
-        'Nowak, J.': 'surname, initials', 'Nowak, Jan': 'surname, full given name',
-        'Nowak J.': 'surname + initials',
-    },
-    'pl': {
-        'J. Nowak': 'inicjały + nazwisko', 'Jan Nowak': 'pełne imię + nazwisko',
-        'Nowak, J.': 'nazwisko, inicjały', 'Nowak, Jan': 'nazwisko, pełne imię',
-        'Nowak J.': 'nazwisko + inicjały',
-    },
-}
-
-
-def author_format_detail(block, expected, found):
-    labels = AUTHOR_FORMAT_LABELS['en' if getattr(block, 'language', None) == 'en' else 'pl']
-    return detail(block, labels.get(expected, expected), labels.get(found, found))
-
-
 def dominant(values):
     """
     Dominant value computed only when it has enough support and a clear lead. This prevents
@@ -451,7 +432,7 @@ def check_coherence_iso(matches, Bib_context, bib_blocks):
             equivalent = expected == 'Jan Nowak' and author_fmt in {'Nowak J.', 'Nowak, J.'}
             if not equivalent and author_fmt != expected:
                 matches = check_item_words(matches, item, block, "AUTHOR_FORMAT_COHERENCE",
-                                           messages["AUTHOR_FORMAT_COHERENCE"] + author_format_detail(block, expected, author_fmt),
+                                           messages["AUTHOR_FORMAT_COHERENCE"] + detail(block, expected, author_fmt),
                                            item.content, fragment=get_text(item.authors))
 
         expected = dominant_date_fmt.get(key)

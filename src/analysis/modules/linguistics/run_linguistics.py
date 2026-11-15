@@ -72,8 +72,6 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
             logger.warning("Invalid data type in linguistics config: %s", e)
     logger.info("Config: check_first_person=%s, check_bibtex=%s", check_first_person, check_bibtex)
 
-    from analysis.modules.linguistics.abstract_language import apply_abstract_languages
-    apply_abstract_languages(raw_blocks)
     blocks = get_context(raw_blocks)
     # extract_errors_to_json(blocks, "document.json")
     # with open("document_before.json", "w", encoding="utf-8") as json_file:

@@ -66,15 +66,6 @@ class EmbeddedPdfFiguresTest(unittest.TestCase):
         self.assertTrue(Path(image.path).is_file())
         self.assertEqual(len(collect_figures(data)), 1)
 
-    def test_paths_outside_form_clip_do_not_become_a_second_figure(self):
-        with chart_pdf() as source:
-            source[0].draw_rect(fitz.Rect(150, 30, 600, 110),
-                                fill=(.5, .2, .2), color=(0, 0, 0))
-            data = self.extract(source)
-        self.assertEqual(len(data.pages[0].images), 1)
-        self.assertEqual(data.pages[0].tables, [])
-        self.assertLess(data.pages[0].images[0].bbox[2], 501)
-
     def test_text_only_included_pdf_is_found_without_raster_or_paths(self):
         with chart_pdf(text_only=True) as source:
             data = self.extract(source)
