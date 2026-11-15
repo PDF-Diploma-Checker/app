@@ -26,15 +26,6 @@ def _comparable_title(text):
     return "".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
 
 
-def _comparable_toc_title(text):
-    # Contents may spell out "Dodatek A", whereas the heading prints "A.".
-    text = re.sub(
-        r"^(?:dodatek|appendix|załącznik|zalacznik|aneks)\s+([a-z])(?=[.\s])",
-        r"\1", text.strip(), flags=re.IGNORECASE,
-    )
-    return _comparable_title(text)
-
-
 VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
 
 
@@ -891,11 +882,6 @@ class RedactionValidator:
         else:
             comment = "Podpis nie zawiera odwołania do bibliografii (np. [1]) ani informacji o źródle (np. 'Źródło: opracowanie własne')."
 
-        reported_captions = set()
-
-        def caption_key(page, text):
-            return page, " ".join(text.split()).casefold()
-
         for block in self.document_data_linguistics.logical_blocks:
             if getattr(block, "incorrect_caption", 0) == 1:
                 if getattr(block, "words", []):
@@ -914,10 +900,6 @@ class RedactionValidator:
                     caption_bbox = (0, 0, 0, 0)
                     page_num = 1
 
-                key = caption_key(page_num, getattr(block, "content", ""))
-                if key[1] and key in reported_captions:
-                    continue
-                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
@@ -946,10 +928,6 @@ class RedactionValidator:
                     else ""
                 )
 
-                key = caption_key(getattr(visual, "page_number", 1), caption_text)
-                if caption_text and key in reported_captions:
-                    continue
-                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
@@ -992,7 +970,7 @@ class RedactionValidator:
             # printed page numbers (including when the PDF has page labels).
             is_bookmark = entry.src_page == -1
             expected_page = entry.page - (1 if is_bookmark else offset)
-            expected_title = _comparable_toc_title(entry.title)
+            expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
@@ -1015,7 +993,7 @@ class RedactionValidator:
                             line_text = " ".join([s.text for s in line.spans])
                             page_full_text += line_text + " "
 
-                    page_full_text = _comparable_toc_title(page_full_text)
+                    page_full_text = _comparable_title(page_full_text)
 
                     if expected_title in page_full_text:
                         correct_page = True

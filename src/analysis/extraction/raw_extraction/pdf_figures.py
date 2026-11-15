@@ -83,32 +83,3 @@ def embedded_pdf_regions(reader, page_index, page):
         logger.exception('Could not resolve embedded PDF placements on page %s', page_index)
         return []
     return regions
-
-
-def visible_drawings(page):
-    """Respect PDF clipping when finding paths belonging to included figures.
-
-    Path bounds can extend far outside a plot's axes or its Form BBox. Those
-    invisible portions must not become another figure beside the original.
-    """
-    clips = []
-    result = []
-    for drawing in page.get_drawings(extended=True):
-        level = drawing["level"]
-        while clips and clips[-1][0] >= level:
-            clips.pop()
-        if drawing["type"] == "clip":
-            clips.append((level, fitz.Rect(drawing["scissor"])))
-            continue
-        if drawing["type"] == "group":
-            continue
-        rect = fitz.Rect(drawing["rect"])
-        for _, clip in clips:
-            # Preserve horizontal/vertical lines (zero-area rectangles).
-            if rect.x1 < clip.x0 or rect.x0 > clip.x1 or rect.y1 < clip.y0 or rect.y0 > clip.y1:
-                break
-            rect = fitz.Rect(max(rect.x0, clip.x0), max(rect.y0, clip.y0),
-                             min(rect.x1, clip.x1), min(rect.y1, clip.y1))
-        else:
-            result.append({**drawing, "rect": rect})
-    return result

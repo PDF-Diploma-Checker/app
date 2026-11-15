@@ -129,10 +129,6 @@ def build_image_summary(raw_image_report, language="pl"):
             if worst_status.get(img_id) != "bad":
                 worst_status[img_id] = "failed"
             status = "failed"
-        elif is_correct == "Partial":
-            if worst_status.get(img_id) not in ("bad", "failed"):
-                worst_status[img_id] = "partial"
-            status = "partial"
         elif is_correct == "False" or is_correct is False:
             worst_status[img_id] = "bad"
             status = "bad"
@@ -152,8 +148,6 @@ def build_image_summary(raw_image_report, language="pl"):
         "total": len(statuses),
         "bad_count": statuses.count("bad"),
         "good_count": statuses.count("good"),
-        "partial_count": statuses.count("partial"),
-        "unchecked_count": statuses.count("failed"),
         "details": image_details_lines,
         "problem_details": problem_lines,
         "analysis_failed": failed,

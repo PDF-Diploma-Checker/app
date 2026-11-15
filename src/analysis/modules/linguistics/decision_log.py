@@ -116,8 +116,6 @@ def report_sources(sources, kept, blocks):
     for source, matches in sources:
         for match in matches:
             match.source = source
-            block = by_id.get(match.block_id)
-            match.language = block.language if block else ""
             match.context = _text_around(match, by_id.get(match.block_id))
             if id(match) in kept_ids:
                 reported(source, match, by_id.get(match.block_id), sections.get(match.block_id, ""))
