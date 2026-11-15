@@ -28,6 +28,11 @@ class CaptionSourceDuplicatesTest(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(errors[0].bounding_box, (100, 610, 520, 630))
 
+    def test_repeated_caption_text_is_reported_once(self):
+        block = NS(incorrect_caption=1, content='Rysunek 5.1. Skan terenu.',
+                   words=[NS(bbox=(100, 610, 520, 630), page_number=39)])
+        self.assertEqual(len(self.check([block, block], [self.visual()])), 1)
+
     def test_shared_caption_without_text_block_is_reported_once(self):
         self.assertEqual(len(self.check([], [self.visual(), self.visual()])), 1)
 
