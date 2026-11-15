@@ -1,7 +1,11 @@
 """CPU regressions for captions independent of image/table detection."""
 import unittest
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from types import SimpleNamespace as NS
-from test_list_titles import _entry, _page, _validator
+from unit_tests.test_list_titles import _entry, _page, _validator
 from analysis.modules.redaction.redaction_validator import RedactionValidator
 from analysis.extraction.raw_extraction.front_and_back_matter import (
     TableOfFiguresExtractor, TableOfTablesExtractor,
