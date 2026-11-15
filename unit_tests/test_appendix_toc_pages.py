@@ -137,6 +137,34 @@ class AppendixTocPagesTest(unittest.TestCase):
                 RedactionValidator.check_toc(check)
                 self.assertEqual([e.category for e in errors], ['TOC_mismatch'])
 
+    def test_contents_self_entry_matches_its_opening_heading(self):
+        for title in ('SPIS TREŚCI', 'Table of contents', 'Contents'):
+            with self.subTest(title=title):
+                page = _page(3, title, footer=5)
+                page.text_blocks[0].lines[0].bbox = (70, 60, 400, 80)
+                check, errors = _validator([page], toc=[_entry(title, 5)])
+                check.document_data.toc.page_nums = [3]
+                RedactionValidator.check_toc(check)
+                self.assertEqual(errors, [])
+
+    def test_contents_self_entry_still_requires_correct_destination(self):
+        page = _page(3, 'SPIS TREŚCI', footer=5)
+        page.text_blocks[0].lines[0].bbox = (70, 60, 400, 80)
+        check, errors = _validator([page], toc=[_entry('SPIS TREŚCI', 6)])
+        check.document_data.toc.page_nums = [3]
+        RedactionValidator.check_toc(check)
+        self.assertEqual([e.category for e in errors], ['TOC_mismatch'])
+
+    def test_contents_row_is_not_an_opening_heading(self):
+        for text, y in (('SPIS TREŚCI .... 5', 60), ('SPIS TREŚCI', 400)):
+            with self.subTest(text=text, y=y):
+                page = _page(3, text, footer=5)
+                page.text_blocks[0].lines[0].bbox = (70, y, 400, y + 20)
+                check, errors = _validator([page], toc=[_entry('SPIS TREŚCI', 5)])
+                check.document_data.toc.page_nums = [3]
+                RedactionValidator.check_toc(check)
+                self.assertEqual([e.category for e in errors], ['TOC_mismatch'])
+
     def test_contents_cannot_validate_its_own_entry(self):
         check, errors = _validator(
             [_page(1, 'B. Missing .... 1', footer=1), _page(2, 'Other material', footer=2)],

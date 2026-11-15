@@ -1054,8 +1054,18 @@ class RedactionValidator:
                         printed_number == entry.page if printed_number is not None
                         else page.number == expected_page
                     )
-                    # The contents themselves repeat both the title and number.
-                    matches_page = matches_page and page.number not in toc_pages
+                    # A contents row must not validate itself. A self-reference
+                    # is valid only at the actual heading on the opening page.
+                    if page.number in toc_pages:
+                        contents_titles = {"spistreści", "spistresci", "tableofcontents", "contents", "toc"}
+                        has_heading = expected_title in contents_titles and any(
+                            line.bbox[1] < page.height * 0.15
+                            and _comparable_toc_title(" ".join(span.text for span in line.spans)) == expected_title
+                            for block in page.text_blocks
+                            if block.block_type not in {"footer", "header"}
+                            for line in block.lines
+                        )
+                        matches_page = matches_page and has_heading
                 if matches_page:
                     page_full_text = ""
                     for block in page.text_blocks:
