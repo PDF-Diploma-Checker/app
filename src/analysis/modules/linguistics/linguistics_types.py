@@ -23,7 +23,6 @@ class Error_type:
     why: str = ""       # what the check saw, for the log
     source: str = ""    # the name of the check that found it
     context: str = ""   # the text around it, with the finding between « »
-    language: str = ""  # language of the text, separate from the report language
 
 @dataclass
 class Analisys_type:

@@ -42,18 +42,6 @@ class ReviewTest(unittest.TestCase):
         with patch.object(review, "make_llama", return_value=llm), patch.object(review, "typo_check", return_value=False):
             return review.review_findings(matches)
 
-    def test_english_finding_uses_english_review_in_polish_document(self):
-        match = finding('works', context='The robot «works» correctly.')
-        match.language = 'en'
-        llm = model(verdict(False, 'Correct English', 'works'))
-        with patch.object(review, 'make_llama', return_value=llm), \
-             patch.object(review, '_with_polish_letters') as polish_check:
-            self.assertEqual(review.review_findings([match], 'pl'), [])
-        polish_check.assert_not_called()
-        prompt = llm.create_chat_completion.call_args.kwargs['messages'][0]['content']
-        self.assertIn('A fragment of a thesis', prompt)
-        self.assertNotIn('podmiotem domyślnym', prompt)
-
     def test_only_rejected_findings_leave(self):
         real, correct = finding("sie"), finding("Kubernetes")
         with self.assertLogs("analysis.modules.linguistics.decision_log", "INFO") as logs:

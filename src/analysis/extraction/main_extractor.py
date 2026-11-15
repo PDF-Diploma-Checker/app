@@ -8,7 +8,7 @@ import fitz  # PyMuPDF
 import statistics
 import logging
 from pypdf import PdfReader
-from analysis.extraction.raw_extraction.pdf_figures import embedded_pdf_regions, visible_drawings
+from analysis.extraction.raw_extraction.pdf_figures import embedded_pdf_regions
 
 from analysis.extraction.raw_extraction.bare_struct import (
     DocumentData,
@@ -100,7 +100,7 @@ def extractPDF(file_path: str) -> DocumentData:
             is_blank=True,
         )
 
-        drawings = visible_drawings(page)
+        drawings = page.get_drawings()
 
         font_sizes = [
             span["size"]

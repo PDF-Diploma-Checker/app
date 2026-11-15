@@ -191,8 +191,7 @@ def review_findings(matches, language="pl"):
     """
     to_ask = []
     for match in matches:
-        match_language = getattr(match, "language", "") or language
-        reason = _why_not_asked(match, match_language)
+        reason = _why_not_asked(match, language)
         if reason:
             not_reviewed(reason, match)
         else:
@@ -200,6 +199,7 @@ def review_findings(matches, language="pl"):
     if not to_ask:
         return matches
 
+    template = _PROMPTS.get(language, _PROMPTS["pl"])
     progress = _PROGRESS.get(language, _PROGRESS["pl"])
     llm = make_llama(
         purpose="Weryfikacja błędów językowych",
@@ -215,9 +215,7 @@ def review_findings(matches, language="pl"):
             if done % NOTIFY_EVERY == 0:
                 run_control.notify(progress.format(done=done, total=len(to_ask)))
             try:
-                match_language = getattr(match, "language", "") or language
-                template = _PROMPTS.get(match_language, _PROMPTS["pl"])
-                answer = _ask(llm, template, match, match_language)
+                answer = _ask(llm, template, match, language)
             except Exception:
                 logger.exception("Review of the finding %r failed", match.content)
                 not_reviewed("the model failed", match)

@@ -109,8 +109,6 @@ _TEXTS = {
         "status_good": "Poprawny",
         "status_bad": "Wykryto rozbieżności",
         "status_failed": "Nie przeanalizowano",
-        "status_partial": "Częściowo sprawdzono",
-        "partial_values": "Porównano potwierdzone wartości; pozostałych danych nie udało się zweryfikować.",
         "details": "Szczegóły",
         "unknown": "Nieznany",
         "blurry": "Model wizyjny uznał, że obraz jest niewyraźny lub rozmazany.",
@@ -134,8 +132,6 @@ _TEXTS = {
         "status_good": "Correct",
         "status_bad": "Discrepancies found",
         "status_failed": "Not analysed",
-        "status_partial": "Partially checked",
-        "partial_values": "Confirmed values were compared; the remaining data could not be verified.",
         "details": "Details",
         "unknown": "Unknown",
         "blurry": "The vision model found the image blurry or unclear.",
@@ -224,7 +220,7 @@ def scale_problem(ticks, is_bar_chart):
 def consistency_verdict(verification):
     """Normalize the consistency model's answer to 'True', 'False', or 'Error' when it gave no usable verdict."""
     value = str(verification.get("poprawnosc_danych", "")).strip().lower()
-    return {"true": "True", "false": "False", "unreadable": "Unreadable", "partial": "Partial"}.get(value, "Error")
+    return {"true": "True", "false": "False", "unreadable": "Unreadable"}.get(value, "Error")
 
 
 def _area(img):

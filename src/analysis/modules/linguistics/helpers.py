@@ -247,14 +247,14 @@ def get_context(blocks):
     for block in blocks.logical_blocks:
         if not block.words:
             continue
-        if block.words[-1].page_number not in {0, 1} or getattr(block, "section_language", None):
+        if block.words[-1].page_number not in {0, 1}:
             if isinstance(block, ParagraphBlock):
                 contents = block.content
             elif isinstance(block, ListBlock):
                 contents = " ".join(item.text for item in block.items if item.text)
             else:
                 continue
-            block_lang = getattr(block, "section_language", None) or language(contents)
+            block_lang = language(contents)
             block_info = Block_context(
                 block = block,
                 contents = contents,
