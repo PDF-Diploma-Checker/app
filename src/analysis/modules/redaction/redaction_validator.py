@@ -905,7 +905,10 @@ class RedactionValidator:
                     caption_bbox = (0, 0, 0, 0)
                     page_num = 1
 
-                reported_captions.add(caption_key(page_num, getattr(block, "content", "")))
+                key = caption_key(page_num, getattr(block, "content", ""))
+                if key[1] and key in reported_captions:
+                    continue
+                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
