@@ -964,13 +964,29 @@ class RedactionValidator:
             return None, is_toc
 
         offset = _printed_page_offset(self.document_data)
+        toc_pages = getattr(self.document_data.toc, "page_nums", [])
         for entry in self.document_data.toc.entries:
-            expected_page = entry.page - offset
+            # PyMuPDF bookmarks contain one-based physical destinations, not
+            # printed page numbers (including when the PDF has page labels).
+            is_bookmark = entry.src_page == -1
+            expected_page = entry.page - (1 if is_bookmark else offset)
             expected_title = _comparable_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
-                if page.number == expected_page:
+                if is_bookmark:
+                    matches_page = page.number == expected_page
+                else:
+                    # Back matter can restart numbering. Prefer the number on
+                    # the actual page; use the document offset only if absent.
+                    printed_number = _footer_number(page)
+                    matches_page = (
+                        printed_number == entry.page if printed_number is not None
+                        else page.number == expected_page
+                    )
+                    # The contents themselves repeat both the title and number.
+                    matches_page = matches_page and page.number not in toc_pages
+                if matches_page:
                     page_full_text = ""
                     for block in page.text_blocks:
                         for line in block.lines:
