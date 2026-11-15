@@ -17,6 +17,7 @@ from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 from analysis.extraction.raw_extraction.image_extractor import (
     extract_raster_images,
     extract_vector_graphics,
+    extract_embedded_pdf_figures,
     merge_fragment_images,
 
 )
@@ -139,6 +140,16 @@ def extractPDF(file_path: str) -> DocumentData:
             cur_page=cur_page,
             priority_side=detected_img_priority,
         )
+
+        before_forms = len(cur_page.images)
+        detected_img_priority = extract_embedded_pdf_figures(page, page_index, cur_page, detected_img_priority)
+        form_regions = [image.bbox for image in cur_page.images[before_forms:]]
+        # An included PDF is already one complete figure. Re-clustering its paths
+        # can join it to its neighbour or misclassify a chart grid as a table.
+        drawings = [drawing for drawing in drawings if not any(
+            region[0] - 0.5 <= drawing["rect"].x0 and region[1] - 0.5 <= drawing["rect"].y0
+            and region[2] + 0.5 >= drawing["rect"].x1 and region[3] + 0.5 >= drawing["rect"].y1
+            for region in form_regions)]
 
         if all_spacings:  # Znajdywanie średniej interlinii wykorzystywanej w pliku
             for s in range(len(all_spacings)):
