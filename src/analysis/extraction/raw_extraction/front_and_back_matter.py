@@ -264,11 +264,11 @@ class TableOfFiguresExtractor(Extractor):
 
                     page_text += line_full_text + " "
                     match_full = re.search(
-                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?([A-Z\d]+(?:\.[A-Z\d]+)*)\.?\s+(.*?)(?:\.|\s)*\s+(\d+)$",
+                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?((?:[A-Z]\.)?\d+(?:\.\d+)*)\.?\s+(.*?)(?:\.|\s)*\s+(\d+)$",
                         line_full_text,
                     )
                     match_start = re.match(
-                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?([A-Z\d]+(?:\.[A-Z\d]+)*)\.?\s+(.*)",
+                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?((?:[A-Z]\.)?\d+(?:\.\d+)*)\.?\s+(.*)",
                         line_full_text,
                     )
                     match_end = re.search(r"(.*?)(?:\.|\s)*\s+(\d+)$", line_full_text)
@@ -430,11 +430,11 @@ class TableOfTablesExtractor(Extractor):
 
                     page_text += line_full_text + " "
                     match_full = re.search(
-                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?([A-Z\d]+(?:\.[A-Z\d]+)*)\.?\s+(.*?)(?:\.|\s)*\s+(\d+)$",
+                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?((?:[A-Z]\.)?\d+(?:\.\d+)*)\.?\s+(.*?)(?:\.|\s)*\s+(\d+)$",
                         line_full_text,
                     )
                     match_start = re.match(
-                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?([A-Z\d]+(?:\.[A-Z\d]+)*)\.?\s+(.*)",
+                        r"^(?:[A-Z][a-zśł]{3,10}\.?\s*)?((?:[A-Z]\.)?\d+(?:\.\d+)*)\.?\s+(.*)",
                         line_full_text,
                     )
                     match_end = re.search(r"(.*?)(?:\.|\s)*\s+(\d+)$", line_full_text)
