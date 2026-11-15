@@ -1,6 +1,6 @@
 """Word-only submission from a linguistic error marker, off the GUI thread."""
 from PySide6.QtCore import QThread, Signal, Qt
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFrame, QHBoxLayout
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QFrame, QHBoxLayout, QSizePolicy
 from common import shared_dictionary
 from . import styles
 
@@ -54,6 +54,7 @@ class ProposalDialog(QDialog):
             item = QLabel(text)
             item.setTextFormat(Qt.PlainText)
             item.setWordWrap(True)
+            item.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
             item.setStyleSheet(f"color: {color}; font-size: {size}px; font-weight: {600 if bold else 400}; background: transparent;")
             return item
 
@@ -96,6 +97,7 @@ class ProposalDialog(QDialog):
         self.status = label('')
         self.status.setAccessibleName('Submission status' if en else 'Stan zgłoszenia')
         layout.addWidget(self.status)
+        layout.addStretch()
         buttons = QHBoxLayout()
         buttons.addStretch()
         self.cancel = QPushButton('Cancel' if en else 'Anuluj')
