@@ -891,6 +891,11 @@ class RedactionValidator:
         else:
             comment = "Podpis nie zawiera odwołania do bibliografii (np. [1]) ani informacji o źródle (np. 'Źródło: opracowanie własne')."
 
+        reported_captions = set()
+
+        def caption_key(page, text):
+            return page, " ".join(text.split()).casefold()
+
         for block in self.document_data_linguistics.logical_blocks:
             if getattr(block, "incorrect_caption", 0) == 1:
                 if getattr(block, "words", []):
@@ -909,6 +914,10 @@ class RedactionValidator:
                     caption_bbox = (0, 0, 0, 0)
                     page_num = 1
 
+                key = caption_key(page_num, getattr(block, "content", ""))
+                if key[1] and key in reported_captions:
+                    continue
+                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
@@ -937,6 +946,10 @@ class RedactionValidator:
                     else ""
                 )
 
+                key = caption_key(getattr(visual, "page_number", 1), caption_text)
+                if caption_text and key in reported_captions:
+                    continue
+                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
