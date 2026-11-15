@@ -32,6 +32,9 @@ Return JSON with the key "niezgodnosci": a list of objects {"element": name, "w_
 
 _THOUSANDS = r"[1-9]\d{0,2}(?:[ \u00a0,]\d{3})+(?!\d)"
 _NUMBER = re.compile(rf"(?<![\w.,])[-+−]?(?:{_THOUSANDS}|\d+(?:[.,]\d+)?)")
+# Parse interval endpoints separately so an ASCII separator is not a minus sign.
+_ENDPOINT = r"[-+−]?\d+(?:[.,]\d+)?"
+_RANGE = re.compile(rf"^\s*({_ENDPOINT})\s*[–—-]\s*({_ENDPOINT})\s*[^\d]*$")
 _READ_VALUE = re.compile(r":(.+)$", re.M)
 _MIN_AXIS_RUN = 4       # so many printed numbers in a row with one step are the scale of an axis, not values of the data
 _MAX_UNIT_LENGTH = 4    # "ms", "MB/s"; a longer word is a noun in some grammatical case: "200 błędów", "200 błędy"
@@ -44,6 +47,9 @@ def _value(text):
 
 def _numbers(text):
     """(number, decimal places) of each number in the text. "5,000" and "5 000" are thousands, "0,989" is a fraction."""
+    interval = _RANGE.fullmatch(str(text))
+    if interval:
+        return _numbers(interval[1]) + _numbers(interval[2])
     found = []
     for digits in _NUMBER.findall(str(text)):
         digits = digits.replace("−", "-")
@@ -75,24 +81,21 @@ def _same_value(in_text, in_image):
     if len(image_numbers) != 1:
         return False
     image, image_places = image_numbers[0]
-    if len(text_numbers) == 2 and re.search(r"\d\s*[–—-]\s*\d", str(in_text)):
+    if len(text_numbers) == 2 and _RANGE.fullmatch(str(in_text)):
         low, high = sorted(number for number, _ in text_numbers)
         return low <= image <= high and _units_agree(in_text, in_image)
     if len(text_numbers) != 1:
         return False
     number, places = text_numbers[0]
-    # Normalize only known compatible units. A bare fraction may express a percent.
+    # Normalize only known compatible units with explicit fraction context.
     units = {"ms": ("time", .001), "s": ("time", 1), "min": ("time", 60),
              "kb": ("bytes", 1000), "mb": ("bytes", 1e6), "gb": ("bytes", 1e9),
-             "%": ("fraction", .01)}
+             "%": ("fraction", .01), "fraction": ("fraction", 1),
+             "proportion": ("fraction", 1)}
     a, b = _unit(in_text), _unit(in_image)
     scale_a = scale_b = 1
     if a in units and b in units and units[a][0] == units[b][0]:
         scale_a, scale_b = units[a][1], units[b][1]
-    elif a == "%" and not b and abs(image) <= 1:
-        scale_a = .01
-    elif b == "%" and not a and abs(number) <= 1:
-        scale_b = .01
     elif not _units_agree(in_text, in_image):
         return False
     number, image = number * scale_a, image * scale_b
@@ -169,7 +172,7 @@ def _grounded_value(quote, element, value):
         match = item.search(clause)
         if match is None:
             continue
-        remainder = clause[:match.start()] + clause[match.end():]
+        remainder = (clause[:match.start()] + clause[match.end():]).strip(" :\t")
         if [n for n, _ in _numbers(remainder)] != [n for n, _ in expected]:
             continue
         if _unit(value) and _value(value) not in _value(remainder):
@@ -183,8 +186,13 @@ def _is_comparable(mismatch, paragraph, image_data=None):
     in_text, in_image = _numbers(mismatch.get("w_tekscie", "")), _numbers(mismatch.get("na_rysunku", ""))
     if not in_text or not in_image:
         return False
+    # A bare number does not establish whether the quantity is a fraction,
+    # percentage points, or something else. Neither equality nor error is proven.
+    a, b = _unit(mismatch.get("w_tekscie", "")), _unit(mismatch.get("na_rysunku", ""))
+    if (a == "%" and not b) or (b == "%" and not a):
+        return False
     # A pair such as 37/80 is a ratio, not a range or a single measured value.
-    if len(in_image) != 1 or (len(in_text) != 1 and not re.search(r"\d\s*[–—-]\s*\d", str(mismatch.get("w_tekscie", "")))):
+    if len(in_image) != 1 or (len(in_text) != 1 and not _RANGE.fullmatch(str(mismatch.get("w_tekscie", "")))):
         return False
     if image_data is not None:
         # The model must point to evidence on both sides, rather than borrow an
@@ -198,6 +206,9 @@ def _is_comparable(mismatch, paragraph, image_data=None):
                 return False
             if not _grounded_value(quote, mismatch.get("element", ""), value):
                 return False
+    # Literal, item-grounded quotes already establish presence in both sources.
+    if image_data is not None:
+        return True
     return paragraph is None or {n for n, _ in in_text} <= {n for n, _ in _numbers(paragraph)}
 
 

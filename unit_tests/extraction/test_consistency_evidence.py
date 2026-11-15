@@ -33,11 +33,33 @@ class ConsistencyEvidenceTest(unittest.TestCase):
             self.assertEqual(self.verdict(text, image), 'Unreadable')
 
     def test_explicit_unit_conversions(self):
-        for text, image in [('0.81', '81%'), ('81%', '0.81'),
+        for text, image in [('0.81 fraction', '81%'), ('81%', '0.81 proportion'),
                             ('1000 ms', '1 s'), ('1.5 GB', '1500 MB')]:
             self.assertEqual(self.verdict(text, image), 'True', (text, image))
-        for text, image in [('0.81', '80%'), ('1100 ms', '1 s'), ('300 ms', '300 s')]:
+        for text, image in [('0.81 fraction', '80%'), ('1100 ms', '1 s'), ('300 ms', '300 s')]:
             self.assertEqual(self.verdict(text, image), 'False', (text, image))
+
+    def test_bare_percentage_conversion_is_ambiguous(self):
+        for text, image in [('0.81', '81%'), ('81%', '0.81'),
+                            ('0.81', '80%'), ('81', '81%')]:
+            self.assertEqual(self.verdict(text, image), 'Unreadable')
+
+    def test_ascii_and_en_dash_intervals_preserve_endpoints(self):
+        for interval in ['0.4-0.6', '0.4 -0.6', '0.4 - 0.6', '0.4–0.6']:
+            with self.subTest(interval=interval):
+                self.assertEqual(_numbers(interval), [(0.4, 1), (0.6, 1)])
+                self.assertEqual(self.verdict(interval, '0.5'), 'True')
+                self.assertEqual(self.verdict(interval, '-0.5'), 'False')
+                self.assertEqual(self.verdict(interval, '0.7'), 'False')
+                self.assertEqual(self.verdict(interval, '0.7', f'A: {interval}', 'A: 0.7'), 'False')
+        for interval in ['-0.6--0.4', '-0.6 - -0.4', '-0.6–-0.4', '−0.6–−0.4']:
+            with self.subTest(interval=interval):
+                self.assertEqual(_numbers(interval), [(-0.6, 1), (-0.4, 1)])
+                self.assertEqual(self.verdict(interval, '-0.5'), 'True')
+                self.assertEqual(self.verdict(interval, '0.5'), 'False')
+                self.assertEqual(self.verdict(interval, '-0.7'), 'False')
+                self.assertEqual(self.verdict(interval, '-0.7', f'A: {interval}', 'A: -0.7'), 'False')
+        self.assertEqual(self.verdict('-0.4-0.6', '0'), 'True')
 
     def test_rounding_requires_decimal_precision(self):
         for text, image in [('0.81', '0'), ('0.4', '0'), ('1', '1.4'), ('0.81', '0.82')]:
