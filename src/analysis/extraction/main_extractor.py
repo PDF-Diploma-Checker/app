@@ -6,6 +6,9 @@ W przyszłości proponuje to przenieść jako metody struktury zamiast oddzielny
 import os
 import fitz  # PyMuPDF
 import statistics
+import logging
+from pypdf import PdfReader
+from analysis.extraction.raw_extraction.pdf_figures import embedded_pdf_regions
 
 from analysis.extraction.raw_extraction.bare_struct import (
     DocumentData,
@@ -17,6 +20,7 @@ from analysis.extraction.raw_extraction.geometry import GeometryClassifier
 from analysis.extraction.raw_extraction.image_extractor import (
     extract_raster_images,
     extract_vector_graphics,
+    extract_embedded_pdf_figures,
     merge_fragment_images,
 
 )
@@ -60,6 +64,11 @@ def extractPDF(file_path: str) -> DocumentData:
 
     # TODO: dalsza walidacja
     doc = fitz.open(file_path)
+    try:
+        form_reader = PdfReader(file_path, strict=False)
+    except Exception:
+        logging.getLogger(__name__).exception("Could not inspect PDF form resources")
+        form_reader = None
     metadata = doc.metadata
     document_data = DocumentData(metadata=metadata)
 
@@ -140,6 +149,17 @@ def extractPDF(file_path: str) -> DocumentData:
             priority_side=detected_img_priority,
         )
 
+        before_forms = len(cur_page.images)
+        detected_img_priority = extract_embedded_pdf_figures(page, page_index, cur_page, detected_img_priority,
+                                                            embedded_pdf_regions(form_reader, page_index, page))
+        form_regions = [image.bbox for image in cur_page.images[before_forms:]]
+        # An included PDF is already one complete figure. Re-clustering its paths
+        # can join it to its neighbour or misclassify a chart grid as a table.
+        drawings = [drawing for drawing in drawings if not any(
+            region[0] - 0.5 <= drawing["rect"].x0 and region[1] - 0.5 <= drawing["rect"].y0
+            and region[2] + 0.5 >= drawing["rect"].x1 and region[3] + 0.5 >= drawing["rect"].y1
+            for region in form_regions)]
+
         if all_spacings:  # Znajdywanie średniej interlinii wykorzystywanej w pliku
             for s in range(len(all_spacings)):
                 all_spacings[s] = round(all_spacings[s], 1)
@@ -187,5 +207,7 @@ def extractPDF(file_path: str) -> DocumentData:
     document_data.tot = tot_extractor.extract(
         document_data.pages, document_data.toc.page_nums if document_data.toc else []
     )
+    if form_reader is not None:
+        form_reader.close()
     doc.close()
     return document_data
