@@ -26,6 +26,8 @@ def embedded_pdf_regions(reader, page_index, page):
         path_rect = None
         pending_clip = False
         for args, op in ContentStream(stream, reader).operations:
+            if len(regions) >= 1000:
+                break
             if op == b'q':
                 stack.append((fitz.Matrix(matrix), fitz.Rect(clip)))
             elif op == b'Q':

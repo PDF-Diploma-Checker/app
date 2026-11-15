@@ -127,6 +127,27 @@ This body paragraph discusses Figure 1.
         mapped = PDFMapper().map_to_schema(data)
         self.assertNotIn('long chart legend', ' '.join(getattr(b, 'content', '') for b in mapped.logical_blocks))
 
+    def test_reused_form_placements_are_distinct_and_unused_resources_ignored(self):
+        with chart_pdf(text_only=True) as source, fitz.open() as thesis:
+            page = thesis.new_page()
+            page.show_pdf_page(fitz.Rect(50, 100, 270, 260), source, 0)
+            page.show_pdf_page(fitz.Rect(320, 100, 540, 260), source, 0)
+            forms = [item for item in page.get_xobjects() if item[2] == 0]
+            matrices = [thesis.xref_get_key(item[0], 'Matrix')[1][1:-1] for item in forms]
+            xref, name = forms[0][:2]
+            thesis.xref_set_key(xref, 'Matrix', '[1 0 0 1 0 0]')
+            content = page.get_contents()[0]
+            thesis.update_stream(content, (' '.join(f'q {matrix} cm /{name} Do Q' for matrix in matrices)).encode())
+            page.set_contents(content)
+            page.insert_text((50, 265), 'Figure 1. Left chart', fontsize=10)
+            page.insert_text((320, 265), 'Figure 2. Right chart', fontsize=10)
+            thesis.save('thesis.pdf')
+        data = extractPDF('thesis.pdf')
+        images = data.pages[0].images
+        self.assertEqual(len(images), 2)
+        self.assertNotEqual(images[0].path, images[1].path)
+        self.assertEqual({f['id'] for f in collect_figures(data)}, {'Figure 1', 'Figure 2'})
+
     def test_side_by_side_pdfs_keep_their_own_captions(self):
         with chart_pdf() as source, fitz.open() as thesis:
             page = thesis.new_page()
