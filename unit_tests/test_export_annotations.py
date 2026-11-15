@@ -45,6 +45,27 @@ class ExtraRectsExportTest(unittest.TestCase):
                 mock.patch.object(main_window, "MessageBox"):
             main_window.PDFReader.export_pdf_with_annotations(reader)
 
+    def test_clickable_word_decoration_is_not_written_to_the_pdf(self):
+        from ui.select_text import SelectablePdfView, SpellingHighlightBox
+        errors = [{"page": 0, "category": "TYPOS", "found_text": "wyraz", "coords": rect_coords(72, 100)}]
+        view = SelectablePdfView()
+        try:
+            view.add_errors(errors)
+            self.assertIsInstance(view.highlight_boxes[0], SpellingHighlightBox)
+            self.export(errors)
+            pages = self.highlights()
+            self.assertEqual(len(pages[0]), 1)
+            stroke = pages[0][0][1]
+            self.assertAlmostEqual(stroke[0], 0.95, places=2)
+            self.assertAlmostEqual(stroke[1], 0.35, places=2)
+            with fitz.open(self.source) as original:
+                self.assertEqual(list(original[0].annots() or []), [])
+            with fitz.open(self.target) as exported:
+                self.assertEqual(len(list(exported[0].annots() or [])), 1)
+                self.assertEqual(exported[0].get_links(), [])
+        finally:
+            view.close()
+
     def test_global_findings_and_summary_are_not_pdf_annotations(self):
         self.export([
             {"page": 0, "category": "bibliography_summary", "found_text": "[1] Book"},
