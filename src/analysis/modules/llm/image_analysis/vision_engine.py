@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 # The model answers these best in English, also for a Polish chart; the labels stay as printed in the image.
 READ_PROMPT = (
     "Read this chart. Write its title, then one line for each bar or point in the form 'label: value', "
-    "exactly as printed in the image. Do not add anything else."
+    "only when the value is explicitly printed next to that item. "
+    "Do not estimate values from bar heights, curves, positions or axis ticks. "
+    "Omit items without printed values. Do not add anything else."
 )
 READ_MAX_TOKENS = 512
 YES_NO_MAX_TOKENS = 6
