@@ -128,23 +128,15 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
     return "", priority_side
 
-def extract_embedded_pdf_figures(page, page_index, cur_page, priority_side=None):
-    """Recognize an included PDF by its outer Form XObject and an adjacent figure caption.
+def extract_embedded_pdf_figures(page, page_index, cur_page, priority_side=None, placements=()):
+    """Recognize captioned PDF Forms using their transformed invocation bounds.
 
-    Nested forms have local coordinates, so only direct page invocations are used.
-    A full imported thesis page must not turn into one giant ignored image region.
-    Raster and path fragments are subsequently merged into this rendered figure.
+    The content parser supplies nested and reused Form placements. Larger wrappers
+    win over their components, while imported full pages remain ordinary pages.
     """
-    try:
-        forms = page.get_xobjects()
-    except (AttributeError, RuntimeError, ValueError):
-        logger.exception("Could not inspect embedded PDF objects on page %s", page_index)
-        return priority_side
     regions = []
-    for xref, name, invoker, raw_bbox in forms:
-        if invoker != 0:
-            continue
-        bbox = (fitz.Rect(raw_bbox) * page.transformation_matrix) & page.rect
+    for invocation, (xref, raw_bbox) in enumerate(sorted(placements, key=lambda item: item[1].get_area(), reverse=True)):
+        bbox = fitz.Rect(raw_bbox)
         if bbox.is_empty or not bbox.is_valid or min(bbox.width, bbox.height) < 20:
             continue
         if bbox.get_area() > page.rect.get_area() * 0.85:
@@ -156,7 +148,7 @@ def extract_embedded_pdf_figures(page, page_index, cur_page, priority_side=None)
             continue
         try:
             pix = page.get_pixmap(clip=bbox, matrix=VECTOR_RENDER_ZOOM)
-            path = f"images/p{page_index}_pdf_{xref}.png"
+            path = f"images/p{page_index}_pdf_{xref}_{invocation}.png"
             pix.save(path)
         except (RuntimeError, ValueError, OSError):
             logger.exception("Could not render embedded PDF figure on page %s", page_index)

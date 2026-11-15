@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import shutil
+import subprocess
 from types import SimpleNamespace
 import unittest
 
@@ -81,6 +83,49 @@ class EmbeddedPdfFiguresTest(unittest.TestCase):
             data = self.extract(nested, rotate=90)
         self.assertEqual(len(data.pages[0].images), 1)
         self.assertLess(data.pages[0].images[0].bbox[3], 340)
+
+    def test_content_stream_transform_is_used_for_pdf_placement(self):
+        with chart_pdf(text_only=True) as source, fitz.open() as thesis:
+            page = thesis.new_page()
+            page.show_pdf_page(fitz.Rect(80, 100, 500, 330), source, 0)
+            xref, name, _, _ = next(form for form in page.get_xobjects() if form[2] == 0)
+            matrix = thesis.xref_get_key(xref, 'Matrix')[1][1:-1]
+            thesis.xref_set_key(xref, 'Matrix', '[1 0 0 1 0 0]')
+            for content in page.get_contents():
+                stream = thesis.xref_stream(content)
+                thesis.update_stream(content, stream.replace(f'/{name} Do'.encode(), f'{matrix} cm /{name} Do'.encode()))
+            page.insert_text((80, 355), 'Figure 1. An externally transformed PDF')
+            thesis.save('thesis.pdf')
+        data = extractPDF('thesis.pdf')
+        self.assertEqual(len(data.pages[0].images), 1)
+        self.assertAlmostEqual(data.pages[0].images[0].bbox[0], 80, places=1)
+        self.assertAlmostEqual(data.pages[0].images[0].bbox[3], 327, places=1)
+
+    @unittest.skipUnless(shutil.which('pdflatex'), 'pdflatex is optional for this integration fixture')
+    def test_actual_latex_includegraphics_keeps_the_complete_figure(self):
+        with chart_pdf(text_only=True) as source:
+            source.save('chart.pdf')
+        Path('main.tex').write_text(r"""\documentclass{article}
+\usepackage{graphicx}
+\begin{document}
+This body paragraph discusses Figure 1.
+\begin{figure}[h]
+\centering
+\includegraphics[width=.8\textwidth]{chart.pdf}
+\caption{A separately exported PDF chart}
+\end{figure}
+\end{document}
+""")
+        subprocess.run(['pdflatex', '-no-shell-escape', '-interaction=batchmode', '-halt-on-error', 'main.tex'],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, timeout=30)
+        data = extractPDF('main.pdf')
+        self.assertEqual(len(data.pages[0].images), 1)
+        image = data.pages[0].images[0]
+        self.assertTrue(image.description.startswith('Figure 1'))
+        self.assertLess(image.bbox[1], 180)
+        self.assertGreater(image.bbox[3], 290)
+        mapped = PDFMapper().map_to_schema(data)
+        self.assertNotIn('long chart legend', ' '.join(getattr(b, 'content', '') for b in mapped.logical_blocks))
 
     def test_side_by_side_pdfs_keep_their_own_captions(self):
         with chart_pdf() as source, fitz.open() as thesis:
