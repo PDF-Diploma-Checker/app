@@ -217,7 +217,7 @@ def verdict_from_answer(answer, language="pl", printed=None, paragraph=None, ima
     so the verdict is decided here from the values and not taken from the model. `printed` holds the numbers printed
     in the image: a chart without values gets values made up when it is read, and those prove nothing against the text."""
     mismatches = answer.get("niezgodnosci") if isinstance(answer, dict) else None
-    if not isinstance(mismatches, list):
+    if not isinstance(mismatches, list) or any(not isinstance(m, dict) for m in mismatches):
         return {"poprawnosc_danych": "Error", "bledy": "None"}
     real = [
         m for m in mismatches

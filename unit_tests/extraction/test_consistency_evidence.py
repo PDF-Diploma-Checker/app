@@ -93,6 +93,15 @@ class ConsistencyEvidenceTest(unittest.TestCase):
                                          paragraph='A: 1', image_data=data)
             self.assertEqual(result['poprawnosc_danych'], 'Unreadable')
 
+    def test_malformed_entries_are_errors(self):
+        valid = dict(element='A', w_tekscie='40', na_rysunku='70')
+        for entry in ['bad entry', None, 42, []]:
+            for entries in [[entry], [valid, entry], [entry, valid]]:
+                with self.subTest(entries=entries):
+                    result = verdict_from_answer({'niezgodnosci': entries})
+                    self.assertEqual(result['poprawnosc_danych'], 'Error')
+        self.assertEqual(verdict_from_answer({'niezgodnosci': []})['poprawnosc_danych'], 'True')
+
     def test_units_cannot_be_invented_in_quotes(self):
         self.assertEqual(self.verdict('40 s', '70 ms', 'A: 40 ms', 'A: 70 ms'), 'Unreadable')
 
