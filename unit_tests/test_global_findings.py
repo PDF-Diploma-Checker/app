@@ -72,6 +72,24 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertFalse(any("4 (1)" in text for text in texts))
         self.assertEqual(self.errors, original)
 
+    def test_word_proposal_hint_is_visible_without_ai_results(self):
+        panel, _ = build_report_panel(None, lambda: None, [{"category": "TYPOS", "page": 0}])
+        self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
+
+    def test_global_and_bibliography_sections_follow_analysis_results(self):
+        data = {"content_grade": {"grade": 80}, "statystyki_zdan": {"active_ratio": 70}}
+        errors = self.errors + [{"category": "TYPOS", "page": 0}]
+        panel, download = build_report_panel(data, lambda: None, errors)
+        titles = []
+        for i in range(panel.layout().count()):
+            widget = panel.layout().itemAt(i).widget()
+            if widget is not None:
+                titles.extend(label.text() for label in widget.findChildren(QLabel)
+                              if label.text() in {"Global findings", "Bibliography", "Sentence statistics"})
+        self.assertEqual(titles[-2:], ["Global findings", "Bibliography"])
+        self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
+        self.assertIs(panel.layout().itemAt(panel.layout().count() - 1).widget(), download)
+
     def test_reader_excludes_global_markers_after_json_reload(self):
         with tempfile.TemporaryDirectory() as folder:
             index = Path(folder) / "index.json"
