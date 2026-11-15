@@ -26,6 +26,31 @@ def _comparable_title(text):
     return "".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
 
 
+VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
+
+
+def _footer_number(page):
+    """The page number printed in the footer of a page, None when there is none."""
+    for block in page.text_blocks:
+        if block.block_type == "footer":
+            text = " ".join(span.text for line in block.lines for span in line.spans)
+            match = re.search(r"\d+", text)
+            if match:
+                return int(match.group())
+    return None
+
+
+def _printed_page_offset(document_data):
+    """How much the numbers printed on the pages differ from page.number. Theses leave out different front pages from
+    the numbering, so what counts as a page's number is what most of the document prints."""
+    differences = Counter(
+        number - page.number
+        for page in document_data.pages
+        if (number := _footer_number(page)) is not None
+    )
+    return differences.most_common(1)[0][0] if differences else 0
+
+
 def _caption_title(text):
     # PDF line wrapping splits words; list extraction also removes sentence dots.
     text = re.sub(r"(?<=\w)[-\u00ad]\s+(?=\w)", "", text)
@@ -72,31 +97,6 @@ def _listed_caption_on_page(page, entry, kind):
         if _caption_title(text[match.end():end]).startswith(expected):
             return True
     return False
-
-
-VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
-
-
-def _footer_number(page):
-    """The page number printed in the footer of a page, None when there is none."""
-    for block in page.text_blocks:
-        if block.block_type == "footer":
-            text = " ".join(span.text for line in block.lines for span in line.spans)
-            match = re.search(r"\d+", text)
-            if match:
-                return int(match.group())
-    return None
-
-
-def _printed_page_offset(document_data):
-    """How much the numbers printed on the pages differ from page.number. Theses leave out different front pages from
-    the numbering, so what counts as a page's number is what most of the document prints."""
-    differences = Counter(
-        number - page.number
-        for page in document_data.pages
-        if (number := _footer_number(page)) is not None
-    )
-    return differences.most_common(1)[0][0] if differences else 0
 
 
 @dataclass
