@@ -55,21 +55,26 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
     candidates = {"above": [], "below": []}
 
-    for block in text_blocks:
-        bx0, by0, bx1, by1 = block.bbox
+    # PDF extraction can combine adjacent captions into one text block. Their
+    # individual line boxes preserve which chart each caption belongs to.
+    for block, line in ((block, line) for block in text_blocks for line in block.lines):
+        bx0, by0, bx1, by1 = line.bbox
 
-        is_close_above = abs(by1 - y0) < 40
-        is_close_below = abs(by0 - y1) < 40
+        overlap = min(x1, bx1) - max(x0, bx0)
+        if overlap <= 0 or overlap < min(x1 - x0, bx1 - bx0) * 0.25:
+            continue
+        is_close_above = -2 <= y0 - by1 < 40 or -2 <= y0 - block.bbox[3] < 40
+        is_close_below = -2 <= by0 - y1 < 40 or -2 <= block.bbox[1] - y1 < 40
 
         if is_close_above or is_close_below:
             full_text = " ".join(
-                span.text for line in block.lines for span in line.spans
+                span.text for span in line.spans
             ).strip()
             if not full_text:
                 continue
 
             side = "above" if is_close_above else "below"
-            sizes = [sp.size for line in block.lines for sp in line.spans if sp.text.strip()]
+            sizes = [sp.size for sp in line.spans if sp.text.strip()]
             block_size = max(set(sizes), key=sizes.count) if sizes else None
             candidates[side].append((by0, by1, full_text, block_size))
 
@@ -79,17 +84,17 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
     primary = priority_side if priority_side else "below"
     secondary = "above" if primary == "below" else "below"
 
-    def build_full_caption(block_list):
+    def build_full_caption(block_list, side):
         if not block_list:
             return ""
-        start_idx = -1
+        starts = []
         for idx, (_, _, text, _) in enumerate(block_list):
-            if text.lower().startswith(img_keywords):
-                start_idx = idx
-                break
-
-        if start_idx == -1:
+            match = re.match(r"^(?:rys(?:unek)?\.?|fot\.?|ilustracja|wykres|rycina|schemat|diagram|grafika|figure|fig\.?|photo|img|image|schema|chart|plot)\s*\d+(?:\.\d+)*\.?", text, re.I)
+            if match and not re.match(r"(?:przedstawia|pokazuje|ilustruje|prezentuje|shows|illustrates|presents)\b", text[match.end():].lstrip(" .:-–—"), re.I):
+                starts.append(idx)
+        if not starts:
             return ""
+        start_idx = min(starts, key=lambda idx: abs((block_list[idx][1] - y0) if side == "above" else (block_list[idx][0] - y1)))
 
         caption_parts = [block_list[start_idx][2]]
         last_by1 = block_list[start_idx][1]
@@ -113,15 +118,56 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
 
         return " ".join(" ".join(caption_parts).split())
 
-    caption_primary = build_full_caption(candidates[primary])
+    caption_primary = build_full_caption(candidates[primary], primary)
     if caption_primary:
         return caption_primary, primary
 
-    caption_secondary = build_full_caption(candidates[secondary])
+    caption_secondary = build_full_caption(candidates[secondary], secondary)
     if caption_secondary:
         return caption_secondary, secondary
 
     return "", priority_side
+
+def extract_embedded_pdf_figures(page, page_index, cur_page, priority_side=None):
+    """Recognize an included PDF by its outer Form XObject and an adjacent figure caption.
+
+    Nested forms have local coordinates, so only direct page invocations are used.
+    A full imported thesis page must not turn into one giant ignored image region.
+    Raster and path fragments are subsequently merged into this rendered figure.
+    """
+    try:
+        forms = page.get_xobjects()
+    except (AttributeError, RuntimeError, ValueError):
+        logger.exception("Could not inspect embedded PDF objects on page %s", page_index)
+        return priority_side
+    regions = []
+    for xref, name, invoker, raw_bbox in forms:
+        if invoker != 0:
+            continue
+        bbox = (fitz.Rect(raw_bbox) * page.transformation_matrix) & page.rect
+        if bbox.is_empty or not bbox.is_valid or min(bbox.width, bbox.height) < 20:
+            continue
+        if bbox.get_area() > page.rect.get_area() * 0.85:
+            continue
+        description, side = find_image_description(tuple(bbox), cur_page.text_blocks, priority_side)
+        if not description:
+            continue
+        if any((bbox & previous).get_area() > min(bbox.get_area(), previous.get_area()) * 0.95 for previous in regions):
+            continue
+        try:
+            pix = page.get_pixmap(clip=bbox, matrix=VECTOR_RENDER_ZOOM)
+            path = f"images/p{page_index}_pdf_{xref}.png"
+            pix.save(path)
+        except (RuntimeError, ValueError, OSError):
+            logger.exception("Could not render embedded PDF figure on page %s", page_index)
+            continue
+        cur_page.images.append(ImageInfo(path=path, bbox=tuple(bbox), width=pix.width,
+                                         height=pix.height, image_type="vector", description=description))
+        regions.append(bbox)
+        if priority_side is None:
+            priority_side = side
+    return priority_side
+
 
 def merge_fragment_images(
     page: fitz.Page, cur_page: PageData, min_overlap: float = 0.2, pad: float = 5.0

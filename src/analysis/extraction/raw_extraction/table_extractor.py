@@ -111,6 +111,8 @@ def extract_tables(
     # znajdowanie tabel, wyciąganie danych i zapisywanie do list
     tabs = page.find_tables(strategy="lines_strict")
     for tab in tabs.tables:
+        if any(fitz.Rect(image.bbox).contains(fitz.Rect(tab.bbox)) for image in cur_page.images if image.description):
+            continue
         try:
             extracted_data = tab.extract()
         except Exception as e:
