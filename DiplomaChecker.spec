@@ -27,7 +27,7 @@ def add_all(pkg):
 
 # Always required
 for pkg in ("spacy", "pl_core_news_lg", "en_core_web_lg", "morfeusz2",
-            "lingua", "spellchecker", "language_tool_python"):
+            "lingua", "spellchecker", "language_tool_python", "pypdf"):
     add_all(pkg)
 
 # Optional AI runtime (extras cpu/gpu). llama_cpp loads its shared libs via ctypes,
