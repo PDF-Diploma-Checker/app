@@ -26,6 +26,15 @@ def _comparable_title(text):
     return "".join(re.sub(r"[\.\s·-]{2,}", " ", text.lower().strip().rstrip(".")).split())
 
 
+def _comparable_toc_title(text):
+    # Contents may spell out "Dodatek A", whereas the heading prints "A.".
+    text = re.sub(
+        r"^(?:dodatek|appendix|załącznik|zalacznik|aneks)\s+([a-z])(?=[.\s])",
+        r"\1", text.strip(), flags=re.IGNORECASE,
+    )
+    return _comparable_title(text)
+
+
 VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or counts it as page 1
 
 
@@ -49,6 +58,54 @@ def _printed_page_offset(document_data):
         if (number := _footer_number(page)) is not None
     )
     return differences.most_common(1)[0][0] if differences else 0
+
+
+def _caption_title(text):
+    # PDF line wrapping splits words; list extraction also removes sentence dots.
+    text = re.sub(r"(?<=\w)[-\u00ad]\s+(?=\w)", "", text)
+    return _comparable_title(text).replace(".", "")
+
+
+_CAPTION = re.compile(
+    r"^(?P<kind>Rysunek|Rys\.|Figure|Fig\.|Tabela|Table)\s+"
+    r"(?P<number>(?:[A-Z]\.|\d+\.)*\d+)\.?\s+", re.IGNORECASE | re.MULTILINE
+)
+
+
+def _listed_caption_on_page(page, entry, kind):
+    """Check captions even when image/table detection lost their association."""
+    expected = _caption_title(entry.title)
+    if not expected:
+        return False
+    number = str(getattr(entry, "number", "")).rstrip(".").casefold()
+    objects = page.images if kind == "figure" else page.tables
+    for obj in objects:
+        description = obj.description
+        if not description:
+            continue
+        match = _CAPTION.match(description)
+        if number and (not match or match['number'].casefold() != number):
+            continue
+        title = _caption_title(description[match.end():] if match else description)
+        if title and (expected in title or (not number and title in expected)):
+            return True
+
+    # Keep line starts to distinguish actual captions from prose references.
+    text = "\n".join(
+        " ".join(span.text for span in line.spans)
+        for block in page.text_blocks
+        if block.block_type not in {"footer", "header"}
+        for line in block.lines
+    )
+    captions = list(_CAPTION.finditer(text))
+    for i, match in enumerate(captions):
+        caption_kind = "figure" if match['kind'].lower().startswith(("rys", "fig")) else "table"
+        if caption_kind != kind or (number and match['number'].casefold() != number):
+            continue
+        end = captions[i + 1].start() if i + 1 < len(captions) else len(text)
+        if _caption_title(text[match.end():end]).startswith(expected):
+            return True
+    return False
 
 
 @dataclass
@@ -882,6 +939,11 @@ class RedactionValidator:
         else:
             comment = "Podpis nie zawiera odwołania do bibliografii (np. [1]) ani informacji o źródle (np. 'Źródło: opracowanie własne')."
 
+        reported_captions = set()
+
+        def caption_key(page, text):
+            return page, " ".join(text.split()).casefold()
+
         for block in self.document_data_linguistics.logical_blocks:
             if getattr(block, "incorrect_caption", 0) == 1:
                 if getattr(block, "words", []):
@@ -900,6 +962,10 @@ class RedactionValidator:
                     caption_bbox = (0, 0, 0, 0)
                     page_num = 1
 
+                key = caption_key(page_num, getattr(block, "content", ""))
+                if key[1] and key in reported_captions:
+                    continue
+                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
@@ -928,6 +994,10 @@ class RedactionValidator:
                     else ""
                 )
 
+                key = caption_key(getattr(visual, "page_number", 1), caption_text)
+                if caption_text and key in reported_captions:
+                    continue
+                reported_captions.add(key)
                 self.errors.append(
                     Error(
                         id=self._get_next_id(),
@@ -970,7 +1040,7 @@ class RedactionValidator:
             # printed page numbers (including when the PDF has page labels).
             is_bookmark = entry.src_page == -1
             expected_page = entry.page - (1 if is_bookmark else offset)
-            expected_title = _comparable_title(entry.title)
+            expected_title = _comparable_toc_title(entry.title)
             correct_page = False
 
             for page in self.document_data.pages:
@@ -993,7 +1063,7 @@ class RedactionValidator:
                             line_text = " ".join([s.text for s in line.spans])
                             page_full_text += line_text + " "
 
-                    page_full_text = _comparable_title(page_full_text)
+                    page_full_text = _comparable_toc_title(page_full_text)
 
                     if expected_title in page_full_text:
                         correct_page = True
@@ -1044,23 +1114,15 @@ class RedactionValidator:
             return
 
         offset = _printed_page_offset(self.document_data)
+        list_pages = set(getattr(self.document_data.tot, "page_nums", ()))
         for entry in self.document_data.tot.entries:
-            expected_title = _comparable_title(entry.title)
-            correct_page = False
-
-            for page in self.document_data.pages:
-                if page.number + offset == entry.page:
-                    for table in page.tables:
-                        if not table.description:
-                            continue
-                        table_desc = _comparable_title(table.description)
-
-                        if expected_title in table_desc or table_desc in expected_title:
-                            correct_page = True
-                            break
-
-                if correct_page:
-                    break
+            correct_page = any(
+                page.number not in list_pages
+                and (_footer_number(page) if _footer_number(page) is not None
+                     else page.number + offset) == entry.page
+                and _listed_caption_on_page(page, entry, "table")
+                for page in self.document_data.pages
+            )
 
             if lang == "en":
                 comment = f"The table titled '{entry.title}' is not on the specified page (page {entry.page})."
@@ -1109,23 +1171,16 @@ class RedactionValidator:
             return None, is_toc
 
         offset = _printed_page_offset(self.document_data)
+        list_pages = set(getattr(self.document_data.tof, "page_nums", ()))
         for entry in self.document_data.tof.entries:
-            expected_title = _comparable_title(entry.title)
-            correct_page = False
+            correct_page = any(
+                page.number not in list_pages
+                and (_footer_number(page) if _footer_number(page) is not None
+                     else page.number + offset) == entry.page
+                and _listed_caption_on_page(page, entry, "figure")
+                for page in self.document_data.pages
+            )
 
-            for page in self.document_data.pages:
-                if page.number + offset == entry.page:
-                    for image in page.images:
-                        if not image.description:
-                            continue
-
-                        image_desc = _comparable_title(image.description)
-
-                        if expected_title in image_desc or image_desc in expected_title:
-                            correct_page = True
-                            break
-                if correct_page:
-                    break
             if lang == "en":
                 comment = f"The figure titled '{entry.title}' is not on the specified page (Page {entry.page})."
             else:
