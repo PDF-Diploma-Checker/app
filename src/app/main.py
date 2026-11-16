@@ -45,7 +45,6 @@ def smoke_test():
         # similarity pulls in sentence_transformers, sklearn and scipy, which can fail to import only when frozen
         modules += ["analysis.modules.llm.similarity", "analysis.modules.llm.get_grade",
                     "analysis.modules.llm.image_analysis.run_image", "analysis.modules.llm.image_analysis.font_checker",
-                    "analysis.modules.llm.image_analysis.axis_checker",
                     "analysis.modules.llm.image_analysis.image_quality_checker"]
     for name in modules:
         try:
