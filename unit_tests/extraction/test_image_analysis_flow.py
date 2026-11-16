@@ -322,7 +322,7 @@ class AxisRulesTest(unittest.TestCase):
 
 
 class ReportPdfAxesTest(unittest.TestCase):
-    def test_axis_problem_is_in_the_report(self):
+    def test_saved_axis_problem_is_hidden_from_the_report(self):
         from ui.report_pdf import build_report_pdf
 
         data = {"content_grade": {"grade": 50, "max_grade": 100},
@@ -333,8 +333,8 @@ class ReportPdfAxesTest(unittest.TestCase):
             build_report_pdf(data, "t.pdf", "en", path)
             with fitz.open(path) as doc:
                 text = " ".join(" ".join(page.get_text().split()) for page in doc)
-        self.assertIn("Chart Axes", text)
-        self.assertIn("The chart has no scale", text)
+        self.assertNotIn("Chart Axes", text)
+        self.assertNotIn("The chart has no scale", text)
 
 
 class ReportPdfPurposeTest(unittest.TestCase):
@@ -422,7 +422,7 @@ class ReportPanelTest(unittest.TestCase):
         text = " | ".join(label.text() for label in content.findChildren(QLabel))
         self.assertIn("Rysunek 4.6: [DPI]: Rozciagniety", text)
         self.assertIn("Rysunek 4.9: Niespojne czcionki", text)
-        self.assertIn("Rysunek 4.15: Os nie od zera", text)
+        self.assertNotIn("Rysunek 4.15: Os nie od zera", text)
 
     def test_report_saved_before_this_change_still_opens(self):
         text = self._texts({"total": 1, "bad_count": 0, "good_count": 1, "details": ["Rys. 1: Poprawny"]})

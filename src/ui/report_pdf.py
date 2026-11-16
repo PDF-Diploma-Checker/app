@@ -593,7 +593,7 @@ def _content(w, s, data):
                                    err.get("powody_odrzucenia", []) or [])
             w.card(rows)
 
-        for key, prefix in (("czcionki_obrazkow", "rep_fonts"), ("osie_wykresow", "rep_axes")):
+        for key, prefix in (("czcionki_obrazkow", "rep_fonts"),):
             w.heading(s[f"{prefix}_title"])
             found = data.get(key) or []
             if not found:

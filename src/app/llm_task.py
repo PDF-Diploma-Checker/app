@@ -245,17 +245,6 @@ def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token
     cleanup_text_llm_instances()
     check_cancelled(cancel_token)
 
-    try:
-        from analysis.modules.llm.image_analysis.axis_checker import get_axis_report
-
-        axis_errors = get_axis_report(doc_obj, mapped_doc, language=language)
-        axis_errors, failed = split_failed_checks(axis_errors or [])
-        analysis_failed = analysis_failed or failed
-    except Exception:
-        logger.exception("Chart axis analysis failed")
-        axis_errors = []
-        analysis_failed = True
-
     image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
     cleanup_text_llm_instances()
 
@@ -264,10 +253,9 @@ def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token
         summary=image_summary_data,
         quality_errors=quality_errors,
         font_errors=font_errors,
-        axis_errors=axis_errors,
     )
     return {"image_analysis": image_summary_data, "jakosc_obrazkow": quality_errors,
-            "czcionki_obrazkow": font_errors, "osie_wykresow": axis_errors}
+            "czcionki_obrazkow": font_errors, "osie_wykresow": []}
 
 
 def run_figures(doc_obj, pdf_path, language="pl", cancel_token=None):
