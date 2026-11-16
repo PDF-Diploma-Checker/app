@@ -16,11 +16,12 @@ def finding_kind(error):
         return "global"
     # Legacy font checks shared config_file with page-specific format checks.
     comment = str(error.get("comment", error.get("komentarz", ""))).lower()
-    global_font_prefixes = (
+    global_document_prefixes = (
+        "the document has ", "dokument ma ",
         "the font used (", "the font size used (",
         "używana czcionka (", "używany rozmiar czcionki (",
     )
-    if category == "config_file" and comment.startswith(global_font_prefixes):
+    if category == "config_file" and comment.startswith(global_document_prefixes):
         return "global"
     return "page"
 
