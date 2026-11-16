@@ -1,3 +1,4 @@
+from common.figure_findings import figure_details
 """The "Detailed content analysis report" as a designed PDF: a header band, score tiles, cards with progress bars,
 status pills and figure lists, a running header and "page x of y" footers.
 
@@ -34,7 +35,7 @@ STRINGS = {
         "rep_ai_eval_title": "Ogólna ocena merytoryczna (AI)", "rep_skipped_fast": "Analiza została pominięta (wybrano Tryb Szybki).",
         "rep_img_title": "Analiza spójności grafik i wykresów (AI)", "rep_img_total": "Zweryfikowane rysunki",
         "rep_img_bad": "Z błędnym opisem w tekście", "rep_img_good": "Poprawne",
-        "rep_raster_ident": "Zidentyfikowane grafiki rastrowe podlegające badaniu:", "rep_img_details": "Lista szczegółowa rozbieżności:",
+        "rep_raster_ident": "Zidentyfikowane grafiki rastrowe podlegające badaniu:", "rep_img_details": "Lista szczegółowa rozbieżności:", "rep_img_unchecked": "Nieprzeanalizowane obrazy:",
         "rep_qual_title": "Ocena jakości obrazów (DPI i czytelność)", "rep_qual_all_ok": "Wszystkie obrazy mają odpowiednią jakość i czytelność.",
         "rep_qual_err_1": "Wykryto problemy z jakością w", "rep_qual_err_2": "obrazach:", "rep_format_lbl": "Format:",
         "rep_fonts_title": "Spójność czcionek na obrazach", "rep_fonts_all_ok": "Brak wykrytych problemów ze spójnością czcionek na rysunkach.",
@@ -71,7 +72,7 @@ STRINGS = {
         "rep_ai_eval_title": "Overall Content Evaluation (AI)", "rep_skipped_fast": "Analysis skipped (Fast Mode selected).",
         "rep_img_title": "Graphics and Charts Consistency Analysis (AI)", "rep_img_total": "Verified figures",
         "rep_img_bad": "With incorrect description in text", "rep_img_good": "Correct",
-        "rep_raster_ident": "Identified raster graphics subject to analysis:", "rep_img_details": "Detailed list of discrepancies:",
+        "rep_raster_ident": "Identified raster graphics subject to analysis:", "rep_img_details": "Detailed list of discrepancies:", "rep_img_unchecked": "Unanalysed figures:",
         "rep_qual_title": "Image Quality Assessment (DPI & Legibility)", "rep_qual_all_ok": "All images have adequate quality and legibility.",
         "rep_qual_err_1": "Quality issues detected in", "rep_qual_err_2": "images:", "rep_format_lbl": "Format:",
         "rep_fonts_title": "Font Consistency in Images", "rep_fonts_all_ok": "No font consistency issues detected in figures.",
@@ -572,12 +573,13 @@ def _content(w, s, data):
         if raster:
             rows += [w.r_gap(6), w.r_label(s["rep_raster_ident"], C["primary_dark"], 10, 6),
                      w.r_chips([n if not str(n)[:1].isdigit() else f"{s['panel_fig_prefix']} {n}" for n in raster])]
-        details = img.get("problem_details")
-        if details is None:     # a report saved by an older version lists every figure in "details"
-            details = [d for d in img.get("details", []) or [] if "Poprawny" not in str(d)]
+        details, unchecked = figure_details(img)
         if details:
             rows += [w.r_gap(8), w.r_label(s["rep_img_details"], C["text"], 10.5, 5)]
             rows += w.r_bullets(details, 10, C["text"], C["danger_dot"])
+        if unchecked:
+            rows += [w.r_gap(8), w.r_label(s["rep_img_unchecked"], C["warning"], 10.5, 5)]
+            rows += w.r_bullets(unchecked, 10, C["text"], C["warning_dot"])
         w.card(rows)
 
         w.heading(s["rep_qual_title"])
