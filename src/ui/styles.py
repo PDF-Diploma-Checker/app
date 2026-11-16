@@ -477,6 +477,19 @@ COMMENT_MARKER_STYLE = """
     }
     QPushButton:hover { background-color: #1D4ED8; }
 """
+# UI-only spelling affordances: PDF export uses its own annotation colours.
+SPELLING_MARKER_STYLE = COMMENT_MARKER_STYLE
+SPELLING_HIGHLIGHT_STYLE = """
+    QPushButton#SpellingHighlight {
+        background-color: rgba(30, 140, 250, 28);
+        border: 1px dashed #1E8CFA; border-bottom: 2px dashed #1E8CFA;
+        border-radius: 3px; padding: 0;
+    }
+    QPushButton#SpellingHighlight:hover, QPushButton#SpellingHighlight:focus {
+        background-color: rgba(30, 140, 250, 50);
+        border: 2px solid #1478DC;
+    }
+"""
 HIGHLIGHT_BOX_ERROR = "background-color: rgba(239, 68, 68, 55); border: none;"
 HIGHLIGHT_BOX_COMMENT = "background-color: rgba(37, 99, 235, 55); border: none;"
 HIGHLIGHT_BOX_DEFAULT = "background-color: rgba(37, 99, 235, 65); border: none;"

@@ -243,6 +243,8 @@ def _findings_section(root, errors, on_page):
         lay.addWidget(_note(t("main.findings_count", count=sum(pages.values()), pages=len(pages)), "bad"))
         lay.addWidget(_label(t("main.findings_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
         lay.addWidget(_page_buttons(pages, on_page))
+        if any(isinstance(error, dict) and error.get("category") == "TYPOS" for error in errors):
+            lay.addWidget(_note(t("main.word_proposal_hint"), "off"))
     else:
         lay.addWidget(_note(t("main.findings_none"), "ok"))
     root.addWidget(card)
@@ -286,38 +288,8 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         root.addWidget(_note(text, "bad"))
     elif data.get("gpu_layers_fallback") is not None:
         root.addWidget(_note(t("main.ai_gpu_fallback", layers=data["gpu_layers_fallback"]), "warn"))
-    if errors is not None and report_data is not None:
+    if errors is not None and (report_data is not None or errors):
         _findings_section(root, errors, on_page)
-
-    if errors is not None:
-        for kind, key in (("global", "global_findings"), ("bibliography", "bibliography_summary")):
-            items = [error for error in errors if isinstance(error, dict) and finding_kind(error) == kind]
-            if not items:
-                continue
-            root.addWidget(_section(t("main." + key)))
-            card, lay = _card()
-            if kind == "bibliography":
-                toggle = QToolButton()
-                toggle.setText(t("main.bibliography_details"))
-                toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-                toggle.setArrowType(Qt.RightArrow)
-                toggle.setCheckable(True)
-                toggle.setCursor(Qt.PointingHandCursor)
-                lay.addWidget(toggle)
-                details = _label("\n\n".join(finding_text(item) for item in items),
-                                 f"font-size: 13px; color: {styles.TEXT}; {TRANSPARENT}")
-                details.setTextFormat(Qt.PlainText)
-                details.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                details.hide()
-                toggle.toggled.connect(details.setVisible)
-                toggle.toggled.connect(
-                    lambda expanded, button=toggle: button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
-                )
-                lay.addWidget(details)
-            else:
-                for item in items:
-                    lay.addWidget(_note(finding_text(item), "warn"))
-            root.addWidget(card)
 
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
@@ -387,6 +359,36 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
             value = _number(stats.get(key, 0))
             lay.addWidget(_bar(t(name).rstrip(":"), f"{_fmt(value)}%", value / 100, color=colour))
         root.addWidget(card)
+
+    if errors is not None:
+        for kind, key in (("global", "global_findings"), ("bibliography", "bibliography_summary")):
+            items = [error for error in errors if isinstance(error, dict) and finding_kind(error) == kind]
+            if not items:
+                continue
+            root.addWidget(_section(t("main." + key)))
+            card, lay = _card()
+            if kind == "bibliography":
+                toggle = QToolButton()
+                toggle.setText(t("main.bibliography_details"))
+                toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+                toggle.setArrowType(Qt.RightArrow)
+                toggle.setCheckable(True)
+                toggle.setCursor(Qt.PointingHandCursor)
+                lay.addWidget(toggle)
+                details = _label("\n\n".join(finding_text(item) for item in items),
+                                 f"font-size: 13px; color: {styles.TEXT}; {TRANSPARENT}")
+                details.setTextFormat(Qt.PlainText)
+                details.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                details.hide()
+                toggle.toggled.connect(details.setVisible)
+                toggle.toggled.connect(
+                    lambda expanded, button=toggle: button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+                )
+                lay.addWidget(details)
+            else:
+                for item in items:
+                    lay.addWidget(_note(finding_text(item), "warn"))
+            root.addWidget(card)
 
     root.addStretch()
 

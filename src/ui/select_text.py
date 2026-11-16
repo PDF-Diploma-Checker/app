@@ -36,19 +36,24 @@ class ErrorMarker(QPushButton):
         self.setStyleSheet(styles.ERROR_MARKER_STYLE)
         self.setText("!")
         if self.data.get("category") == "TYPOS":
+            self.setStyleSheet(styles.SPELLING_MARKER_STYLE)
             self.setToolTip("Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo")
         self.clicked.connect(self.show_details)
         if self.data.get("category") == "TYPOS":
             self.setContextMenuPolicy(Qt.CustomContextMenu)
             self.customContextMenuRequested.connect(self.proposal_menu)
 
+    def open_proposal(self):
+        from .dictionary_proposal import ProposalDialog
+        ProposalDialog(self, self.lang).exec()
+
     def proposal_menu(self, position):
         if self.data.get("category") != "TYPOS":
             return
-        from .dictionary_proposal import ProposalDialog, TEXT
+        from .dictionary_proposal import TEXT
         menu = QMenu(self)
         action = menu.addAction(TEXT.get(self.lang, TEXT['pl'])[0])
-        action.triggered.connect(lambda: ProposalDialog(self, self.lang).exec())
+        action.triggered.connect(self.open_proposal)
         menu.exec(self.mapToGlobal(position))
 
     def show_details(self):
@@ -95,6 +100,50 @@ class HighlightBox(QFrame):
         self.data = rect_data
         self.setStyleSheet(styles.HIGHLIGHT_BOX_DEFAULT)
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
+
+class SpellingHighlightBox(QPushButton):
+    """A word-sized application overlay, never a stored PDF annotation."""
+    def __init__(self, rect_data, marker, parent=None):
+        super().__init__(parent)
+        self.data = rect_data
+        self.setObjectName('SpellingHighlight')
+        self.setStyleSheet(styles.SPELLING_HIGHLIGHT_STYLE)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAutoDefault(False)
+        self.setToolTip(t('main.spelling_click_hint'))
+        self.setAccessibleName(t('main.spelling_proposal_action'))
+        self.setAccessibleDescription(t('main.spelling_click_hint'))
+        self.clicked.connect(marker.open_proposal)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda position: marker.proposal_menu(marker.mapFromGlobal(self.mapToGlobal(position))))
+
+    def mousePressEvent(self, event):
+        if event.modifiers() & Qt.ShiftModifier:
+            event.ignore()  # Preserve Shift-drag text selection in the PDF view.
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if event.modifiers() & Qt.ShiftModifier:
+            event.ignore()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.modifiers() & Qt.ShiftModifier:
+            event.ignore()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.click()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
 
 class SelectablePdfView(QPdfView):
     """An extended PDF view that enables area-based text selection, adding custom user comments, and overlaying error markers."""
@@ -144,18 +193,23 @@ class SelectablePdfView(QPdfView):
             w = coords.get("w", 0)
             
             if w > 0:
-                box = HighlightBox(err, self.viewport())
+                box = self._error_box(err, marker, err)
                 box.is_error = True
-                box.setStyleSheet(styles.HIGHLIGHT_BOX_ERROR)
                 self.highlight_boxes.append(box)
 
             for extra in err.get("extra_rects", []):
-                ebox = HighlightBox(extra, self.viewport())
+                ebox = self._error_box(extra, marker, err)
                 ebox.is_error = True
-                ebox.setStyleSheet(styles.HIGHLIGHT_BOX_ERROR)
                 self.highlight_boxes.append(ebox)
 
         self.update_markers_pos()
+
+    def _error_box(self, rect_data, marker, error):
+        if error.get('category') == 'TYPOS':
+            return SpellingHighlightBox(rect_data, marker, self.viewport())
+        box = HighlightBox(rect_data, self.viewport())
+        box.setStyleSheet(styles.HIGHLIGHT_BOX_ERROR)
+        return box
 
     def update_markers_pos(self):
         """Recalculates and updates the pixel positions of all markers and highlight boxes."""

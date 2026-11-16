@@ -67,7 +67,7 @@ class PDFMapper:
     MATH_FONTS = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
     MONOSPACE_FONTS = ("courier", "consolas", "mono", "code", "typewriter")
     IMG_PATTERN = re.compile(
-        r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram)\s*(?:\d+|[IVX]+)",
+        r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram|wykres|chart|plot)\s*(?:\d+|[IVX]+)",
         re.IGNORECASE,
     )
     TAB_PATTERN = re.compile(
@@ -1373,6 +1373,13 @@ class PDFMapper:
         bottom_thresh = page.height - self.BOTTOM_MARGIN_OFFSET
         table_bboxes = [t.bbox for t in page.tables]
 
+        def inside_figure(bbox):
+            return any(
+                bbox[0] >= image.bbox[0] - 0.5 and bbox[1] >= image.bbox[1] - 0.5
+                and bbox[2] <= image.bbox[2] + 0.5 and bbox[3] <= image.bbox[3] + 0.5
+                for image in page.images
+            )
+
         img_pattern = self.IMG_PATTERN
         tab_pattern = self.TAB_PATTERN
 
@@ -1412,6 +1419,11 @@ class PDFMapper:
         )
 
         for block in page.text_blocks:
+            if inside_figure(block.bbox):
+                self._empty_paragraph_buffer("figure text")
+                prev_geom = None
+                ref_pitch = None
+                continue
             if getattr(block, "block_type", "") == "footnote":
                 new_doc.floating_elements.page_artifacts.append(
                     PageArtifact(
@@ -1603,6 +1615,11 @@ class PDFMapper:
                     if line.spans
                     else line.bbox
                 )
+                if inside_figure(line_bbox):
+                    self._empty_paragraph_buffer("figure line")
+                    prev_geom = None
+                    ref_pitch = None
+                    continue
                 if self.is_inside_table(line_bbox, table_bboxes):
                     continue
 
