@@ -4,6 +4,7 @@ No model is imported here, so this part can be tested without llama.cpp or a GPU
 """
 
 import logging
+import math
 import re
 from pathlib import Path
 
@@ -188,7 +189,9 @@ def parse_axis_numbers(answer):
 
 
 def _is_scale(ticks):
-    return len(ticks) >= _MIN_AXIS_TICKS and all(a < b for a, b in zip(ticks, ticks[1:]))
+    return (len(ticks) >= _MIN_AXIS_TICKS
+            and all(math.isfinite(tick) for tick in ticks)
+            and all(a < b for a, b in zip(ticks, ticks[1:])))
 
 
 def _is_even(values):
@@ -210,7 +213,7 @@ def _lost_numbers(steps):
 
 def scale_problem(ticks, is_bar_chart):
     """'uneven', 'truncated' or None for the numbers read from an axis. None also for what does not look like a scale."""
-    ticks = sorted(ticks) if ticks[:1] > ticks[-1:] else ticks      # also read from the top down
+    ticks = list(reversed(ticks)) if ticks[:1] > ticks[-1:] else ticks      # also read from the top down
     if not _is_scale(ticks) or _is_logarithmic(ticks):
         return None
     steps = [b - a for a, b in zip(ticks, ticks[1:])]
