@@ -476,12 +476,17 @@ def build_report_pdf(report_data, document_name, lang, save_path, font_regular=N
         _content(w, s, report_data)
         from common.findings import finding_kind, finding_text
         for kind, title in (("global", "Global findings" if lang == "en" else "Uwagi ogólne"),
-                            ("bibliography", "Bibliography" if lang == "en" else "Bibliografia")):
+                            ("bibliography", "Bibliography" if lang == "en" else "Bibliografia"),
+                            ("raster", "Raster images" if lang == "en" else "Grafiki rastrowe")):
             items = [item for item in (findings or []) if finding_kind(item) == kind]
             if items:
                 w.heading(title)
                 for item in items:
-                    lines = w.wrap(finding_text(item), 10.5, CONTENT_W - 2 * PAD)
+                    text = finding_text(item)
+                    if kind == "raster":
+                        page = int(item.get("page", 0)) + 1
+                        text = (f"PDF page {page}" if lang == "en" else f"Strona PDF {page}") + "\n" + text
+                    lines = w.wrap(text, 10.5, CONTENT_W - 2 * PAD)
                     w.card([w.r_text(line) for line in lines])
         w.finish()
         pdf.set_metadata({"title": f"{s['rep_main_title']} - {document_name}", "producer": "DiplomaChecker"})
