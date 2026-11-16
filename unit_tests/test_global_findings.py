@@ -43,6 +43,19 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Page orientation is incorrect"}), "page")
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Używany rozmiar czcionki (10)"}), "global")
 
+    def test_page_count_is_a_global_document_finding(self):
+        for comment in ("Dokument ma 42 stron, mniej niż wymagane 50.",
+                        "The document has 42 pages, less than the required 50."):
+            with self.subTest(comment=comment):
+                error = {"category": "config_file", "comment": comment}
+                self.assertEqual(finding_kind(error), "global")
+                panel, _ = build_report_panel({}, lambda: None, [error])
+                self.assertTrue(any(comment in label.text() for label in panel.findChildren(QLabel)))
+                view = SelectablePdfView()
+                view.add_errors([error], lang="en")
+                self.assertEqual(len(view.markers), 0)
+                view.close()
+
     def test_word_level_config_findings_mentioning_fonts_stay_on_page(self):
         for comment in ("Incorrect font for this word", "Niepoprawna czcionka w tym słowie"):
             with self.subTest(comment=comment):
@@ -89,6 +102,8 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertEqual(titles[-2:], ["Global findings", "Bibliography"])
         self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
         self.assertIs(panel.layout().itemAt(panel.layout().count() - 1).widget(), download)
+        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 2).widget())
+        self.assertTrue(panel.layout().alignment() & Qt.AlignTop)
 
     def test_reader_excludes_global_markers_after_json_reload(self):
         with tempfile.TemporaryDirectory() as folder:
