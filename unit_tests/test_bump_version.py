@@ -88,6 +88,14 @@ class BumpVersionTest(unittest.TestCase):
         after = self._commit(root, "0.4.9")
         self.assertFalse(bump_version.set_by_hand("0" * 40, after, root))
 
+    def test_project_version_files_agree(self):
+        import re
+        versions = {
+            name: re.search(pattern, (REPO_ROOT / name).read_text(encoding="utf-8"), re.M).group(1)
+            for name, pattern in bump_version.PLACES.items()
+        }
+        self.assertEqual(len(set(versions.values())), 1, versions)
+
     def test_the_real_project_can_be_read(self):
         for name, pattern in bump_version.PLACES.items():
             self.assertRegex((REPO_ROOT / name).read_text(encoding="utf-8"), "(?m)" + pattern)
