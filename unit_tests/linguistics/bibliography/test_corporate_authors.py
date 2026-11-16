@@ -27,6 +27,24 @@ def bibliography_matches(entries, organizations=(), language='pl'):
 
 
 class CorporateAuthorsTest(unittest.TestCase):
+    def test_spaced_online_address_does_not_require_publication_date(self):
+        from analysis.modules.linguistics.bibliography_check import URL_PATTERN, extract_fields
+        entries = [
+            "NVIDIA: NVIDIA Isaac Sim. B.r. h t t p s : / / d e v e l o p e r . n v i d i a . c o m / i s a ac/sim (dostęp: 25.03.2026).",
+            "NVIDIA: NVIDIA Isaac Lab. B.r. h t t p s : / / d e v e l o p e r . n v i d i a . c o m / i s a ac/lab (dostęp: 25.03.2026).",
+            "NVIDIA: Documentation. https://developer.nvidia.com/docs (dostęp: 25.03.2026).",
+        ]
+        for entry in entries:
+            with self.subTest(entry=entry):
+                self.assertIsNotNone(URL_PATTERN.search(entry))
+                self.assertIn("access_date", extract_fields(entry))
+                matches = bibliography_matches([entry], organizations={"NVIDIA"})
+                self.assertFalse([m for m in matches if m.category in {"MISSING_DATE", "MISSING_ACCESS_DATE_OR_DOI"}])
+
+    def test_book_without_publication_date_still_has_a_date_error(self):
+        matches = bibliography_matches(["Kowalski J.: Robotyka. Wydawnictwo PWN."])
+        self.assertTrue(any(m.category == "MISSING_DATE" for m in matches))
+
     def test_reported_corporate_authors_without_ner(self):
         for name in ('Boston Dynamics', 'Google DeepMind', 'Robotic Systems Lab',
                      'Open Robotics', 'Newton Physics'):
