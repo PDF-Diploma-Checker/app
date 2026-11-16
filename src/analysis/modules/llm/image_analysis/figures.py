@@ -4,7 +4,6 @@ No model is imported here, so this part can be tested without llama.cpp or a GPU
 """
 
 import logging
-import math
 import re
 from pathlib import Path
 
@@ -190,7 +189,7 @@ def parse_axis_numbers(answer):
 
 def _is_scale(ticks):
     return (len(ticks) >= _MIN_AXIS_TICKS
-            and all(math.isfinite(tick) for tick in ticks)
+            and all(-float("inf") < tick < float("inf") for tick in ticks)
             and all(a < b for a, b in zip(ticks, ticks[1:])))
 
 
