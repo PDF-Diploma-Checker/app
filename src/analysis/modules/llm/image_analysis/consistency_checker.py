@@ -37,12 +37,11 @@ _ENDPOINT = r"[-+−]?\d+(?:[.,]\d+)?"
 _RANGE = re.compile(rf"^\s*({_ENDPOINT})\s*[–—-]\s*({_ENDPOINT})\s*[^\d]*$")
 _READ_VALUE = re.compile(r":(.+)$", re.M)
 _MIN_AXIS_RUN = 4       # so many printed numbers in a row with one step are the scale of an axis, not values of the data
-_MAX_UNIT_LENGTH = 4    # "ms", "MB/s"; a longer word is a noun in some grammatical case: "200 błędów", "200 błędy"
 
 
 def _value(text):
-    """A value for comparing: no spaces, no case ('180 ms' and '180ms' are the same)."""
-    return "".join(str(text).split()).lower()
+    """A value for comparing: no spaces, preserving case ('180 ms' and '180ms' are the same)."""
+    return "".join(str(text).split())
 
 
 def _numbers(text):
@@ -64,13 +63,24 @@ def _numbers(text):
 
 
 def _unit(text):
-    return "".join(ch for ch in _NUMBER.sub("", str(text)).lower() if ch.isalpha() or ch in "%/")
+    return "".join(ch for ch in _NUMBER.sub("", str(text)) if ch.isalpha() or ch in "%/")
 
 
-def _units_agree(a, b):
-    """A chart often prints a bare number and has its unit elsewhere: "200 errors" in the text agrees with "200"."""
+_UNITS = {"ms": ("time", .001), "s": ("time", 1), "min": ("time", 60),
+          "kB": ("bytes", 1000), "KB": ("bytes", 1000),
+          "MB": ("bytes", 1e6), "GB": ("bytes", 1e9),
+          "%": ("fraction", .01), "fraction": ("fraction", 1),
+          "proportion": ("fraction", 1)}
+
+
+def _unit_scales(a, b):
+    """Only explicit compatible units establish a conversion."""
     a, b = _unit(a), _unit(b)
-    return not a or not b or a == b or max(len(a), len(b)) > _MAX_UNIT_LENGTH
+    if a == b:
+        return 1, 1
+    if a in _UNITS and b in _UNITS and _UNITS[a][0] == _UNITS[b][0]:
+        return _UNITS[a][1], _UNITS[b][1]
+    return None
 
 
 def _same_value(in_text, in_image):
@@ -81,23 +91,16 @@ def _same_value(in_text, in_image):
     if len(image_numbers) != 1:
         return False
     image, image_places = image_numbers[0]
+    scales = _unit_scales(in_text, in_image)
+    if scales is None:
+        return False
+    scale_a, scale_b = scales
     if len(text_numbers) == 2 and _RANGE.fullmatch(str(in_text)):
         low, high = sorted(number for number, _ in text_numbers)
-        return low <= image <= high and _units_agree(in_text, in_image)
+        return low * scale_a <= image * scale_b <= high * scale_a
     if len(text_numbers) != 1:
         return False
     number, places = text_numbers[0]
-    # Normalize only known compatible units with explicit fraction context.
-    units = {"ms": ("time", .001), "s": ("time", 1), "min": ("time", 60),
-             "kb": ("bytes", 1000), "mb": ("bytes", 1e6), "gb": ("bytes", 1e9),
-             "%": ("fraction", .01), "fraction": ("fraction", 1),
-             "proportion": ("fraction", 1)}
-    a, b = _unit(in_text), _unit(in_image)
-    scale_a = scale_b = 1
-    if a in units and b in units and units[a][0] == units[b][0]:
-        scale_a, scale_b = units[a][1], units[b][1]
-    elif not _units_agree(in_text, in_image):
-        return False
     number, image = number * scale_a, image * scale_b
     if abs(number - image) < 1e-9:
         return True
@@ -160,15 +163,15 @@ def confirmed_reading(image_data, printed):
                 kept.append(line)
             else:
                 omitted = True
-        elif not _numbers(line):
+        elif not _numbers(line) or (not value and re.search(r"[^\W\d_]", line)):
             kept.append(line)
     return ("\n".join(kept) if confirmed else ""), omitted
 
 
 def _literal_quote(quote, source):
     """A quote may not truncate a numeric token (A: 0 from A: 0.81)."""
-    quote = " ".join(quote.split()).casefold()
-    source = " ".join(str(source).split()).casefold()
+    quote = " ".join(quote.split())
+    source = " ".join(str(source).split())
     for match in re.finditer(re.escape(quote), source):
         start, end = match.span()
         if start and quote[0].isalnum() and source[start - 1].isalnum():
@@ -210,10 +213,8 @@ def _is_comparable(mismatch, paragraph, image_data=None):
     in_text, in_image = _numbers(mismatch.get("w_tekscie", "")), _numbers(mismatch.get("na_rysunku", ""))
     if not in_text or not in_image:
         return False
-    # A bare number does not establish whether the quantity is a fraction,
-    # percentage points, or something else. Neither equality nor error is proven.
-    a, b = _unit(mismatch.get("w_tekscie", "")), _unit(mismatch.get("na_rysunku", ""))
-    if (a == "%" and not b) or (b == "%" and not a):
+    # Unknown conversions and missing units cannot establish a quantity.
+    if _unit_scales(mismatch.get("w_tekscie", ""), mismatch.get("na_rysunku", "")) is None:
         return False
     # A pair such as 37/80 is a ratio, not a range or a single measured value.
     if len(in_image) != 1 or (len(in_text) != 1 and not _RANGE.fullmatch(str(mismatch.get("w_tekscie", "")))):
@@ -242,7 +243,7 @@ def verdict_from_answer(answer, language="pl", printed=None, paragraph=None, ima
     in the image: a chart without values gets values made up when it is read, and those prove nothing against the text."""
     mismatches = answer.get("niezgodnosci") if isinstance(answer, dict) else None
     if not isinstance(mismatches, list) or any(not isinstance(m, dict) for m in mismatches):
-        return {"poprawnosc_danych": "Error", "bledy": "None"}
+        return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}
     real = [
         m for m in mismatches
         if isinstance(m, dict) and _is_comparable(m, paragraph, image_data)
@@ -304,17 +305,17 @@ class ConsistencyChecker:
                 },
                 temperature=0.0
             )
-        except Exception as e:
+        except Exception:
             logger.exception("Consistency-check LLM inference failed")
-            raise RuntimeError("Consistency-check LLM inference failed") from e
+            return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}
 
-        result_text = response["choices"][0]["message"]["content"]
-
+        result_text = None
         try:
+            result_text = response["choices"][0]["message"]["content"]
             result = verdict_from_answer(json.loads(result_text), language, printed, paragraph, image_data)
             if omitted and result["poprawnosc_danych"] == "True":
                 result = {"poprawnosc_danych": "Partial", "bledy": image_text(language, "partial_values")}
             return result
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError, KeyError, IndexError):
             logger.exception("Failed to parse consistency-check JSON response: %r", result_text)
-            return {"poprawnosc_danych": "Error", "bledy": "None"}
+            return {"poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unverified_values")}

@@ -1,11 +1,12 @@
 """Deterministic chart evidence checks; no model or GPU libraries required."""
 import sys
 import unittest
+from unittest.mock import Mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
 from analysis.modules.llm.image_analysis.consistency_checker import (
-    _numbers, values_are_printed, verdict_from_answer,
+    _numbers, values_are_printed, verdict_from_answer, confirmed_reading, ConsistencyChecker,
 )
 
 
@@ -93,17 +94,75 @@ class ConsistencyEvidenceTest(unittest.TestCase):
                                          paragraph='A: 1', image_data=data)
             self.assertEqual(result['poprawnosc_danych'], 'Unreadable')
 
-    def test_malformed_entries_are_errors(self):
+    def test_malformed_entries_are_unreadable(self):
         valid = dict(element='A', w_tekscie='40', na_rysunku='70')
         for entry in ['bad entry', None, 42, []]:
             for entries in [[entry], [valid, entry], [entry, valid]]:
                 with self.subTest(entries=entries):
                     result = verdict_from_answer({'niezgodnosci': entries})
-                    self.assertEqual(result['poprawnosc_danych'], 'Error')
+                    self.assertEqual(result['poprawnosc_danych'], 'Unreadable')
         self.assertEqual(verdict_from_answer({'niezgodnosci': []})['poprawnosc_danych'], 'True')
 
     def test_units_cannot_be_invented_in_quotes(self):
         self.assertEqual(self.verdict('40 s', '70 ms', 'A: 40 ms', 'A: 70 ms'), 'Unreadable')
+
+    def test_ambiguous_units_never_establish_a_verdict(self):
+        for text, image in [('1 MB', '1 Mb'), ('2 MB', '1 Mb'),
+                            ('1 kg', '1000 g'), ('2 kg', '1000 g'),
+                            ('2 ms', '1'), ('1', '1 ms'),
+                            ('1–2 s', '1500'), ('1–2 kg', '1500 g')]:
+            with self.subTest(text=text, image=image):
+                self.assertEqual(self.verdict(text, image, f'A: {text}', f'A: {image}'),
+                                 'Unreadable')
+        self.assertEqual(self.verdict('1–2 s', '1500 ms'), 'True')
+        self.assertEqual(self.verdict('1–2 s', '2500 ms'), 'False')
+        self.assertEqual(self.verdict('2 Mb', '1 Mb'), 'False')
+        self.assertEqual(self.verdict('2 kg', '1 kg'), 'False')
+
+    def test_quote_unit_case_cannot_be_fabricated(self):
+        mismatch = dict(element='A', w_tekscie='2 MB', na_rysunku='1 MB',
+                        text_quote='A: 2 MB', image_quote='A: 1 MB')
+        result = verdict_from_answer({'niezgodnosci': [mismatch]},
+                                     paragraph='A: 2 MB', image_data='A: 1 Mb')
+        self.assertEqual(result['poprawnosc_danych'], 'Unreadable')
+
+    def test_numeric_model_headings_survive_confirmation(self):
+        data = 'Model GPT-4\nA: 40\nModel GPT-3\nA: 70\nB: 99'
+        reading, omitted = confirmed_reading(data, [40, 70])
+        self.assertEqual(reading, 'Model GPT-4\nA: 40\nModel GPT-3\nA: 70')
+        self.assertTrue(omitted)
+
+    def test_empty_and_malformed_model_responses(self):
+        checker = ConsistencyChecker.__new__(ConsistencyChecker)
+        checker.llm = Mock()
+        responses = [None, {}, {'choices': []}, {'choices': [None]},
+                     {'choices': [{'message': {}}]}]
+        responses += [{'choices': [{'message': {'content': content}}]}
+                      for content in [None, '', ' ', [], {}, 'null', '{}',
+                                      '{', '{"niezgodnosci": null}']]
+        for response in responses:
+            checker.llm.create_chat_completion.return_value = response
+            for language in ['pl', 'en']:
+                with self.subTest(response=response, language=language):
+                    result = checker.check('A: 40', 'A: 70', language, [70])
+                    self.assertEqual(result['poprawnosc_danych'], 'Unreadable')
+                    self.assertNotIn(result['bledy'], ['', 'None'])
+        checker.llm.create_chat_completion.side_effect = RuntimeError('No response')
+        self.assertEqual(checker.check('A: 40', 'A: 70')['poprawnosc_danych'], 'Unreadable')
+
+    def test_mock_model_preserves_grounded_errors_and_partial_readings(self):
+        checker = ConsistencyChecker.__new__(ConsistencyChecker)
+        checker.llm = Mock()
+        import json
+        mismatch = dict(element='A', w_tekscie='40 ms', na_rysunku='70 ms',
+                        text_quote='A: 40 ms', image_quote='A: 70 ms')
+        checker.llm.create_chat_completion.return_value = {
+            'choices': [{'message': {'content': json.dumps({'niezgodnosci': [mismatch]})}}]}
+        self.assertEqual(checker.check('A: 40 ms', 'A: 70 ms', printed=[70])['poprawnosc_danych'], 'False')
+        checker.llm.create_chat_completion.return_value = {
+            'choices': [{'message': {'content': '{"niezgodnosci": []}'}}]}
+        self.assertEqual(checker.check('A: 70', 'A: 70', printed=[70])['poprawnosc_danych'], 'True')
+        self.assertEqual(checker.check('A: 70', 'A: 70\nB: 99', printed=[70])['poprawnosc_danych'], 'Partial')
 
 
 if __name__ == '__main__':
