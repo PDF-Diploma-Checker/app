@@ -259,6 +259,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     root = QVBoxLayout(content)
     root.setContentsMargins(0, 4, 10, 20)
     root.setSpacing(12)
+    root.setAlignment(Qt.AlignTop)
 
     grade_info = data.get("content_grade")
     img = data.get("image_analysis")
@@ -389,8 +390,6 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                 for item in items:
                     lay.addWidget(_note(finding_text(item), "warn"))
             root.addWidget(card)
-
-    root.addStretch()
 
     button = QPushButton(t("main.download_report"))
     button.setCursor(Qt.PointingHandCursor)
