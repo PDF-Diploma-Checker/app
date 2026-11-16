@@ -337,11 +337,6 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                             "bad" if fonts else "ok"))
         if fonts:
             lay.addWidget(_bullets(_figure_problems(fonts), styles.DANGER_DOT))
-        axes = data.get("osie_wykresow") or []
-        lay.addWidget(_note(t("main.chart_axes_errors", count=len(axes)) if axes else t("main.chart_axes_ok"),
-                            "bad" if axes else "ok"))
-        if axes:
-            lay.addWidget(_bullets(_figure_problems(axes), styles.DANGER_DOT))
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked") if grade_info is not None else t("main.detailed_only"), "off"))
     if unchecked:
