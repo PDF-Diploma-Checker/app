@@ -2,7 +2,6 @@
 
 import io
 import logging
-import math
 import re
 
 from PIL import Image
@@ -59,7 +58,7 @@ def _read_ticks(answer):
     ticks = []
     for part in parts:
         values = parse_axis_numbers(part)
-        if len(values) != 1 or not math.isfinite(values[0]):
+        if len(values) != 1 or not (-float("inf") < values[0] < float("inf")):
             raise _AxisUnchecked
         ticks.extend(values)
     return ticks

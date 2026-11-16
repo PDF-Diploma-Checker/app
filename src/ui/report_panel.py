@@ -9,6 +9,7 @@ the rest is in the detailed report.
 
 from collections import Counter
 
+from common.figure_findings import figure_details
 from common.findings import finding_kind, finding_text
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
@@ -264,6 +265,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     grade_info = data.get("content_grade")
     img = data.get("image_analysis")
     img = img if isinstance(img, dict) else {}
+    problems, unchecked = figure_details(img)
     total_figs = int(_number(img.get("total", 0)))
     stats = data.get("statystyki_zdan")
 
@@ -318,12 +320,11 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     root.addWidget(_section(t("main.graphics_header")))
     card, lay = _card()
     if img.get("analysis_failed"):
-        lay.addWidget(_note(t("main.figures_analysis_failed"), "bad"))
-    if grade_info is not None and total_figs > 0:
+        lay.addWidget(_note(t("main.figures_analysis_failed"), "warn"))
+    if total_figs > 0:
         bad_figs = int(_number(img.get("bad_count", 0)))
         lay.addWidget(_note(t("main.figures_consistency", total=total_figs, good=int(_number(img.get("good_count", 0))),
                               bad=bad_figs), "bad" if bad_figs else "ok"))
-        problems = img.get("problem_details", []) or []
         if problems:
             lay.addWidget(_label(t("main.figures_problems"), f"font-size: 13px; font-weight: 700; color: {styles.DANGER}; {TRANSPARENT}"))
             lay.addWidget(_bullets(problems, styles.DANGER_DOT))
@@ -336,13 +337,24 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                             "bad" if fonts else "ok"))
         if fonts:
             lay.addWidget(_bullets(_figure_problems(fonts), styles.DANGER_DOT))
-        axes = data.get("osie_wykresow") or []
-        lay.addWidget(_note(t("main.chart_axes_errors", count=len(axes)) if axes else t("main.chart_axes_ok"),
-                            "bad" if axes else "ok"))
-        if axes:
-            lay.addWidget(_bullets(_figure_problems(axes), styles.DANGER_DOT))
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked") if grade_info is not None else t("main.detailed_only"), "off"))
+    if unchecked:
+        toggle = QToolButton()
+        toggle.setObjectName("UncheckedFiguresToggle")
+        toggle.setText(t("main.figures_unchecked", count=len({str(line).partition(":")[0] for line in unchecked})))
+        toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toggle.setCheckable(True)
+        toggle.setArrowType(Qt.RightArrow)
+        toggle.setCursor(Qt.PointingHandCursor)
+        toggle.setStyleSheet(f"color: {styles.WARNING}; background: {styles.WARNING_BG}; padding: 8px; border-radius: 6px;")
+        lay.addWidget(toggle)
+        details = _bullets(unchecked, styles.WARNING_DOT)
+        details.setObjectName("UncheckedFiguresDetails")
+        details.hide()
+        toggle.toggled.connect(details.setVisible)
+        toggle.toggled.connect(lambda expanded: toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow))
+        lay.addWidget(details)
     raster = img.get("image_raster", []) or []
     if raster:
         lay.addWidget(_label(t("main.raster_short", count=len(raster), names=", ".join(str(n).split()[-1] for n in raster)),
