@@ -98,7 +98,15 @@ BARE_VOLUME = {
 }
 
 BARE_PAGES = { r'(?<![\w\/\.\-])\d+\s*[-–]\s*\d+(?![\w\/\-])': 'bare 2 - 4',}
-URL_PATTERN = re.compile(r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+')
+# PDF text extraction may split the URL scheme and host into individual glyphs.
+# Keep the original span so field masking and annotations retain their offsets.
+URL_PATTERN = re.compile(
+    r'https?:\s*//(?:\S*[./%\-_=&?]\s+(?=[a-z0-9]))*\S+'
+    r'|h\s+t\s*t\s*p\s*s?\s*:\s*/\s*/\s*'
+    r'(?:[a-z0-9-]\s*)+(?:\.\s*(?:[a-z0-9-]\s*)+)+'
+    r'(?:/\s*(?:[a-z0-9_./%?=&~-]\s*)+)?',
+    re.IGNORECASE)
+
 
 UPPER_CASE = r'[A-ZĄĆĘŁŃÓŚŹŻÀ-ÖØ-öø-ÿĀ-ž]'
 LOWER_CASE = r'[a-ząćęłńóśźżà-öø-ÿā-ž]'
