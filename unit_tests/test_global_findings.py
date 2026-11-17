@@ -12,7 +12,7 @@ os.environ.setdefault("QT_OPENGL", "software")
 
 import fitz
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QToolButton
+from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QPushButton, QToolButton, QWidget
 from common.findings import NUMBERING_CATEGORIES, finding_kind
 from ui.i18n import set_locale
 from ui.report_panel import build_report_panel
@@ -80,6 +80,34 @@ class GlobalFindingsTest(unittest.TestCase):
             for phrase in ("Raster images", "PDF page 4", "Figure 6.1", "Arial", "Bibliography"):
                 self.assertIn(phrase, text)
 
+    def test_long_bibliography_scrolls_in_its_own_box(self):
+        errors = copy.deepcopy(self.errors)
+        errors[0]["found_text"] += "\n" + "\n".join(f"Entry {i}: A recognized bibliography item" for i in range(150))
+        panel, _ = build_report_panel({}, lambda: None, errors)
+        details = panel.findChild(QPlainTextEdit, "BibliographyDetails")
+        self.assertIn("Entry 149", details.toPlainText())
+        self.assertLessEqual(details.height(), 300)
+
+    def test_figures_without_a_source_are_a_collapsed_list_not_page_findings(self):
+        error = {"category": "missing_caption_source", "page": 5, "found_text": "Rys. 2.1 Schemat",
+                 "comment": "The caption does not contain a reference", "coords": {"x": 1, "y": 1, "w": 1, "h": 1}}
+        self.assertEqual(finding_kind(error), "caption_source")
+        visited = []
+        panel, _ = build_report_panel({}, lambda: None, [error], visited.append)
+        toggle = panel.findChild(QToolButton, "CaptionSourceToggle")
+        details = panel.findChild(QWidget, "CaptionSourceDetails")
+        self.assertIn("(1)", toggle.text())
+        self.assertTrue(details.isHidden())
+        toggle.click()
+        self.assertFalse(details.isHidden())
+        next(b for b in details.findChildren(QPushButton) if "6 (1)" in b.text()).click()
+        self.assertEqual(visited, [5])
+        self.assertFalse(any(label.text().startswith("Findings:") for label in panel.findChildren(QLabel)))
+        view = SelectablePdfView()
+        view.add_errors([error], lang="en")
+        self.assertEqual(len(view.markers), 0)
+        view.close()
+
     def test_word_level_config_findings_mentioning_fonts_stay_on_page(self):
         for comment in ("Incorrect font for this word", "Niepoprawna czcionka w tym słowie"):
             with self.subTest(comment=comment):
@@ -93,7 +121,8 @@ class GlobalFindingsTest(unittest.TestCase):
     def test_collapsible_summary_and_only_local_page_buttons(self):
         original = copy.deepcopy(self.errors)
         panel, _ = build_report_panel({}, lambda: None, self.errors)
-        details = next(label for label in panel.findChildren(QLabel) if "Example <Book>" in label.text())
+        details = panel.findChild(QPlainTextEdit, "BibliographyDetails")
+        self.assertIn("Example <Book>", details.toPlainText())
         toggle = next(button for button in panel.findChildren(QToolButton) if button.isCheckable())
         self.assertTrue(details.isHidden())
         self.assertEqual(toggle.toolButtonStyle(), Qt.ToolButtonTextBesideIcon)
