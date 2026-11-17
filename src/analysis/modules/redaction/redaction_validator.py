@@ -40,12 +40,15 @@ VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or 
 
 def _footer_number(page):
     """The page number printed in the footer of a page, None when there is none."""
-    for block in page.text_blocks:
-        if block.block_type == "footer":
-            text = " ".join(span.text for line in block.lines for span in line.spans)
-            match = re.search(r"\d+", text)
-            if match:
-                return int(match.group())
+    # the last lines of the text can be taken for the footer too, and a citation such as [17] in them is no page number:
+    # the number is the lowest footer on the page
+    footers = sorted((block for block in page.text_blocks if block.block_type == "footer"),
+                     key=lambda block: block.bbox[3], reverse=True)
+    for block in footers:
+        text = " ".join(span.text for line in block.lines for span in line.spans)
+        match = re.search(r"\d+", text)
+        if match:
+            return int(match.group())
     return None
 
 
