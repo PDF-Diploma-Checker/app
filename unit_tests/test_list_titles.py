@@ -73,6 +73,14 @@ class PrintedPageNumbersTest(unittest.TestCase):
     def _shifted_document(self, shift, **lists):
         return _validator([_page(n, f"Rozdział {n}", footer=n + shift) for n in range(1, 8)], **lists)
 
+    def test_last_text_line_taken_for_the_footer_does_not_give_the_number(self):
+        page = _page(16, "2.3. Aproksymacja funkcji", footer=18)
+        body = NS(lines=[_line("Krytyk zmniejsza tę wariancję [17].")], block_type="footer", bbox=(71, 757, 498, 767))
+        page.text_blocks.insert(1, body)
+        validator, errors = _validator([page], toc=[_entry("2.3 Aproksymacja funkcji", 18)])
+        RedactionValidator.check_toc(validator)
+        self.assertEqual(errors, [])
+
     def test_lists_use_the_numbers_printed_on_the_pages(self):
         for shift in (0, 1, 2, 3):
             validator, errors = self._shifted_document(shift, toc=[_entry("Rozdział 4", 4 + shift)])

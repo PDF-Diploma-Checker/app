@@ -324,7 +324,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     if total_figs > 0:
         bad_figs = int(_number(img.get("bad_count", 0)))
         lay.addWidget(_note(t("main.figures_consistency", total=total_figs, good=int(_number(img.get("good_count", 0))),
-                              bad=bad_figs), "bad" if bad_figs else "ok"))
+                              bad=bad_figs, nodata=int(_number(img.get("nodata_count", 0)))), "bad" if bad_figs else "ok"))
         if problems:
             lay.addWidget(_label(t("main.figures_problems"), f"font-size: 13px; font-weight: 700; color: {styles.DANGER}; {TRANSPARENT}"))
             lay.addWidget(_bullets(problems, styles.DANGER_DOT))
@@ -355,6 +355,14 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         toggle.toggled.connect(details.setVisible)
         toggle.toggled.connect(lambda expanded: toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow))
         lay.addWidget(details)
+    raster_findings = [error for error in (errors or [])
+                       if isinstance(error, dict) and finding_kind(error) == "raster"]
+    if raster_findings:
+        lay.addWidget(_label(t("main.raster_findings"),
+                             f"font-size: 13px; font-weight: 700; color: {styles.TEXT_2}; {TRANSPARENT}"))
+        for item in raster_findings:
+            lay.addWidget(_label(finding_text(item), f"font-size: 12px; color: {styles.TEXT_2}; {TRANSPARENT}"))
+            lay.addWidget(_page_buttons({int(item.get("page", 0)): 1}, on_page))
     raster = img.get("image_raster", []) or []
     if raster:
         lay.addWidget(_label(t("main.raster_short", count=len(raster), names=", ".join(str(n).split()[-1] for n in raster)),

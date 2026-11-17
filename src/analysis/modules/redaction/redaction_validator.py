@@ -40,12 +40,15 @@ VALID_PAGE_OFFSETS = (0, 1)     # the numbering starts after the title page, or 
 
 def _footer_number(page):
     """The page number printed in the footer of a page, None when there is none."""
-    for block in page.text_blocks:
-        if block.block_type == "footer":
-            text = " ".join(span.text for line in block.lines for span in line.spans)
-            match = re.search(r"\d+", text)
-            if match:
-                return int(match.group())
+    # the last lines of the text can be taken for the footer too, and a citation such as [17] in them is no page number:
+    # the number is the lowest footer on the page
+    footers = sorted((block for block in page.text_blocks if block.block_type == "footer"),
+                     key=lambda block: block.bbox[3], reverse=True)
+    for block in footers:
+        text = " ".join(span.text for line in block.lines for span in line.spans)
+        match = re.search(r"\d+", text)
+        if match:
+            return int(match.group())
     return None
 
 
@@ -1555,80 +1558,56 @@ class RedactionValidator:
             else:
                 logger.warning("Redaction: nie można określić marginesów")
             return True
-        if self.config.margin_type == "lustrzany":
-            if len(margins) < 2:
-                if lang == "en":
-                    logger.warning(
-                        "Redaction: too few pages to evaluate mirror margins"
-                    )
-                else:
-                    logger.warning(
-                        "Redaction: zbyt mało stron do oceny marginesów lustrzanych"
-                    )
-                return True
-
-            for page_num, margin in margins.items():
-                if page_num % 2 == 1:
-                    if lang == "en":
-                        comment = f"Expected larger margin on the left side of the page: left={margin.get('left', 0)}, right={margin.get('right', 0)}."
-                    else:
-                        comment = f"Oczekiwany większy margines po lewej stronie stronie: left={margin.get('left', 0)}, right={margin.get('right', 0)}."
-                    if margin.get("left", 0) <= margin.get("right", 0):
-                        self.errors.append(
-                            Error(
-                                id=self._get_next_id(),
-                                module=self.module,
-                                category="config_file",
-                                page_number=page_num,
-                                bounding_box=(0, 0, 0, 0),
-                                text=None,
-                                comments=comment,
-                            )
-                        )
-                        return False
-                else:
-                    if lang == "en":
-                        comment = f"Expected larger margin on the right side of the page: left={margin.get('left', 0)}, right={margin.get('right', 0)}."
-                    else:
-                        comment = f"Oczekiwany większy margines po prawej stronie stronie: left={margin.get('left', 0)}, right={margin.get('right', 0)}."
-                    if margin.get("right", 0) <= margin.get("left", 0):
-                        self.errors.append(
-                            Error(
-                                id=self._get_next_id(),
-                                module=self.module,
-                                category="config_file",
-                                page_number=page_num,
-                                bounding_box=(0, 0, 0, 0),
-                                text=None,
-                                comments=comment,
-                            )
-                        )
-                        return False
-                    margins[page_num]["left"], margins[page_num]["right"] = (
-                        margins[page_num]["right"],
-                        margins[page_num]["left"],
-                    )
-
-            org_margin = margins[1]
-            for page_num, margin in margins.items():
-                if margin != org_margin:
-                    if lang == "en":
-                        comment = f"The margin on this page is different from the margins on other pages: {margin} vs {org_margin}."
-                    else:
-                        comment = f"Margines na tej stronie różni się od marginesów na pozostałych stronach: {margin} vs {org_margin}."
-                    self.errors.append(
-                        Error(
-                            id=self._get_next_id(),
-                            module=self.module,
-                            category="config_file",
-                            page_number=page_num,
-                            bounding_box=(0, 0, 0, 0),
-                            text=None,
-                            comments=comment,
-                        )
-                    )
-                    return False
+        if self.config.margin_type != "lustrzany":
             return True
+
+        # Visible text bounds are not the configured text area: short symbol
+        # lists, headings and last paragraph lines cannot prove a margin error.
+        evidence = {}
+        for page in doc_data.pages:
+            lines = []
+            for block in getattr(page, "text_blocks", []):
+                for line in block.lines:
+                    text = " ".join(span.text for span in line.spans)
+                    box = line.bbox
+                    if sum(ch.isalpha() for ch in text) >= 20 and box[2] - box[0] >= page.width * .60:
+                        lines.append(box)
+            if len(lines) < 3:
+                continue
+            left = min(box[0] for box in lines)
+            right = max(box[2] for box in lines)
+            if sum(abs(box[0] - left) <= 5 and abs(box[2] - right) <= 5 for box in lines) < 3:
+                continue
+            evidence[page.number] = (left, page.width - right)
+
+        groups = {parity: [v for n, v in evidence.items() if n % 2 == parity] for parity in (0, 1)}
+        if any(len(values) < 2 for values in groups.values()):
+            return True  # insufficient full-width text on both page sides
+        def median(values):
+            values = sorted(values)
+            middle = len(values) // 2
+            return (values[middle] + values[~middle]) / 2
+
+        references = {parity: tuple(median([v[i] for v in values]) for i in (0, 1))
+                      for parity, values in groups.items()}
+        tolerance = 8.5  # 3 mm: font bearings and PDF extraction rounding
+        mirror_pattern = (abs(references[0][0] - references[1][1]) <= tolerance
+                          and abs(references[0][1] - references[1][0]) <= tolerance
+                          and abs(references[0][0] - references[0][1]) > tolerance)
+        valid = True
+        for page_num, margin in evidence.items():
+            expected = references[page_num % 2]
+            # Indentation and short lines may enlarge the visible margins. Only
+            # text intruding into an established margin proves a violation.
+            if mirror_pattern and all(a >= b - tolerance for a, b in zip(margin, expected)):
+                continue
+            comment = (f"Inconsistent mirror margins: left={margin[0]:.1f}, right={margin[1]:.1f}."
+                       if lang == "en" else
+                       f"Niespójne marginesy lustrzane: lewy={margin[0]:.1f}, prawy={margin[1]:.1f}.")
+            self.errors.append(Error(id=self._get_next_id(), module=self.module, category="config_file",
+                                     page_number=page_num, bounding_box=(0, 0, 0, 0), text=None, comments=comment))
+            valid = False
+        return valid
 
     def check_format(self, doc_data: DocumentData) -> bool:
         tolerance = 10

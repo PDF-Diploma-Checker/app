@@ -56,6 +56,30 @@ class GlobalFindingsTest(unittest.TestCase):
                 self.assertEqual(len(view.markers), 0)
                 view.close()
 
+    def test_raster_information_has_navigation_without_pdf_markers(self):
+        error = {"category": "raster_image", "page": 3,
+                 "found_text": "Figure 6.1", "comment": "Raster image detected",
+                 "coords": {"x": 20, "y": 30, "w": 40, "h": 20}}
+        self.assertEqual(finding_kind(error), "raster")
+        visited = []
+        panel, _ = build_report_panel(None, lambda: None, [error], visited.append)
+        button = next(b for b in panel.findChildren(QPushButton) if "4 (1)" in b.text())
+        button.click()
+        self.assertEqual(visited, [3])
+        self.assertTrue(any("Figure 6.1" in l.text() for l in panel.findChildren(QLabel)))
+        view = SelectablePdfView()
+        view.add_errors([error], lang="en")
+        self.assertEqual(len(view.markers), 0)
+        self.assertEqual(len(view.highlight_boxes), 0)
+        view.close()
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / "report.pdf")
+            build_report_pdf({}, "Thesis", "en", path, findings=[error] + self.errors)
+            with fitz.open(path) as pdf:
+                text = " ".join(page.get_text() for page in pdf)
+            for phrase in ("Raster images", "PDF page 4", "Figure 6.1", "Arial", "Bibliography"):
+                self.assertIn(phrase, text)
+
     def test_word_level_config_findings_mentioning_fonts_stay_on_page(self):
         for comment in ("Incorrect font for this word", "Niepoprawna czcionka w tym słowie"):
             with self.subTest(comment=comment):
