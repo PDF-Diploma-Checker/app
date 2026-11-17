@@ -133,18 +133,21 @@ def build_image_summary(raw_image_report, language="pl"):
             if worst_status.get(img_id) not in ("bad", "failed"):
                 worst_status[img_id] = "partial"
             status = "partial"
+        elif is_correct == "NoData":
+            worst_status.setdefault(img_id, "nodata")
+            status = "nodata"
         elif is_correct == "False" or is_correct is False:
             worst_status[img_id] = "bad"
             status = "bad"
         else:
-            if img_id not in worst_status:
+            if worst_status.get(img_id) in (None, "nodata"):
                 worst_status[img_id] = "good"
             status = "good"
 
         status_text = image_text(language, f"status_{status}")
         line = f"{img_id}: {status_text} - {image_text(language, 'details')}: {errors}"
         image_details_lines.append(line)
-        if status != "good":
+        if status not in ("good", "nodata"):
             problem_lines.append(line)
 
     statuses = list(worst_status.values())
@@ -154,6 +157,7 @@ def build_image_summary(raw_image_report, language="pl"):
         "good_count": statuses.count("good"),
         "partial_count": statuses.count("partial"),
         "unchecked_count": statuses.count("failed"),
+        "nodata_count": statuses.count("nodata"),
         "details": image_details_lines,
         "problem_details": problem_lines,
         "analysis_failed": failed,

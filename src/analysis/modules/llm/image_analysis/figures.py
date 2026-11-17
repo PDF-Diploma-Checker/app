@@ -110,6 +110,9 @@ _TEXTS = {
         "status_bad": "Wykryto rozbieżności",
         "status_failed": "Nie przeanalizowano",
         "status_partial": "Częściowo sprawdzono",
+        "status_nodata": "Brak danych do porównania",
+        "claims_unclear": "Nie udało się potwierdzić ani podważyć na rysunku tego, co mówi o nim tekst.",
+        "no_claims": "Tekst nie podaje o tym rysunku wartości ani przebiegu, które można sprawdzić na rysunku.",
         "partial_values": "Porównano potwierdzone wartości; pozostałych danych nie udało się zweryfikować.",
         "details": "Szczegóły",
         "unknown": "Nieznany",
@@ -135,6 +138,9 @@ _TEXTS = {
         "status_bad": "Discrepancies found",
         "status_failed": "Not analysed",
         "status_partial": "Partially checked",
+        "status_nodata": "Nothing to compare",
+        "claims_unclear": "What the text says about the figure could be neither confirmed nor ruled out on the figure.",
+        "no_claims": "The text gives no value or trend for this figure that the figure could confirm.",
         "partial_values": "Confirmed values were compared; the remaining data could not be verified.",
         "details": "Details",
         "unknown": "Unknown",
@@ -224,9 +230,10 @@ def scale_problem(ticks, is_bar_chart):
 
 
 def consistency_verdict(verification):
-    """Normalize the consistency model's answer to 'True', 'False', or 'Error' when it gave no usable verdict."""
+    """Normalize the consistency model's answer to 'True', 'False', 'Unreadable', 'Partial', 'NoData', or 'Error' when it
+    gave no usable verdict."""
     value = str(verification.get("poprawnosc_danych", "")).strip().lower()
-    return {"true": "True", "false": "False", "unreadable": "Unreadable", "partial": "Partial"}.get(value, "Error")
+    return {"true": "True", "false": "False", "unreadable": "Unreadable", "partial": "Partial", "nodata": "NoData"}.get(value, "Error")
 
 
 def _area(img):

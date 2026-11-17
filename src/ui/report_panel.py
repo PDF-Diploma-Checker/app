@@ -324,7 +324,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     if total_figs > 0:
         bad_figs = int(_number(img.get("bad_count", 0)))
         lay.addWidget(_note(t("main.figures_consistency", total=total_figs, good=int(_number(img.get("good_count", 0))),
-                              bad=bad_figs), "bad" if bad_figs else "ok"))
+                              bad=bad_figs, nodata=int(_number(img.get("nodata_count", 0)))), "bad" if bad_figs else "ok"))
         if problems:
             lay.addWidget(_label(t("main.figures_problems"), f"font-size: 13px; font-weight: 700; color: {styles.DANGER}; {TRANSPARENT}"))
             lay.addWidget(_bullets(problems, styles.DANGER_DOT))

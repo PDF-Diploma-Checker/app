@@ -8,7 +8,7 @@ def figure_details(summary):
     for entry in source:
         text = str(entry).strip()
         status = text.partition(":")[2].partition(" - ")[0].strip().casefold()
-        if not text or status in {"poprawny", "correct"}:
+        if not text or status in {"poprawny", "correct", "brak danych do porównania", "nothing to compare"}:
             continue
         target = unchecked if status in unknown else problems
         if text not in target:
