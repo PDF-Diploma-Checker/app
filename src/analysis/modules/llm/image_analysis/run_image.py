@@ -6,6 +6,7 @@ from analysis.modules.llm.image_analysis.figures import collect_figures, consist
 from analysis.modules.llm.image_analysis.vision_engine import VisionEngine, too_small_to_read
 from analysis.modules.llm.image_analysis.reference_matcher import ReferenceMatcher
 from analysis.modules.llm.image_analysis.consistency_checker import ConsistencyChecker
+from analysis.modules.llm.image_analysis.claim_checker import about_figure, check_claim, claims_verdict, extract_claims
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                 "bledy": [image_text(language, "no_reference")]
             })
         else:
-            images_with_refs.append({"id": img["id"], "bytes": img["bytes"], "refs": refs})
+            images_with_refs.append({"id": img["id"], "number": img["number"], "family": img["family"],
+                                     "bytes": img["bytes"], "refs": refs})
 
     if not images_with_refs:
         return final_report
@@ -73,7 +75,10 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                 if not image_data:
                     raise ValueError("The vision model returned no data")
                 extracted_image_data[img["id"]] = image_data
-                printed_numbers[img["id"]] = engine.printed_numbers(img["bytes"])
+                printed = engine.printed_numbers(img["bytes"])
+                if len(printed) > 1 and len(set(printed)) == 1:
+                    printed = []    # the model repeating one number over and over, not numbers of the figure
+                printed_numbers[img["id"]] = printed
             except Exception:
                 # one unreadable figure must not cost the results of all the others
                 logger.exception("Could not read figure %s", img["id"])
@@ -86,6 +91,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
         logger.info("[AI] Ładowanie modelu sprawdzającego spójność (Gemma) do VRAM...")
 
     checker = ConsistencyChecker()
+    statements = []     # (figure, statements of a paragraph) where no value of the figure could be compared
     try:
         for img in images_with_refs:
             if img["id"] not in extracted_image_data:
@@ -107,6 +113,11 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                     logger.error("Unusable consistency verdict for figure %s: %r", img["id"], verification)
                     final_report.append(_failed_entry(img["id"], language))
                     continue
+                if verdict == "Unreadable":
+                    # a curve or a diagram: what the text says about it is checked on the figure itself
+                    part = about_figure(ref_para, img, images)
+                    statements.append((img, extract_claims(checker.llm, part, img["id"], language)))
+                    continue
 
                 final_report.append({
                     "obrazek": img["id"],
@@ -117,7 +128,35 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     finally:
         checker.close()     # the model must not block the video memory for the next stages
 
+    final_report += _check_statements(statements, language, verbose)
     return final_report
+
+
+def _check_statements(statements, language, verbose):
+    """Report entries for the statements of the text, each looked up on its figure by the vision model."""
+    entries = []
+    if not any(claims for _, claims in statements):
+        return [_statements_entry(img["id"], [], language) for img, _ in statements]
+    with VisionEngine("Zgodność rysunków z tekstem") as engine:
+        for img, claims in statements:
+            if verbose:
+                logger.info(" -> Sprawdzanie stwierdzeń o rysunku %s...", img["id"])
+            try:
+                results = [(claim, check_claim(engine, img["bytes"], claim["claim"])) for claim in claims]
+            except Exception:
+                logger.exception("Could not check the statements about figure %s", img["id"])
+                entries.append(_failed_entry(img["id"], language))
+                continue
+            logger.info("Statements about %s: %s", img["id"],
+                        "; ".join(f"{claim['claim']} -> {result}" for claim, result in results) or "none")
+            entries.append(_statements_entry(img["id"], results, language))
+    return entries
+
+
+def _statements_entry(image_id, results, language):
+    verdict, errors = claims_verdict(results, language)
+    return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": verdict, "bledy": errors}
+
 
 if __name__ == "__main__":
     import time

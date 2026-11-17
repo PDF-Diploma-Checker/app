@@ -35,6 +35,7 @@ STRINGS = {
         "rep_ai_eval_title": "Ogólna ocena merytoryczna (AI)", "rep_skipped_fast": "Analiza została pominięta (wybrano Tryb Szybki).",
         "rep_img_title": "Analiza spójności grafik i wykresów (AI)", "rep_img_total": "Zweryfikowane rysunki",
         "rep_img_bad": "Z błędnym opisem w tekście", "rep_img_good": "Poprawne",
+        "rep_img_nodata": "Bez danych do porównania",
         "rep_raster_ident": "Zidentyfikowane grafiki rastrowe podlegające badaniu:", "rep_img_details": "Lista szczegółowa rozbieżności:", "rep_img_unchecked": "Nieprzeanalizowane obrazy:",
         "rep_qual_title": "Ocena jakości obrazów (DPI i czytelność)", "rep_qual_all_ok": "Wszystkie obrazy mają odpowiednią jakość i czytelność.",
         "rep_qual_err_1": "Wykryto problemy z jakością w", "rep_qual_err_2": "obrazach:", "rep_format_lbl": "Format:",
@@ -72,6 +73,7 @@ STRINGS = {
         "rep_ai_eval_title": "Overall Content Evaluation (AI)", "rep_skipped_fast": "Analysis skipped (Fast Mode selected).",
         "rep_img_title": "Graphics and Charts Consistency Analysis (AI)", "rep_img_total": "Verified figures",
         "rep_img_bad": "With incorrect description in text", "rep_img_good": "Correct",
+        "rep_img_nodata": "Nothing to compare",
         "rep_raster_ident": "Identified raster graphics subject to analysis:", "rep_img_details": "Detailed list of discrepancies:", "rep_img_unchecked": "Unanalysed figures:",
         "rep_qual_title": "Image Quality Assessment (DPI & Legibility)", "rep_qual_all_ok": "All images have adequate quality and legibility.",
         "rep_qual_err_1": "Quality issues detected in", "rep_qual_err_2": "images:", "rep_format_lbl": "Format:",
@@ -528,7 +530,8 @@ def _content(w, s, data):
         tiles.append((s["rep_off_pct"].format(count=off_topic, percent=_fmt(p_off)), s["rep_tile_off"],
                       C["danger"] if off_topic else C["success"]))
     if has_images:
-        good, total = int(_number(img.get("good_count", 0))), int(_number(img.get("total", 0)))
+        good = int(_number(img.get("good_count", 0)))
+        total = int(_number(img.get("total", 0))) - int(_number(img.get("nodata_count", 0)))    # the compared ones
         tiles.append((s["rep_figs_of"].format(good=good, total=total), s["rep_tile_figures"],
                       _ratio_colors(good / total if total else 1)[0]))
     if tiles:
@@ -572,7 +575,8 @@ def _content(w, s, data):
         bad = int(_number(img.get("bad_count", 0)))
         rows = [w.r_note(s["rep_img_failed"], "bad"), w.r_gap(6)] if img.get("analysis_failed") else []
         rows += [w.r_text(f"{s['rep_img_total']}: {int(_number(img.get('total', 0)))}   |   "
-                         f"{s['rep_img_bad']}: {bad}   |   {s['rep_img_good']}: {int(_number(img.get('good_count', 0)))}",
+                         f"{s['rep_img_bad']}: {bad}   |   {s['rep_img_good']}: {int(_number(img.get('good_count', 0)))}"
+                         f"   |   {s['rep_img_nodata']}: {int(_number(img.get('nodata_count', 0)))}",
                          10.5, True, C["danger"] if bad else C["success"], 0.0, 4)]
         raster = img.get("raster_numbers", img.get("image_raster", [])) or []
         if raster:
