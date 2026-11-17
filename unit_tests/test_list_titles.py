@@ -5,6 +5,9 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+import re
+
+from analysis.extraction.raw_extraction.front_and_back_matter import _continues_title
 from analysis.modules.redaction.redaction_validator import RedactionValidator, _comparable_title
 
 
@@ -65,6 +68,36 @@ class ListTitlesTest(unittest.TestCase):
         RedactionValidator.check_tof(validator)
         RedactionValidator.check_tot(validator)
         self.assertEqual(errors, [])
+
+    def test_list_caption_reworded_after_its_first_sentence_is_on_its_page(self):
+        image = NS(description="Rysunek 7.4. Przejście modelu M3 po magazynie: kolejne klatki z nagrania. "
+                               "Pierwsza klatka przedstawia wejście na schody.")
+        entry = _entry("Przejście modelu M3 po magazynie: kolejne klatki z nagrania Na pierwszej klatce przedstawiono "
+                       "wejście na schody", 5)
+        entry.number = "7.4"
+        validator, errors = _validator([_page(5, images=[image])], tof=[entry])
+        RedactionValidator.check_tof(validator)
+        self.assertEqual(errors, [])
+
+    def test_another_figure_of_the_same_number_is_still_reported(self):
+        image = NS(description="Rysunek 7.4. Wykres nagrody w kolejnych iteracjach uczenia.")
+        entry = _entry("Przejście modelu M3 po magazynie: kolejne klatki z nagrania", 5)
+        entry.number = "7.4"
+        validator, errors = _validator([_page(5, images=[image])], tof=[entry])
+        RedactionValidator.check_tof(validator)
+        self.assertEqual([e.category for e in errors], ["TOF_mismatch"])
+
+
+class ListEntryParsingTest(unittest.TestCase):
+    START = re.compile(r"^((?:[A-Z]\.)?\d+(?:\.\d+)*)\.?\s+(.*)")
+
+    def test_wrapped_title_starting_with_a_number_goes_on_with_the_entry(self):
+        self.assertTrue(_continues_title(self.START.match("2 m przed nim (z lewej)"), "5.1"))
+
+    def test_next_entry_starts_a_new_one(self):
+        self.assertFalse(_continues_title(self.START.match("5.2 Promienie odległościowe"), "5.1"))
+        self.assertFalse(_continues_title(self.START.match("A.2 Parametry"), "A.1"))
+        self.assertFalse(_continues_title(self.START.match("2 m przed nim"), ""))
 
 
 class PrintedPageNumbersTest(unittest.TestCase):

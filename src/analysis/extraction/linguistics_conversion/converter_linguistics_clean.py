@@ -66,12 +66,13 @@ class PDFMapper:
     EQ_NUM_RE = re.compile(r"^\(\s*\d+(?:[.,]\s*\d+)*\s*\)$")
     MATH_FONTS = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
     MONOSPACE_FONTS = ("courier", "consolas", "mono", "code", "typewriter")
+    # a figure in an appendix is numbered with its letter: Tabela A.3
     IMG_PATTERN = re.compile(
-        r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram|wykres|chart|plot)\s*(?:\d+|[IVX]+)",
+        r"^(rysunek|rys\.|fot\.|schemat|figure|fig\.|image|scheme|diagram|wykres|chart|plot)\s*(?:\d+|[A-Z]\.\d+|[IVX]+)",
         re.IGNORECASE,
     )
     TAB_PATTERN = re.compile(
-        r"^(tabela\.?|tab\.|table\.?)\s*(?:\d+|[IVX]+)", re.IGNORECASE
+        r"^(tabela\.?|tab\.|table\.?)\s*(?:\d+|[A-Z]\.\d+|[IVX]+)", re.IGNORECASE
     )
 
     def _use_geom(self) -> bool:
@@ -737,7 +738,10 @@ class PDFMapper:
                     block_type = "heading"
                 elif PDFMapper.is_keywords(combined_words):
                     block_type = "keywords"
-        if block_type == "paragraph":
+        # a caption of a figure or a table is not a paragraph of the text: its short last line is no widow and its
+        # place at the top of a page is no bastard
+        is_caption = bool(self.IMG_PATTERN.match(combined_content.strip()) or self.TAB_PATTERN.match(combined_content.strip()))
+        if block_type == "paragraph" and not is_caption:
             is_widow = (
                 is_widow_func(combined_words)
                 if is_widow_func(combined_words) != 0

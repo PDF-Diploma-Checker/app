@@ -14,7 +14,8 @@ from common.findings import finding_kind, finding_text
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLayout, QProgressBar, QPushButton, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QLayout, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from . import icons, styles
@@ -234,6 +235,69 @@ def _page_buttons(pages, on_page):
     return box
 
 
+LIST_MAX_HEIGHT = 300
+
+
+def _toggle(text, details, colour=None, background=None):
+    """A collapsed list: the button shows and hides `details`."""
+    toggle = QToolButton()
+    toggle.setText(text)
+    toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    toggle.setCheckable(True)
+    toggle.setArrowType(Qt.RightArrow)
+    toggle.setCursor(Qt.PointingHandCursor)
+    if colour:
+        toggle.setStyleSheet(f"color: {colour}; background: {background}; padding: 8px; border-radius: 6px;")
+    details.hide()
+    toggle.toggled.connect(details.setVisible)
+    toggle.toggled.connect(lambda expanded: toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow))
+    return toggle
+
+
+def _figure_list(name, title, items, on_page):
+    """A collapsed list of figure notes, one line per figure with its page: what the note says is the same for each,
+    so it is written once above the list. A long list scrolls on its own."""
+    rows = QWidget()
+    rows.setStyleSheet("background: transparent;")
+    rows_lay = QVBoxLayout(rows)
+    rows_lay.setContentsMargins(0, 0, 0, 0)
+    rows_lay.setSpacing(4)
+    for item in sorted(items, key=lambda error: int(error.get("page", 0))):
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        page = _page_buttons({int(item.get("page", 0)): 1}, on_page)
+        page.setFixedWidth(84)
+        row.addWidget(page, 0)
+        text = " ".join(str(item.get("found_text", item.get("znaleziony_tekst", "")) or "").split())
+        caption = _label(text if text and text != "None" else "—", f"font-size: 12px; color: {styles.TEXT}; {TRANSPARENT}")
+        caption.setWordWrap(False)
+        caption.setToolTip(text)
+        caption.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        row.addWidget(caption, 1)
+        rows_lay.addLayout(row)
+    scroll = QScrollArea()
+    scroll.setWidget(rows)
+    scroll.setWidgetResizable(True)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+    scroll.setFixedHeight(min(rows.sizeHint().height() + 4, LIST_MAX_HEIGHT))
+
+    details = QWidget()
+    details.setObjectName(name + "Details")
+    details.setStyleSheet("background: transparent;")
+    details_lay = QVBoxLayout(details)
+    details_lay.setContentsMargins(4, 0, 0, 0)
+    details_lay.setSpacing(6)
+    comment = str(items[0].get("comment", items[0].get("komentarz", "")) or "")
+    if comment:
+        details_lay.addWidget(_label(comment, f"font-size: 12px; color: {styles.TEXT_2}; {TRANSPARENT}"))
+    details_lay.addWidget(scroll)
+    toggle = _toggle(title, details)
+    toggle.setObjectName(name + "Toggle")
+    return toggle, details
+
+
 def _findings_section(root, errors, on_page):
     """How many findings the text has and where: the markers on the pages alone do not tell it."""
     root.addWidget(_section(t("main.findings_header")))
@@ -340,29 +404,19 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     elif not img.get("analysis_failed"):
         lay.addWidget(_note(t("main.no_figures_checked") if grade_info is not None else t("main.detailed_only"), "off"))
     if unchecked:
-        toggle = QToolButton()
-        toggle.setObjectName("UncheckedFiguresToggle")
-        toggle.setText(t("main.figures_unchecked", count=len({str(line).partition(":")[0] for line in unchecked})))
-        toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toggle.setCheckable(True)
-        toggle.setArrowType(Qt.RightArrow)
-        toggle.setCursor(Qt.PointingHandCursor)
-        toggle.setStyleSheet(f"color: {styles.WARNING}; background: {styles.WARNING_BG}; padding: 8px; border-radius: 6px;")
-        lay.addWidget(toggle)
         details = _bullets(unchecked, styles.WARNING_DOT)
         details.setObjectName("UncheckedFiguresDetails")
-        details.hide()
-        toggle.toggled.connect(details.setVisible)
-        toggle.toggled.connect(lambda expanded: toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow))
+        toggle = _toggle(t("main.figures_unchecked", count=len({str(line).partition(":")[0] for line in unchecked})),
+                         details, styles.WARNING, styles.WARNING_BG)
+        toggle.setObjectName("UncheckedFiguresToggle")
+        lay.addWidget(toggle)
         lay.addWidget(details)
-    raster_findings = [error for error in (errors or [])
-                       if isinstance(error, dict) and finding_kind(error) == "raster"]
-    if raster_findings:
-        lay.addWidget(_label(t("main.raster_findings"),
-                             f"font-size: 13px; font-weight: 700; color: {styles.TEXT_2}; {TRANSPARENT}"))
-        for item in raster_findings:
-            lay.addWidget(_label(finding_text(item), f"font-size: 12px; color: {styles.TEXT_2}; {TRANSPARENT}"))
-            lay.addWidget(_page_buttons({int(item.get("page", 0)): 1}, on_page))
+    for kind, name, title in (("raster", "RasterFigures", "main.raster_findings"),
+                              ("caption_source", "CaptionSource", "main.caption_source_findings")):
+        items = [error for error in (errors or []) if isinstance(error, dict) and finding_kind(error) == kind]
+        if items:
+            for widget in _figure_list(name, t(title, count=len(items)), items, on_page):
+                lay.addWidget(widget)
     raster = img.get("image_raster", []) or []
     if raster:
         lay.addWidget(_label(t("main.raster_short", count=len(raster), names=", ".join(str(n).split()[-1] for n in raster)),
@@ -389,22 +443,14 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
             root.addWidget(_section(t("main." + key)))
             card, lay = _card()
             if kind == "bibliography":
-                toggle = QToolButton()
-                toggle.setText(t("main.bibliography_details"))
-                toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-                toggle.setArrowType(Qt.RightArrow)
-                toggle.setCheckable(True)
-                toggle.setCursor(Qt.PointingHandCursor)
-                lay.addWidget(toggle)
-                details = _label("\n\n".join(finding_text(item) for item in items),
-                                 f"font-size: 13px; color: {styles.TEXT}; {TRANSPARENT}")
-                details.setTextFormat(Qt.PlainText)
-                details.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                details.hide()
-                toggle.toggled.connect(details.setVisible)
-                toggle.toggled.connect(
-                    lambda expanded, button=toggle: button.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
-                )
+                # the whole list in its own scrolling box: a label as tall as a long bibliography was cut off
+                details = QPlainTextEdit("\n\n".join(finding_text(item) for item in items))
+                details.setObjectName("BibliographyDetails")
+                details.setReadOnly(True)
+                details.setFixedHeight(LIST_MAX_HEIGHT)
+                details.setStyleSheet(f"QPlainTextEdit {{ font-size: 13px; color: {styles.TEXT}; background: transparent; "
+                                      f"border: 1px solid {styles.BORDER}; border-radius: 6px; padding: 4px; }}")
+                lay.addWidget(_toggle(t("main.bibliography_details"), details))
                 lay.addWidget(details)
             else:
                 for item in items:

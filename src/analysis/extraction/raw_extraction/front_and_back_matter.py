@@ -37,6 +37,12 @@ def _opens_with_title(page, titles):
     return any(_clean_title(text).startswith(titles) for text in top)
 
 
+def _continues_title(match, open_number):
+    """True when a line of a list that looks like a new entry goes on with the open one: a title wrapped after "0," reads
+    "2 m przed nim", but the numbers of a list are all as deep as each other (5.1, 5.2), and "2" is not."""
+    return bool(match and open_number) and match.group(1).count(".") != open_number.count(".")
+
+
 class Extractor(ABC):
     """Base class for all extractors."""
 
@@ -272,6 +278,8 @@ class TableOfFiguresExtractor(Extractor):
                         line_full_text,
                     )
                     match_end = re.search(r"(.*?)(?:\.|\s)*\s+(\d+)$", line_full_text)
+                    if _continues_title(match_full or match_start, cut_obj_num):
+                        match_full = match_start = None
 
                     if match_full:
                         obj_num, title_raw, p_num = match_full.groups()
@@ -438,6 +446,8 @@ class TableOfTablesExtractor(Extractor):
                         line_full_text,
                     )
                     match_end = re.search(r"(.*?)(?:\.|\s)*\s+(\d+)$", line_full_text)
+                    if _continues_title(match_full or match_start, cut_obj_num):
+                        match_full = match_start = None
 
                     if match_full:
                         obj_num, title_raw, p_num = match_full.groups()
