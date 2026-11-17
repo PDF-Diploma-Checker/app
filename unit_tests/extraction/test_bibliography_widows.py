@@ -61,6 +61,13 @@ class BibliographyWidowTest(unittest.TestCase):
         self.assertTrue(ends_with_link(words))
 
 
+class AppendixCaptionTest(unittest.TestCase):
+    def test_captions_numbered_with_the_appendix_letter_are_captions(self):
+        self.assertTrue(PDFMapper.TAB_PATTERN.match("Tabela A.3. Zakresy akcji"))
+        self.assertTrue(PDFMapper.IMG_PATTERN.match("Rysunek B.1. Wizualizacja klatek"))
+        self.assertFalse(PDFMapper.TAB_PATTERN.match("Tabela pokazuje wyniki"))
+
+
 class WordAndLinkJoiningTest(unittest.TestCase):
     def test_same_line_and_multiline_url_joining(self):
         text = "AUTODESK. [data dostępu 2026-11-03]. Dostępne z: https : //www.autodesk.com/products/overview."

@@ -479,13 +479,15 @@ def build_report_pdf(report_data, document_name, lang, save_path, font_regular=N
         from common.findings import finding_kind, finding_text
         for kind, title in (("global", "Global findings" if lang == "en" else "Uwagi ogólne"),
                             ("bibliography", "Bibliography" if lang == "en" else "Bibliografia"),
-                            ("raster", "Raster images" if lang == "en" else "Grafiki rastrowe")):
+                            ("raster", "Raster images" if lang == "en" else "Grafiki rastrowe"),
+                            ("caption_source", "Figures without a source in the caption" if lang == "en"
+                             else "Rysunki bez źródła w podpisie")):
             items = [item for item in (findings or []) if finding_kind(item) == kind]
             if items:
                 w.heading(title)
                 for item in items:
                     text = finding_text(item)
-                    if kind == "raster":
+                    if kind in ("raster", "caption_source"):
                         page = int(item.get("page", 0)) + 1
                         text = (f"PDF page {page}" if lang == "en" else f"Strona PDF {page}") + "\n" + text
                     lines = w.wrap(text, 10.5, CONTENT_W - 2 * PAD)

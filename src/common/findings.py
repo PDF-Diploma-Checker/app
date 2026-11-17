@@ -12,6 +12,8 @@ def finding_kind(error):
     category = error.get("category", error.get("kategoria", ""))
     if category == "raster_image":
         return "raster"
+    if category == "missing_caption_source":
+        return "caption_source"
     if category == "bibliography_summary":
         return "bibliography"
     if error.get("scope") == "global" or category in NUMBERING_CATEGORIES:

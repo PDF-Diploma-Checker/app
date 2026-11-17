@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import List
 import json
 import logging
+import os
 import re
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,19 @@ _CAPTION = re.compile(
 )
 
 
+SAME_START = 30
+
+
+def _same_caption(listed, printed, numbered):
+    """A numbered list entry and a caption of the same number agree when they start the same way: the list may hold a
+    shorter or reworded caption after its first sentence."""
+    if listed in printed:
+        return True
+    if not numbered:
+        return False
+    return len(os.path.commonprefix([listed, printed])) >= SAME_START
+
+
 def _listed_caption_on_page(page, entry, kind):
     """Check captions even when image/table detection lost their association."""
     expected = _caption_title(entry.title)
@@ -90,7 +104,7 @@ def _listed_caption_on_page(page, entry, kind):
         if number and (not match or match['number'].casefold() != number):
             continue
         title = _caption_title(description[match.end():] if match else description)
-        if title and (expected in title or (not number and title in expected)):
+        if title and (_same_caption(expected, title, bool(number)) or (not number and title in expected)):
             return True
 
     # Keep line starts to distinguish actual captions from prose references.
@@ -106,7 +120,8 @@ def _listed_caption_on_page(page, entry, kind):
         if caption_kind != kind or (number and match['number'].casefold() != number):
             continue
         end = captions[i + 1].start() if i + 1 < len(captions) else len(text)
-        if _caption_title(text[match.end():end]).startswith(expected):
+        printed = _caption_title(text[match.end():end])
+        if printed.startswith(expected) or (number and _same_caption(expected, printed, True)):
             return True
     return False
 
