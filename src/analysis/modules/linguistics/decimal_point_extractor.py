@@ -66,7 +66,10 @@ def decimal_check(blocks, chapter_nums):
 # "w sekcji 2.4", "na rysunku 2.1"). Dopasowywane jako prefiks, żeby objąć wszystkie formy odmiany.
 REFERENCE_STEMS = ("wersj", "rysun", "tabel", "wykres", "rozdzia", "podrozdzia", "obraz", "wzor", "wzór",
                    "równani", "listing", "sekcj", "podsekcj", "podpunk", "paragraf", "załącznik", "aneks",
-                   "algorytm", "schemat", "schemac", "grafik", "grafic", "diagram", "fotografi", "zdjęci", "ilustracj")
+                   "algorytm", "schemat", "schemac", "grafik", "grafic", "diagram", "fotografi", "zdjęci", "ilustracj",
+                   "zależnoś")
+# "przemysł 5.0", "Industry 4.0", "Web 2.0": the name of a generation, not a value
+GENERATION_STEMS = ("przemys", "industr", "rewolucj", "web", "społeczeństw", "logistyk", "gospodark", "marketing")
 # Słowa dopasowywane dokładnie - jako prefiksy dawałyby fałszywe trafienia
 # (np. "roz" -> "rozmiar", "punkt" -> "punktacja", "dodatk" -> "dodatkowo", "table" -> "tablet").
 REFERENCE_WORDS = {"wer", "rys", "tab", "wyk", "roz", "rozdz", "podrozdz", "obr", "rów", "sek", "pkt",
@@ -133,6 +136,8 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
         elif in_black_list:
             is_error = 2
         elif follows_name(before_text, black_list):
+            is_error = 0
+        elif re.fullmatch(r"\d+\.0", match.content) and previous_text and previous_text[-1].startswith(GENERATION_STEMS):
             is_error = 0
         elif any(is_reference_word(word) for word in previous_text):
             is_error = 0
