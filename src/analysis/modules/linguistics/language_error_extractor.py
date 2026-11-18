@@ -151,11 +151,20 @@ def language_tool_analisys(blocks):
                     elif not any(letter.isalpha() for letter in match.matched_text):
                         dropped("no letters in the match", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
+                    elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl" and SENTENCE_BREAK_RE.search(
+                            contents[match.offset:match.offset + match.error_length]):
+                        # LanguageTool reads "Hz." as an abbreviation and joins two sentences into one
+                        dropped("two sentences, not one compound sentence", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                        continue
                     elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl":
                         reason = predicative_adjective_reason(match.message, contents, match.offset, match.error_length)
                         if reason:
                             dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                             continue
+                if match.rule_id == "WE_W" and "/" in contents[match.offset:match.offset + match.error_length + 1]:
+                    # "we/wy" (inputs/outputs) is an abbreviation, not the preposition "we"
+                    dropped("part of an abbreviation with a slash", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                    continue
                 if match.category in {"TYPOS", "SPELLING", "COMPOUNDING", "SYNTAX"}:
                     word = contents[match.offset:match.offset + match.error_length].strip(string.punctuation + string.whitespace)
                     if typo_check(word):
@@ -290,6 +299,11 @@ def is_adjective_verb_homograph(word):
     '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''
     tags = {interpretation[2][2].split(":")[0] for interpretation in morf.analyse(word.lower())}
     return "adj" in tags and "praet" in tags
+
+# a sentence ends inside the match: a dot after a word and a capital letter after it, unless the word is an
+# abbreviation that goes on with the same sentence ("np. Arduino")
+SENTENCE_BREAK_RE = re.compile(
+    r"(?<![\w.])(?!(?:np|tzw|tj|tzn|ang|łac|wg|ok|dr|inż|mgr|prof|ul|ww|zob|por|cyt)\.)[^\W\d_]{2,}[.!?]\s+[A-ZĄĆĘŁŃÓŚŹŻ]")
 
 def predicative_adjective_reason(message, contents, offset, length):
     '''Checks if the second "verb" found by LanguageTool rule ZDANIA_ZLOZONE is an adjective after a copula.
