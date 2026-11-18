@@ -71,7 +71,7 @@ def _caption_title(text):
 
 
 _CAPTION = re.compile(
-    r"^(?P<kind>Rysunek|Rys\.|Figure|Fig\.|Tabela|Table)\s+"
+    r"^(?P<kind>Rysunek|Rys|Figure|Fig|Tabela|Table|Tab)\.?\s+"
     r"(?P<number>(?:[A-Z]\.|\d+\.)*\d+)\.?\s+", re.IGNORECASE | re.MULTILINE
 )
 
