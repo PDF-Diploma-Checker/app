@@ -37,6 +37,22 @@ def _opens_with_title(page, titles):
     return any(_clean_title(text).startswith(titles) for text in top)
 
 
+def _rows(page):
+    """The lines of a page grouped into rows, keyed by the top of each row. A title with a formula in it sits a little
+    higher than its number and page ("5.2." at 498, "Transformata ... sin(2π⋅50t)" at 496), so a row is the lines
+    whose middles fall within the first line of the row, not the lines of the same rounded top."""
+    rows = {}
+    bounds = []
+    for line in sorted((line for block in page.text_blocks for line in block.lines), key=lambda line: line.bbox[1]):
+        middle = (line.bbox[1] + line.bbox[3]) / 2
+        key = next((top for top, bottom in bounds if top <= middle <= bottom), None)
+        if key is None:
+            key = line.bbox[1]
+            bounds.append((line.bbox[1], line.bbox[3]))
+        rows.setdefault(key, []).append(line)
+    return rows
+
+
 def _continues_title(match, open_number):
     """True when a line of a list that looks like a new entry goes on with the open one: a title wrapped after "0," reads
     "2 m przed nim", but the numbers of a list are all as deep as each other (5.1, 5.2), and "2" is not."""
@@ -83,12 +99,7 @@ class TableOfContentsExtractor(Extractor):
                     break
 
                 y_groups = {}
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 page_entries = []
                 page_text = ""
@@ -219,12 +230,7 @@ class TableOfFiguresExtractor(Extractor):
                 page_text = ""
                 y_groups = {}
 
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 has_keyword_on_top = False
                 has_anti_keyword_on_top = False
@@ -389,12 +395,7 @@ class TableOfTablesExtractor(Extractor):
                 page_text = ""
                 y_groups = {}
 
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 has_keyword_on_top = False
                 has_anti_keyword_on_top = False
