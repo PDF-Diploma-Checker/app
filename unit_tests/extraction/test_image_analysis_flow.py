@@ -484,6 +484,12 @@ class ReferencesAcrossSeriesTest(unittest.TestCase):
         figure, chart = {"number": "1", "family": "rys"}, {"number": "1", "family": "wykres"}
         self.assertEqual(self.references(["Na wykresie 1 widać dane."], figure, [figure, chart]), [])
 
+    def test_figure_called_a_photo_in_the_text(self):
+        img = {"number": "4.5", "family": "rys"}
+        text = "Użyto modułu akcelerometru GY–291 widocznego na zdjęciu 4.5, którego schemat znajduje się w dokumentacji."
+        self.assertEqual(self.references([text], img, [img]), [text])
+        self.assertTrue(self.references(["Na zdjęciach 4.4 i 4.5 widać moduł."], img, [img]))
+
 
 
 if __name__ == "__main__":
