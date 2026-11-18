@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 _FAMILIES = {
     "rys": ("rys", "fig", "rycin", "ilustracj", "grafik", "obraz", "image", "img"),
     "wykres": ("wykres", "chart", "plot"),
-    "fot": ("fot", "photo"),
+    "fot": ("fot", "zdjęc", "zdjęć", "zdjec", "photo"),
     "schemat": ("schemat", "schema", "diagram"),
 }
 FIGURE_FAMILIES = tuple(_FAMILIES)
