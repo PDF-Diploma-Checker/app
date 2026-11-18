@@ -43,6 +43,19 @@ def _continues_title(match, open_number):
     return bool(match and open_number) and match.group(1).count(".") != open_number.count(".")
 
 
+LIST_INDENT_SHIFT = 60
+
+
+def _goes_on_with_list(listed, page_entries):
+    """True when the entries read on the page after a list carry that list on. The page after a list can be a chapter
+    whose figure holds lines like "A.1 ... 0": they point back in the document and stand away from the list's left edge,
+    while a list goes on with page numbers that do not go back and with entries under each other."""
+    if not listed:
+        return True
+    left = min(entry.bbox[0] for entry in listed)
+    return page_entries[0].page >= listed[-1].page and min(entry.bbox[0] for entry in page_entries) - left < LIST_INDENT_SHIFT
+
+
 class Extractor(ABC):
     """Base class for all extractors."""
 
@@ -326,6 +339,8 @@ class TableOfFiguresExtractor(Extractor):
                 if is_detecting and page_entries:
                     if len(tof_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
                         is_detecting = False
+                    elif not has_keyword_on_top and not _goes_on_with_list(all_entries, page_entries):
+                        is_detecting = False
                     else:
                         all_entries.extend(page_entries)
                         if page_obj.number not in tof_pages:
@@ -493,6 +508,8 @@ class TableOfTablesExtractor(Extractor):
 
                 if is_detecting and page_entries:
                     if len(tot_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
+                        is_detecting = False
+                    elif not has_keyword_on_top and not _goes_on_with_list(all_entries, page_entries):
                         is_detecting = False
                     else:
                         all_entries.extend(page_entries)

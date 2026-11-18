@@ -221,6 +221,20 @@ def merge_fragment_images(
                 break
 
 
+FIGURE_TO_BOX_AREA = 4
+
+
+def _box_of_figure(figure, table_bbox, tables):
+    """True when a table without a caption lies inside a figure many times its size: a flowchart's box with two lines of
+    text in it reads as a small table, and the figure would be dropped for it."""
+    table_rect = fitz.Rect(table_bbox)
+    table = next((table for table in tables if fitz.Rect(table.bbox) == table_rect), None)
+    if table is None or table.description:
+        return False
+    return (fitz.Rect(figure) + (-1, -1, 1, 1)).contains(table_rect) and \
+        figure.width * figure.height >= FIGURE_TO_BOX_AREA * table_rect.width * table_rect.height
+
+
 def extract_vector_graphics(
     page: fitz.Page,
     drawings: list,
@@ -431,6 +445,8 @@ def extract_vector_graphics(
             if aspect_ratio < 25.0 and aspect_ratio > 0.05:
                 is_invalid = False
                 for t_bbox in table_bboxes:
+                    if _box_of_figure(bbox, t_bbox, cur_page.tables):
+                        continue
                     intersect = bbox & t_bbox
                     if intersect.is_valid and not intersect.is_empty:
                         intersect_area = intersect.width * intersect.height
@@ -450,6 +466,8 @@ def extract_vector_graphics(
                 bbox = bbox.intersect(page.rect)
                 if not bbox.is_valid or bbox.is_empty:
                     continue
+                # a box of a flowchart taken for a table is a part of the figure, not a table of the thesis
+                cur_page.tables = [table for table in cur_page.tables if not _box_of_figure(bbox, table.bbox, cur_page.tables)]
 
                 description, found_side = find_image_description(
                     (bbox.x0, bbox.y0, bbox.x1, bbox.y1),
