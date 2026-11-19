@@ -24,6 +24,27 @@ if (($Variant -eq "gpu" -or $Variant -eq "all") -and -not (Get-Command nvcc -Err
     throw "Wariant gpu wymaga CUDA Toolkit (brak 'nvcc' w PATH): llama-cpp-python jest kompilowany z CUDA. Zainstaluj toolkit albo zbuduj tylko base/cpu."
 }
 
+function Get-CudaArchitectures {
+    # machine code for Pascal to Ada (plus Blackwell when nvcc knows it) and PTX that newer cards compile at run time
+    $archs = "61-real;70-real;75-real;80-real;86-real;89-real"
+    $release = [regex]::Match((& nvcc --version | Out-String), "release (\d+)\.(\d+)")
+    if ($release.Success -and ([int]$release.Groups[1].Value * 100 + [int]$release.Groups[2].Value) -ge 1208) {
+        $archs += ";120-real"
+    }
+    return "$archs;89-virtual"
+}
+
+function Copy-CudaRuntime($llamaLib) {
+    # ggml-cuda.dll loads cudart/cublas by name. Without its own copies it takes whatever CUDA is on the user's
+    # PATH (an older toolkit crashes it) or fails on a computer without a toolkit. The copies come from the toolkit
+    # it was compiled with and sit next to it, in the folder llama_cpp puts first on PATH.
+    $bin = Split-Path (Get-Command nvcc).Source
+    $dlls = @(Get-ChildItem -Path (Join-Path $bin "*"), (Join-Path $bin "x64\*") -Include "cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll" -File -ErrorAction SilentlyContinue)
+    if ($dlls.Count -lt 3) { throw "Nie znaleziono bibliotek cudart/cublas/cublasLt CUDA Toolkit w $bin." }
+    $dlls | Copy-Item -Destination $llamaLib -Force
+    Write-Host "Biblioteki CUDA dolaczone do llama_cpp: $($dlls.Name -join ', ')"
+}
+
 function Build-Variant($name) {
     Write-Host ""
     Write-Host "=== Wariant: $name ==="
@@ -41,7 +62,7 @@ function Build-Variant($name) {
         # "uv sync" is exact: packages that are not part of this variant (e.g. CUDA torch) are removed.
         $syncArgs = @("sync", "--frozen", "--no-dev")
         if ($name -eq "cpu") { $syncArgs += @("--extra", "cpu") }
-        if ($name -eq "gpu") { $syncArgs += @("--extra", "gpu"); $env:CMAKE_ARGS = "-DGGML_CUDA=on" }
+        if ($name -eq "gpu") { $syncArgs += @("--extra", "gpu"); $env:CMAKE_ARGS = "-DGGML_CUDA=on -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES=$(Get-CudaArchitectures)" }
         try {
             Run "uv" $syncArgs
         } finally {
@@ -60,6 +81,14 @@ function Build-Variant($name) {
         if ($LASTEXITCODE -ne 0) {
             throw "llama-cpp-python w tym srodowisku jest zbudowany BEZ CUDA. Usun .venv-build-gpu, wykonaj 'uv cache clean llama-cpp-python' i uruchom ponownie."
         }
+        $llamaLib = & $python -c "import llama_cpp, os; print(os.path.join(os.path.dirname(llama_cpp.__file__), 'lib'))"
+        # Without an architecture list llama.cpp is compiled for the GPU of this machine only, and the detailed mode
+        # crashes on every other card (also with 0 layers on the GPU).
+        & $python tools/check_cuda_archs.py (Join-Path $llamaLib "ggml-cuda.dll")
+        if ($LASTEXITCODE -ne 0) {
+            throw "ggml-cuda.dll nie ma kodu dla popularnych kart. Usun .venv-build-gpu, wykonaj 'uv cache clean llama-cpp-python' i uruchom ponownie."
+        }
+        Copy-CudaRuntime $llamaLib
     }
 
     Run $python @("tools/check_imports.py")
