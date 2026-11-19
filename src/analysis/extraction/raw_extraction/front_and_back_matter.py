@@ -14,11 +14,18 @@ from analysis.extraction.raw_extraction.bare_struct import (
 )
 
 
+# lists a thesis may have after its figures and tables: their entries look the same ("4.1 Konfiguracja ... 45")
+OTHER_LISTS = (
+    "spis listingów", "spis listingow", "wykaz listingów", "wykaz listingow", "list of listings",
+    "spis kodów", "spis kodow", "wykaz kodów", "wykaz kodow", "spis algorytmów", "spis algorytmow",
+    "wykaz algorytmów", "wykaz algorytmow", "list of algorithms", "spis załączników", "wykaz załączników",
+)
+
 LIST_TITLES = (
     "spis rysunkow", "spis rysunków", "spis ilustracji", "spis wykresow", "spis wykresów", "wykaz rysunkow", "wykaz rysunków",
     "list of figures", "table of figures", "table of graphs",
     "spis tabel", "spis tablic", "wykaz tabel", "list of tables",
-)
+) + OTHER_LISTS
 
 
 def _clean_title(text):
@@ -37,10 +44,39 @@ def _opens_with_title(page, titles):
     return any(_clean_title(text).startswith(titles) for text in top)
 
 
+def _rows(page):
+    """The lines of a page grouped into rows, keyed by the top of each row. A title with a formula in it sits a little
+    higher than its number and page ("5.2." at 498, "Transformata ... sin(2π⋅50t)" at 496), so a row is the lines
+    whose middles fall within the first line of the row, not the lines of the same rounded top."""
+    rows = {}
+    bounds = []
+    for line in sorted((line for block in page.text_blocks for line in block.lines), key=lambda line: line.bbox[1]):
+        middle = (line.bbox[1] + line.bbox[3]) / 2
+        key = next((top for top, bottom in bounds if top <= middle <= bottom), None)
+        if key is None:
+            key = line.bbox[1]
+            bounds.append((line.bbox[1], line.bbox[3]))
+        rows.setdefault(key, []).append(line)
+    return rows
+
+
 def _continues_title(match, open_number):
     """True when a line of a list that looks like a new entry goes on with the open one: a title wrapped after "0," reads
     "2 m przed nim", but the numbers of a list are all as deep as each other (5.1, 5.2), and "2" is not."""
     return bool(match and open_number) and match.group(1).count(".") != open_number.count(".")
+
+
+LIST_INDENT_SHIFT = 60
+
+
+def _goes_on_with_list(listed, page_entries):
+    """True when the entries read on the page after a list carry that list on. The page after a list can be a chapter
+    whose figure holds lines like "A.1 ... 0": they point back in the document and stand away from the list's left edge,
+    while a list goes on with page numbers that do not go back and with entries under each other."""
+    if not listed:
+        return True
+    left = min(entry.bbox[0] for entry in listed)
+    return page_entries[0].page >= listed[-1].page and min(entry.bbox[0] for entry in page_entries) - left < LIST_INDENT_SHIFT
 
 
 class Extractor(ABC):
@@ -70,12 +106,7 @@ class TableOfContentsExtractor(Extractor):
                     break
 
                 y_groups = {}
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 page_entries = []
                 page_text = ""
@@ -195,7 +226,7 @@ class TableOfFiguresExtractor(Extractor):
                 "wykaz tabel",
                 "bibliografia",
                 "bibliography",
-            ]
+            ] + list(OTHER_LISTS)
             all_entries = []
             tof_pages = []
             is_detecting = False
@@ -206,12 +237,7 @@ class TableOfFiguresExtractor(Extractor):
                 page_text = ""
                 y_groups = {}
 
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 has_keyword_on_top = False
                 has_anti_keyword_on_top = False
@@ -250,6 +276,7 @@ class TableOfFiguresExtractor(Extractor):
                         is_detecting = False
 
                 page_entries = []
+                list_ended = False
                 cut_obj_num = ""
                 cut_title = ""
                 for y in sorted(y_groups.keys()):
@@ -267,6 +294,10 @@ class TableOfFiguresExtractor(Extractor):
                     if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
+                    if _clean_title(line_full_text) in anti_keywords:
+                        # another list starts on the same page: the rest of the page is not this list
+                        list_ended = True
+                        break
 
                     page_text += line_full_text + " "
                     match_full = re.search(
@@ -326,11 +357,15 @@ class TableOfFiguresExtractor(Extractor):
                 if is_detecting and page_entries:
                     if len(tof_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
                         is_detecting = False
+                    elif not has_keyword_on_top and not _goes_on_with_list(all_entries, page_entries):
+                        is_detecting = False
                     else:
                         all_entries.extend(page_entries)
                         if page_obj.number not in tof_pages:
                             tof_pages.append(page_obj.number)
                 elif is_detecting and not page_entries:
+                    is_detecting = False
+                if list_ended:
                     is_detecting = False
 
             # a list with its title and nothing in it, for a thesis without such elements, is still there
@@ -363,7 +398,7 @@ class TableOfTablesExtractor(Extractor):
                 "table of graphs",
                 "bibliografia",
                 "bibliography",
-            ]
+            ] + list(OTHER_LISTS)
             all_entries = []
             tot_pages = []
             is_detecting = False
@@ -374,12 +409,7 @@ class TableOfTablesExtractor(Extractor):
                 page_text = ""
                 y_groups = {}
 
-                for block in page_obj.text_blocks:
-                    for line in block.lines:
-                        y_center = round(line.bbox[1] / 5) * 5
-                        if y_center not in y_groups:
-                            y_groups[y_center] = []
-                        y_groups[y_center].append(line)
+                y_groups.update(_rows(page_obj))
 
                 has_keyword_on_top = False
                 has_anti_keyword_on_top = False
@@ -418,6 +448,7 @@ class TableOfTablesExtractor(Extractor):
                         is_detecting = False
 
                 page_entries = []
+                list_ended = False
                 cut_obj_num = ""
                 cut_title = ""
                 for y in sorted(y_groups.keys()):
@@ -435,6 +466,10 @@ class TableOfTablesExtractor(Extractor):
                     if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
+                    if _clean_title(line_full_text) in anti_keywords:
+                        # another list starts on the same page: the rest of the page is not this list
+                        list_ended = True
+                        break
 
                     page_text += line_full_text + " "
                     match_full = re.search(
@@ -494,11 +529,15 @@ class TableOfTablesExtractor(Extractor):
                 if is_detecting and page_entries:
                     if len(tot_pages) == 0 and len(page_entries) < 2 and not _opens_with_title(page_obj, tuple(keywords)):
                         is_detecting = False
+                    elif not has_keyword_on_top and not _goes_on_with_list(all_entries, page_entries):
+                        is_detecting = False
                     else:
                         all_entries.extend(page_entries)
                         if page_obj.number not in tot_pages:
                             tot_pages.append(page_obj.number)
                 elif is_detecting and not page_entries:
+                    is_detecting = False
+                if list_ended:
                     is_detecting = False
 
             # a list with its title and nothing in it, for a thesis without such elements, is still there

@@ -136,5 +136,26 @@ class TestMarkerHyphen(unittest.TestCase):
         self.assertEqual([m for m in matches if m.category == "LIST_ENDING"], [])
 
 
+class TestWhereList(unittest.TestCase):
+
+    def test_symbol_of_the_next_definition_is_not_the_ending(self):
+        texts = ["częstotliwość k-tego prążka, 𝑘", "indeks prążka, 𝑓 𝑠", "częstotliwość próbkowania sygnału, 𝑁",
+                 "liczba próbek sygnału, Δ𝑓", "rozdzielczość częstotliwościowa."]
+        items = []
+        for idx, text in enumerate(texts):
+            ws, pos = [], 0
+            for wi, tok in enumerate(text.split(" ")):
+                ws.append(word(tok, index=wi, start=pos))
+                pos += len(tok) + 1
+            items.append(ListItem(item_id=idx, marker_type="bullet", text=text,
+                                  bbox=[70.0, 200.0 + idx * 15, 250.0, 212.0 + idx * 15], words=ws))
+        block = ListBlock(block_id="where", content="\n".join(texts), bbox=[70.0, 200.0, 250.0, 280.0], items=items,
+                          words=[w for it in items for w in it.words], type="list")
+        block.language = "pl"
+        ctx = Block_context(block=block, contents=block.content, language="pl")
+        matches = check_coherence_in_list([ctx], proper_names=[], acronyms={})
+        self.assertEqual([m.content for m in matches if m.category == "LIST_ENDING"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

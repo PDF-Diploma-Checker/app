@@ -34,6 +34,16 @@ def add_list_error(items_by_id, num, block_id, category, lang):
     error_coordinate = [{"page": coord_word.page_number, "coordinates": list(coord_word.bbox)}]
     return add_match(item.text, block_id, page_start, page_end, word_idxs, error_coordinate, category, Category_and_message[category])
 
+# "gdzie: f – częstotliwość, k – indeks": the symbol of the next definition stands left of its dash, so the text
+# reads it at the end of the item before ("częstotliwość k-tego prążka, 𝑘")
+NEXT_SYMBOL = re.compile(r"([,;])\s+(?:[\U0001D400-\U0001D7FF\u0370-\u03FF∆]\s?){1,4}$")
+
+
+def without_next_symbol(text):
+    """The item without a math symbol that belongs to the next item."""
+    return NEXT_SYMBOL.sub(r"\1", text)
+
+
 def is_short_definition(text, text_language):
     """
     Determines if the text has the structure of a short definition.
@@ -99,7 +109,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
             quote_close = {'"', '»', '”', '’', '"', ')'}
             upper_id, lower_id, neutral_id, quote_id, definition_id, endings = [], [], [], [], [], []
             for item in block.items:
-                item_text = re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', item.text)).strip()
+                item_text = without_next_symbol(re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', item.text)).strip())
                 if not item_text:
                     continue
                 effective_text = item_text
@@ -245,7 +255,7 @@ def check_coherence_in_list(blocks, proper_names, acronyms):
                 last_item = False
                 second_to_last = False
 
-                full_text = re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', item.text)).strip()
+                full_text = without_next_symbol(re.sub(r'\s+', ' ', re.sub(r'\[\d+\]', '', item.text)).strip())
                 if not full_text:
                     continue
                 if len(block.items) == 1:

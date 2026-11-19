@@ -469,3 +469,15 @@ class TestGeneratedPdfs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGenerationNames(unittest.TestCase):
+    def test_industry_generation_is_not_a_decimal(self):
+        self.assertEqual(detected("Aby kontynuować koncepcję przemysłu 5.0 w tym projekcie, zaleca się zmiany."), {})
+        self.assertEqual(detected("Przemysł 4.0 zmienia produkcję."), {})
+
+    def test_relation_number_is_a_reference(self):
+        self.assertEqual(detected("Opisuje ją zależność 2.11 podana wcześniej."), {})
+
+    def test_value_with_zero_after_a_dot_is_still_reported(self):
+        self.assertIn("5.0", detected("Napięcie wynosi 5.0 w każdym pomiarze."))
