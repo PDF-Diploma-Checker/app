@@ -14,11 +14,18 @@ from analysis.extraction.raw_extraction.bare_struct import (
 )
 
 
+# lists a thesis may have after its figures and tables: their entries look the same ("4.1 Konfiguracja ... 45")
+OTHER_LISTS = (
+    "spis listingów", "spis listingow", "wykaz listingów", "wykaz listingow", "list of listings",
+    "spis kodów", "spis kodow", "wykaz kodów", "wykaz kodow", "spis algorytmów", "spis algorytmow",
+    "wykaz algorytmów", "wykaz algorytmow", "list of algorithms", "spis załączników", "wykaz załączników",
+)
+
 LIST_TITLES = (
     "spis rysunkow", "spis rysunków", "spis ilustracji", "spis wykresow", "spis wykresów", "wykaz rysunkow", "wykaz rysunków",
     "list of figures", "table of figures", "table of graphs",
     "spis tabel", "spis tablic", "wykaz tabel", "list of tables",
-)
+) + OTHER_LISTS
 
 
 def _clean_title(text):
@@ -219,7 +226,7 @@ class TableOfFiguresExtractor(Extractor):
                 "wykaz tabel",
                 "bibliografia",
                 "bibliography",
-            ]
+            ] + list(OTHER_LISTS)
             all_entries = []
             tof_pages = []
             is_detecting = False
@@ -269,6 +276,7 @@ class TableOfFiguresExtractor(Extractor):
                         is_detecting = False
 
                 page_entries = []
+                list_ended = False
                 cut_obj_num = ""
                 cut_title = ""
                 for y in sorted(y_groups.keys()):
@@ -286,6 +294,10 @@ class TableOfFiguresExtractor(Extractor):
                     if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
+                    if _clean_title(line_full_text) in anti_keywords:
+                        # another list starts on the same page: the rest of the page is not this list
+                        list_ended = True
+                        break
 
                     page_text += line_full_text + " "
                     match_full = re.search(
@@ -353,6 +365,8 @@ class TableOfFiguresExtractor(Extractor):
                             tof_pages.append(page_obj.number)
                 elif is_detecting and not page_entries:
                     is_detecting = False
+                if list_ended:
+                    is_detecting = False
 
             # a list with its title and nothing in it, for a thesis without such elements, is still there
             title_pages = [page.number for page in pages if page.number not in toc_pages and _opens_with_title(page, tuple(keywords))]
@@ -384,7 +398,7 @@ class TableOfTablesExtractor(Extractor):
                 "table of graphs",
                 "bibliografia",
                 "bibliography",
-            ]
+            ] + list(OTHER_LISTS)
             all_entries = []
             tot_pages = []
             is_detecting = False
@@ -434,6 +448,7 @@ class TableOfTablesExtractor(Extractor):
                         is_detecting = False
 
                 page_entries = []
+                list_ended = False
                 cut_obj_num = ""
                 cut_title = ""
                 for y in sorted(y_groups.keys()):
@@ -451,6 +466,10 @@ class TableOfTablesExtractor(Extractor):
                     if _clean_title(line_full_text) in keywords:
                         page_text += line_full_text + " "
                         continue
+                    if _clean_title(line_full_text) in anti_keywords:
+                        # another list starts on the same page: the rest of the page is not this list
+                        list_ended = True
+                        break
 
                     page_text += line_full_text + " "
                     match_full = re.search(
@@ -517,6 +536,8 @@ class TableOfTablesExtractor(Extractor):
                         if page_obj.number not in tot_pages:
                             tot_pages.append(page_obj.number)
                 elif is_detecting and not page_entries:
+                    is_detecting = False
+                if list_ended:
                     is_detecting = False
 
             # a list with its title and nothing in it, for a thesis without such elements, is still there
