@@ -462,4 +462,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     button.setStyleSheet(styles.RAPORT_BTN_STYLE)
     button.clicked.connect(on_download)
     root.addWidget(button)
+    # spare height (the scroll area makes the content at least as tall as the view, and wrapped labels can ask for
+    # more than they use) goes below the button, not into the cards, where it opened gaps around the lists
+    root.addStretch(1)
     return content, button

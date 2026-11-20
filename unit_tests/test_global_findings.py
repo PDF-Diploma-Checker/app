@@ -154,8 +154,10 @@ class GlobalFindingsTest(unittest.TestCase):
                               if label.text() in {"Global findings", "Bibliography", "Sentence statistics"})
         self.assertEqual(titles[-2:], ["Global findings", "Bibliography"])
         self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
-        self.assertIs(panel.layout().itemAt(panel.layout().count() - 1).widget(), download)
-        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 2).widget())
+        # the button is last, followed only by the stretch that keeps spare height out of the cards
+        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 1).spacerItem())
+        self.assertIs(panel.layout().itemAt(panel.layout().count() - 2).widget(), download)
+        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 3).widget())
         self.assertTrue(panel.layout().alignment() & Qt.AlignTop)
 
     def test_reader_excludes_global_markers_after_json_reload(self):
