@@ -12,6 +12,7 @@ from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
 from common.timing import log_time
 from common.version import APP_VERSION
+from ui.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class AnalysisPipeline:
         if not pdf_path or not os.path.exists(pdf_path):
             raise FileNotFoundError(f"File not found: {pdf_path}")
 
-        report_progress(10, "Starting text extraction from PDF...")
+        report_progress(10, t("progress.extraction"))
 
         from analysis.extraction.main_extractor import extractPDF
         from analysis.extraction.raw_extraction.image_extractor import get_raster_figure_numbers
@@ -168,12 +169,12 @@ class AnalysisPipeline:
                 logger.error(f"[PIPELINE] Redaction validation error: {e}", exc_info=True)
                 return []
 
-        report_progress(30, "Starting analyses...")
+        report_progress(30, t("progress.starting"))
 
         with log_time(logger, "Redaction check"):
             redaction_errors = task_redaction()
 
-        report_progress(50, "Redaction completed. Running remaining analyses...")
+        report_progress(50, t("progress.redaction_done"))
 
         workers_count = 2 if use_llm else 1
 
@@ -203,7 +204,7 @@ class AnalysisPipeline:
             with log_time(logger, "Review of the language findings"):
                 ling_matches = run_language_review_isolated(ling_matches, language, cancel_token)
 
-        report_progress(100, "Generating final report...")
+        report_progress(100, t("progress.report"))
 
         all_errors = ling_matches + redaction_errors
 
