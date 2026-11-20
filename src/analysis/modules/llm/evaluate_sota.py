@@ -19,7 +19,7 @@ def get_llm():
         logger.info("Loading SOTA evaluation LLM from %s", MODEL_PATH)
         try:
             _llm_instance = make_llama(
-                purpose="Ocena SOTA",
+                purpose="sota",
                 model_path=str(MODEL_PATH),
                 n_ctx=4096,
                 n_gpu_layers=N_GPU_LAYERS,

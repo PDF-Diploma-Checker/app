@@ -321,6 +321,7 @@ def download_ai_models_with_progress(progress_callback=None):
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     from huggingface_hub import hf_hub_download, snapshot_download
+    from ui.i18n import t
 
     def report(value, text):
         if progress_callback:
@@ -329,33 +330,33 @@ def download_ai_models_with_progress(progress_callback=None):
     try:
         if not MODEL_PATH.is_file():
             run_control.check_cancelled()
-            report(15, "Pobieranie modelu Gemma 3 (ok. 8 GB)...")
+            report(15, t("progress.download_gemma"))
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             hf_hub_download(repo_id=GEMMA_REPO, filename=GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
 
         VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
         if not VISION_MODEL_PATH.is_file():
             run_control.check_cancelled()
-            report(50, "Pobieranie modelu Qwen2.5-VL (ok. 5 GB)...")
+            report(50, t("progress.download_vision"))
             hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
         if not VISION_MMPROJ_PATH.is_file():
             run_control.check_cancelled()
-            report(70, "Pobieranie projektora Qwen2.5-VL...")
+            report(70, t("progress.download_projector"))
             hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
         _remove_replaced_models()
 
         if embedding_path() is None:
             run_control.check_cancelled()
-            report(80, "Pobieranie modelu embeddingów...")
+            report(80, t("progress.download_embedding"))
             repo = _embedding_repo()
             EMBEDDING_DIR.mkdir(parents=True, exist_ok=True)
             snapshot_download(
                 repo_id=repo, local_dir=str(EMBEDDING_DIR), ignore_patterns=_embedding_ignore_patterns(repo),
             )
 
-        report(90, "Modele AI zostały pobrane pomyślnie.")
+        report(90, t("progress.download_done"))
     except run_control.AnalysisCancelled:
         raise
     except OSError as e:

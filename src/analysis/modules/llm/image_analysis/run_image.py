@@ -62,7 +62,7 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
     extracted_image_data = {}
     printed_numbers = {}
 
-    with VisionEngine("Analiza obrazów") as engine:
+    with VisionEngine("image_analysis") as engine:
         for idx, img in enumerate(images_with_refs, 1):
             if verbose:
                 logger.info("[%d/%d] Odczyt rysunku %s...", idx, len(images_with_refs), img["id"])
@@ -137,7 +137,7 @@ def _check_statements(statements, language, verbose):
     entries = []
     if not any(claims for _, claims in statements):
         return [_statements_entry(img["id"], [], language) for img, _ in statements]
-    with VisionEngine("Zgodność rysunków z tekstem") as engine:
+    with VisionEngine("figure_text") as engine:
         for img, claims in statements:
             if verbose:
                 logger.info(" -> Sprawdzanie stwierdzeń o rysunku %s...", img["id"])

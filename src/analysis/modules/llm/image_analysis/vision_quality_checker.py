@@ -13,7 +13,7 @@ def get_vision_quality_report(doc_obj, mapped_doc, verbose=False, language="pl")
     if not images: 
         return bad_images_report
         
-    with VisionEngine("Jakość rysunków") as engine:
+    with VisionEngine("figure_quality") as engine:
         for img in images:
             if verbose:
                 logger.info(" -> Ocena wizualna rysunku %s...", img["id"])

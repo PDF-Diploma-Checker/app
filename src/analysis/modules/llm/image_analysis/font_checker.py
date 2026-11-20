@@ -28,7 +28,7 @@ def get_font_consistency_report(doc_obj, mapped_doc, verbose=False, language="pl
     if not images:
         return bad_fonts_report
 
-    with VisionEngine("Czcionki na rysunkach") as engine:
+    with VisionEngine("figure_fonts") as engine:
         for idx, img in enumerate(images, 1):
             if verbose:
                 logger.info("[%d/%d] Weryfikacja czcionek rysunku %s...", idx, len(images), img["id"])

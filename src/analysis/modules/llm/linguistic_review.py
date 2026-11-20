@@ -17,6 +17,7 @@ from analysis.modules.llm import config
 from analysis.modules.llm.llama_factory import make_llama
 from analysis.modules.llm.results_log import log_results
 from common import run_control
+from ui.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,6 @@ _SPELLING_KEY = {
     "en": '"poprawny_zapis" (the reported fragment as it should be written: copy it character by character; when it is correct, without any change), ',
 }
 
-_PROGRESS = {
-    "pl": "AI: weryfikacja błędów językowych ({done}/{total})...",
-    "en": "AI: verifying the language errors ({done}/{total})...",
-}
 
 
 def _with_polish_letters(text):
@@ -200,9 +197,8 @@ def review_findings(matches, language="pl"):
     if not to_ask:
         return matches
 
-    progress = _PROGRESS.get(language, _PROGRESS["pl"])
     llm = make_llama(
-        purpose="Weryfikacja błędów językowych",
+        purpose="language_review",
         model_path=str(config.MODEL_PATH),
         n_ctx=N_CTX,
         n_gpu_layers=config.N_GPU_LAYERS,
@@ -213,7 +209,7 @@ def review_findings(matches, language="pl"):
         for done, match in enumerate(to_ask):
             run_control.check_cancelled()
             if done % NOTIFY_EVERY == 0:
-                run_control.notify(progress.format(done=done, total=len(to_ask)))
+                run_control.notify(t("progress.language_review_count", done=done, total=len(to_ask)))
             try:
                 match_language = getattr(match, "language", "") or language
                 template = _PROMPTS.get(match_language, _PROMPTS["pl"])

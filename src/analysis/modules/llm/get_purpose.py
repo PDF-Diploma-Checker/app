@@ -179,7 +179,7 @@ def ask_model(model_name, prompt, num_predict=120):
         logger.info("Loading purpose-extraction LLM from %s", model_name)
         try:
             _LLAMA_MODELS[model_name] = make_llama(
-                purpose="Cel pracy",
+                purpose="purpose",
                 model_path=model_name,
                 n_ctx=N_CTX,
                 n_threads=N_THREADS,
