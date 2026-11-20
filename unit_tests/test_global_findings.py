@@ -44,13 +44,14 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Używany rozmiar czcionki (10)"}), "global")
 
     def test_page_count_is_a_global_document_finding(self):
-        for comment in ("Dokument ma 42 stron, mniej niż wymagane 50.",
-                        "The document has 42 pages, less than the required 50."):
+        shown = "The document has 42 pages, less than the minimum number of 50."
+        for comment in ("Dokument ma 42 stron, mniej niż minimalna liczba 50",
+                        "The document has 42 pages, less than the minimum number of 50"):
             with self.subTest(comment=comment):
                 error = {"category": "config_file", "comment": comment}
                 self.assertEqual(finding_kind(error), "global")
                 panel, _ = build_report_panel({}, lambda: None, [error])
-                self.assertTrue(any(comment in label.text() for label in panel.findChildren(QLabel)))
+                self.assertTrue(any(shown in label.text() for label in panel.findChildren(QLabel)))
                 view = SelectablePdfView()
                 view.add_errors([error], lang="en")
                 self.assertEqual(len(view.markers), 0)
@@ -154,8 +155,10 @@ class GlobalFindingsTest(unittest.TestCase):
                               if label.text() in {"Global findings", "Bibliography", "Sentence statistics"})
         self.assertEqual(titles[-2:], ["Global findings", "Bibliography"])
         self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
-        self.assertIs(panel.layout().itemAt(panel.layout().count() - 1).widget(), download)
-        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 2).widget())
+        # the button is last, followed only by the stretch that keeps spare height out of the cards
+        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 1).spacerItem())
+        self.assertIs(panel.layout().itemAt(panel.layout().count() - 2).widget(), download)
+        self.assertIsNotNone(panel.layout().itemAt(panel.layout().count() - 3).widget())
         self.assertTrue(panel.layout().alignment() & Qt.AlignTop)
 
     def test_reader_excludes_global_markers_after_json_reload(self):

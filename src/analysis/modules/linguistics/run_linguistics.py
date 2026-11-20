@@ -8,7 +8,7 @@ from analysis.modules.linguistics.proper_names import get_proper_names
 from analysis.modules.linguistics.helpers import get_context, extract_chapter_numbers, extract_errors_to_json
 from analysis.modules.linguistics.first_definition import check_first_definition
 from analysis.modules.linguistics.check_acronym import check_if_was_defined
-from analysis.modules.linguistics.decision_log import report_sources
+from analysis.modules.linguistics.decision_log import report_sources, dropped_match
 from analysis.extraction.main_extractor import extractPDF
 from analysis.modules.linguistics.bibliography_check import check_bibliography
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
@@ -46,6 +46,19 @@ def remove_errors_inside_images(matches, raw_blocks):
         )
         if not inside:
             filtered.append(match)
+    return filtered
+
+def keep_only_bibliography_check_in_bibliography(sources, blocks):
+    '''In a bibliography block only the findings of bibliography_check are shown, all other findings are dropped.'''
+    bibliography = {b.block.block_id: b for b in blocks if getattr(b.block, "is_bibliography", False)}
+    filtered = []
+    for source, source_matches in sources:
+        if source != "bibliography_check":
+            for match in source_matches:
+                if match.block_id in bibliography:
+                    dropped_match(f"in the bibliography (only bibliography_check is shown there, source={source})", match, bibliography[match.block_id])
+            source_matches = [m for m in source_matches if m.block_id not in bibliography]
+        filtered.append((source, source_matches))
     return filtered
 
 def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
@@ -106,7 +119,8 @@ def run_linguistics(raw_blocks, config_path=None, cancel_token=None):
                ("acronym_check", acronym_matches), ("sentence_check", language_style_matches), ("dash_check", dash_matches),
                ("abbreviation_check", abbreviation_matches), ("bibliography_check", bib_matches),
                ("first_definition", italic_matches)]
-    matches = [match for _, source_matches in sources for match in source_matches]
+    sources = keep_only_bibliography_check_in_bibliography(sources, blocks)
+    matches =[match for _, source_matches in sources for match in source_matches]
     before_image_filter = len(matches)
     matches = remove_errors_inside_images(matches, raw_blocks)
     logger.info("Image overlap filter removed %d matches", before_image_filter - len(matches))

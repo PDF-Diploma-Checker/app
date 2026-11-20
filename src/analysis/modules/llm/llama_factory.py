@@ -18,6 +18,7 @@ from llama_cpp import Llama, LogitsProcessorList
 
 from analysis.modules.llm import config
 from common import eta, gpu_check, run_control
+from ui.i18n import t
 
 logger = logging.getLogger(__name__)
 
@@ -93,18 +94,25 @@ class _CancellableLlama(Llama):
 
 
 def device_description(n_gpu_layers, vram_used_mb=None):
-    """(on_gpu, text) for the status line, e.g. (True, 'GPU (NVIDIA GeForce RTX 3060), 25 warstw, 4.8 GB VRAM')."""
+    """(on_gpu, text) for the status line, e.g. (True, 'GPU (NVIDIA GeForce RTX 3060), 25 layers, 4.8 GB VRAM')."""
     if not n_gpu_layers:
-        return False, "procesor (CPU)"
+        return False, t("progress.device_cpu")
     if not gpu_check.llama_gpu_support():
-        return False, "procesor (CPU) - ta wersja llama.cpp nie ma obsługi GPU"
+        return False, t("progress.device_cpu_no_gpu_build")
     gpus = gpu_check.nvidia_gpus()
     name = gpus[0]["name"] if gpus else "GPU"
-    layers = "wszystkie warstwy" if n_gpu_layers < 0 else f"{n_gpu_layers} warstw"
+    layers = t("progress.layers_all") if n_gpu_layers < 0 else t("progress.layers_n", n=n_gpu_layers)
     if vram_used_mb is not None and vram_used_mb < _VRAM_TAKEN_MB:
-        return False, f"procesor (CPU) - karta {name} nie przejęła modelu (zajęte tylko {vram_used_mb:.0f} MB VRAM)"
+        return False, t("progress.device_not_taken", name=name, mb=f"{vram_used_mb:.0f}")
     memory = f", {vram_used_mb / 1024:.1f} GB VRAM" if vram_used_mb else ""
-    return True, f"GPU ({name}), {layers}{memory}"
+    return True, t("progress.device_gpu", name=name, layers=layers, memory=memory)
+
+
+def _purpose_name(purpose):
+    """The model's purpose in the UI language: callers pass a key of "progress.model" ("summaries"...)."""
+    key = f"progress.model.{purpose}"
+    name = t(key)
+    return purpose if name == key else name
 
 
 def _free_gpu_memory():
@@ -139,13 +147,13 @@ def _create_with_fallback(purpose, kwargs):
                 lower = 24                              # "all layers" did not fit: start from a number
             logger.warning("%s: the model does not fit with n_gpu_layers=%s (%s); retrying with %s",
                            purpose, layers, error, lower)
-            run_control.notify(f"{purpose}: za mało pamięci karty, ponawiam z mniejszą liczbą warstw GPU ({lower})")
+            run_control.notify(t("progress.model_retry", purpose=_purpose_name(purpose), lower=lower))
             _free_gpu_memory()
             layers = lower
 
 
 def make_llama(purpose="model", **kwargs):
-    """Create a cancellable Llama and report on which device it runs. `purpose` is a short name for the log."""
+    """Create a cancellable Llama and report on which device it runs. `purpose` is a key of "progress.model" (also used in the log)."""
     run_control.check_cancelled()
     if "n_gpu_layers" not in kwargs:
         kwargs["n_gpu_layers"] = config.N_GPU_LAYERS
@@ -172,7 +180,7 @@ def make_llama(purpose="model", **kwargs):
     big = size >= _BIG_MODEL_BYTES
     if big:
         eta.record_model_load(size, seconds)       # real load speed of this computer, for the time estimate
-        run_control.notify(f"{purpose}: model działa na: {where}")
+        run_control.notify(t("progress.model_runs_on", purpose=_purpose_name(purpose), where=where))
     if layers and not on_gpu:
         logger.warning("%s: GPU was requested (n_gpu_layers=%s) but the model runs on the CPU", purpose, layers)
     run_control.check_cancelled()

@@ -101,7 +101,7 @@ def get_llm():
         logger.info("Loading summary LLM from %s", MODEL_PATH)
         try:
             _LLM = make_llama(
-                purpose="Streszczenia",
+                purpose="summaries",
                 model_path=str(MODEL_PATH),
                 n_ctx=N_CTX,
                 n_threads=N_THREADS,

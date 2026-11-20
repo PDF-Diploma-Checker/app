@@ -157,10 +157,17 @@ def language_tool_analisys(blocks):
                         dropped("two sentences, not one compound sentence", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl":
+                        if spans_two_sentences(match.matched_text):
+                            dropped("spans two sentences (LT did not split after a capitalized word with a period)", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                            continue
                         reason = predicative_adjective_reason(match.message, contents, match.offset, match.error_length)
                         if reason:
                             dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                             continue
+                    elif text_language == "pl" and removed_enumeration_comma(
+                            contents, match.offset, match.error_length, match.replacements):
+                        dropped("comma between items of an enumeration", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                        continue
                 if match.rule_id == "WE_W" and "/" in contents[match.offset:match.offset + match.error_length + 1]:
                     # "we/wy" (inputs/outputs) is an abbreviation, not the preposition "we"
                     dropped("part of an abbreviation with a slash", match.category, match.rule_id, contents, match.offset, match.error_length, block)
@@ -294,6 +301,71 @@ def is_polish_inflected_loanword(word, use_whitelist=True):
     return False
 
 COMPOUND_SENTENCE_VERBS_RE = re.compile(r"\(„([^”]+)”\)\s+a drugim\s+\(„([^”]+)”\)")
+
+
+UPPERCASE = "A-ZĄĆĘŁŃÓŚŹŻ"
+SENTENCE_BOUNDARY_RE = re.compile(rf"\b[{UPPERCASE}]\w*\.\s+[{UPPERCASE}]")
+
+def spans_two_sentences(text):
+    '''Checks if text contains a capitalized word, a period and a capital letter, e.g. "3200 Hz. Na".'''
+    return SENTENCE_BOUNDARY_RE.search(text) is not None
+
+# Łączniki zamykające wyliczenie "coś, coś, ... i/lub/oraz coś".
+ENUMERATION_CONNECTOR_RE = re.compile(
+    r",?\s+(?:i/lub|i/albo|a także|jak również|a też|i|lub|oraz|albo|bądź|czy|ani|tudzież|&)\s+\S")
+ENUMERATION_STOP_RE = re.compile(r"[;:!?]|\.(?:\s|$)")
+MAX_ENUMERATION_ITEM_WORDS = 3
+VERB_TAGS = {"fin", "praet", "impt", "imps", "inf", "bedzie", "winien", "pred", "aglt", "pcon", "pant"}
+CASES = {"nom", "gen", "dat", "acc", "inst", "loc", "voc"}
+SYMBOL_TAGS = {"brev", "ign", "dig", "romandig"}
+
+def _word_tags(word):
+    return [interpretation[2][2] for interpretation in morf.analyse(word)]
+
+def _is_symbol(word):
+    '''Letters, numbers and acronyms: "B", "30%", "F1", "LSTM".'''
+    return not any(char.islower() for char in word)
+
+def _cases(word):
+    '''All grammatical cases Morfeusz allows for word.'''
+    return {case for tag in _word_tags(word) for field in tag.split(":") for case in field.split(".") if case in CASES}
+
+def _has_verb(words):
+    return any(tag.split(":")[0] in VERB_TAGS for word in words for tag in _word_tags(word))
+
+def _items_agree(word_before, word_after):
+    '''Two enumeration items agree: both are symbols ("B", "C") or they share a grammatical case ("precyzji", "czułości").'''
+    if _is_symbol(word_before) or _is_symbol(word_after):
+        return _is_symbol(word_before) and _is_symbol(word_after)
+    return bool(_cases(word_before.lower()) & _cases(word_after.lower()))
+
+def is_enumeration_comma(contents, comma):
+    '''Checks if the comma at index comma separates items of an enumeration "A, B, ... i/lub/oraz C".'''
+    before = re.findall(r"[\w%]+", contents[:comma][-60:])
+    after = contents[comma + 1:]
+    stop = ENUMERATION_STOP_RE.search(after)
+    after = after[:stop.start()] if stop else after
+    connector = ENUMERATION_CONNECTOR_RE.search(after)
+    if not before or not connector:
+        return False
+    items = [re.findall(r"[\w%]+", item) for item in after[:connector.start()].split(",")]
+    if not all(0 < len(item) <= MAX_ENUMERATION_ITEM_WORDS for item in items):
+        return False
+    if _has_verb([word for item in items for word in item]):
+        return False
+    return _items_agree(before[-1], items[0][-1])
+
+def removed_enumeration_comma(contents, offset, length, replacements):
+    '''Checks if a LanguageTool suggestion only removes a comma that separates items of an enumeration,
+    e.g. POZA_TYM in "Dla 30% budżetu wyniki wariantów B, C i D uległy zbliżeniu".'''
+    matched = contents[offset:offset + length]
+    normalize = lambda text: " ".join(text.split())
+    suggestions = {normalize(r) for r in replacements}
+    for i, char in enumerate(matched):
+        if char == "," and normalize(matched[:i] + matched[i + 1:]) in suggestions:
+            if is_enumeration_comma(contents, offset + i):
+                return True
+    return False
 
 def is_adjective_verb_homograph(word):
     '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''

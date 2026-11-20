@@ -273,7 +273,7 @@ class ConsistencyChecker:
         logger.info("Loading consistency-checker LLM from %s", model_path)
         try:
             self.llm = make_llama(
-                purpose="Spójność rysunków",
+                purpose="figure_consistency",
                 model_path=model_path,
                 n_ctx=4096,
                 n_gpu_layers=config.N_GPU_LAYERS,

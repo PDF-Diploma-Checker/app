@@ -7,6 +7,7 @@ the rest is in the detailed report.
 `report_data` is the AI result stored for the document. The texts come from the app language (t()).
 """
 
+import re
 from collections import Counter
 
 from common.figure_findings import figure_details
@@ -24,6 +25,40 @@ from .i18n import t
 TRACK = "#E5E7EB"
 INDIGO = "#6366F1"
 TRANSPARENT = "background: transparent; border: none;"
+
+
+# Global findings keep the comment in the thesis language; the panel shows them in the UI language.
+# Each pattern matches the Polish and the English comment of redaction_validator.py.
+_GLOBAL_TEXTS = [(key, re.compile(pattern, re.DOTALL)) for key, pattern in (
+    ("main.global_font", r"(?:Używana czcionka|The font used) \((?P<font>.*)\) (?:jest niezgodna|does not match)"),
+    ("main.global_font_size",
+     r"(?:Używany rozmiar czcionki|The font size used) \((?P<size>[^)]*)\).*\((?P<required>[^)]*)\)\.?$"),
+    ("main.global_pages_min", r"(?:Dokument ma|The document has) (?P<count>\d+) \w+, (?:mniej|less).*?(?P<limit>\d+)\.?$"),
+    ("main.global_pages_max", r"(?:Dokument ma|The document has) (?P<count>\d+) \w+, (?:więcej|more).*?(?P<limit>\d+)\.?$"),
+    ("main.global_numbering_before_chapter",
+     r"(?:Wykryto numerację na stronie|Numbering detected on page) ?(?P<page>\d+),.*?(?P<first>\d+)\)\.?$"),
+    ("main.global_no_numbering", r"(?:Wykryto brak numeracji na stronie|Missing page numbering detected on page) (?P<page>\d+)"),
+    ("main.global_wrong_number",
+     r"(?:Błędny numer strony\. Wykryto|Invalid page number\. Detected): (?P<found>.*?), (?:oczekiwano|expected): "
+     r"(?P<expected>[^.\s]+)\.(?:.*: (?P<pages>[^:]*?)\.)?$"),
+    ("main.global_numbering_start",
+     r"(?:Numeracja stron zaczyna się|The page numbering starts).*?: (?P<found>.*?), (?:oczekiwano|expected): (?P<expected>.*?)\.?$"),
+    ("main.global_numbering_invalid", r"(?:Z racji niepoprawnej numeracji|Due to incorrect page numbering)"),
+)]
+
+
+def _global_text(item):
+    """The text of a global finding in the UI language; an unknown comment is shown as it was saved."""
+    comment = str(item.get("comment", item.get("komentarz", "")) or "").strip()
+    for key, pattern in _GLOBAL_TEXTS:
+        match = pattern.match(comment)
+        if match:
+            values = match.groupdict()
+            text = t(key, **{name: value for name, value in values.items() if value is not None})
+            if values.get("pages"):
+                text += " " + t("main.global_wrong_number_more", pages=values["pages"])
+            return text
+    return finding_text(item)
 
 
 # ----------------------------------------------------------------------------- helpers
@@ -454,7 +489,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                 lay.addWidget(details)
             else:
                 for item in items:
-                    lay.addWidget(_note(finding_text(item), "warn"))
+                    lay.addWidget(_note(_global_text(item), "warn"))
             root.addWidget(card)
 
     button = QPushButton(t("main.download_report"))
@@ -462,4 +497,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     button.setStyleSheet(styles.RAPORT_BTN_STYLE)
     button.clicked.connect(on_download)
     root.addWidget(button)
+    # spare height (the scroll area makes the content at least as tall as the view, and wrapped labels can ask for
+    # more than they use) goes below the button, not into the cards, where it opened gaps around the lists
+    root.addStretch(1)
     return content, button

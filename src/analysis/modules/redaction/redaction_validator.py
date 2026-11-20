@@ -302,6 +302,7 @@ class RedactionValidator:
         self.remove_errors_from_tables()
         self.remove_errors_from_acronyms_symbols()
         self.remove_errors_from_title_page()
+        self.remove_errors_from_bibliography()
         self.replace_global_errors()
         self.log_all_errors()
 
@@ -334,6 +335,34 @@ class RedactionValidator:
                     new_x1 = i * slot_width + 5
                     new_x2 = (i + 1) * slot_width - 5
                     error.bounding_box = (round(new_x1, 2), 5, round(new_x2, 2), 45)
+
+    def remove_errors_from_bibliography(self):
+        """In the bibliography only the findings of bibliography_check (linguistics module) are shown.."""
+        areas = []                                       # (page, x0, y0, x1, y1) of a bibliography block on a page
+        for block in self.document_data_linguistics.logical_blocks:
+            if not getattr(block, "is_bibliography", False):
+                continue
+            words = [w for item in getattr(block, "items", []) or [] for w in item.words or []] or getattr(block, "words", []) or []
+            for page in {w.page_number for w in words}:
+                boxes = [w.bbox for w in words if w.page_number == page]
+                areas.append((page, min(b[0] for b in boxes), min(b[1] for b in boxes),
+                              max(b[2] for b in boxes), max(b[3] for b in boxes)))
+
+        def in_bibliography(error):
+            box = error.bounding_box
+            if not box or tuple(box) == (0, 0, 0, 0):
+                return False
+            return any(page == error.page_number and box[0] >= x0 - 5 and box[1] >= y0 - 5
+                       and box[2] <= x1 + 5 and box[3] <= y1 + 5 for page, x0, y0, x1, y1 in areas)
+
+        kept = []
+        for error in self.errors:
+            if in_bibliography(error):
+                logger.info("[DROPPED] %s page=%s text=%r reason=in the bibliography (only bibliography_check is shown there)",
+                            error.category, error.page_number, error.text)
+            else:
+                kept.append(error)
+        self.errors = kept
 
     def remove_errors_from_title_page(self):
         for error in self.errors[:]:
