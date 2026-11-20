@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from analysis.modules.linguistics.language_error_extractor import ( 
-    is_adjective_verb_homograph, is_polish_inflected_loanword, predicative_adjective_reason, typo_check
+    is_adjective_verb_homograph, is_polish_inflected_loanword, predicative_adjective_reason, spans_two_sentences, typo_check
 )
 
 
@@ -137,6 +137,23 @@ class TestCompoundSentenceKept(unittest.TestCase):
     def test_message_without_verbs(self):
         sentence = "Po kalibracji pozostaje ona stała i niezależna od temperatury."
         self.assertIsNone(predicative_adjective_reason("Błąd interpunkcyjny.", sentence, 14, 21))
+
+
+class TestSpansTwoSentences(unittest.TestCase):
+    '''ZDANIA_ZLOZONE przez granicę "Słowo. Wielka" - LT nie podzielił zdań, trafienie odrzucone.'''
+
+    def test_capitalized_word_period_capital(self):
+        for text in ("są z częstotliwością 3200 Hz. Na mikrokontrolerze zaimplementowano przetwarzanie",
+                     "mierzy się w Pa. Wartości odczytano", "wynosi 5 Wh. Źródło zasilania stanowi"):
+            with self.subTest(text=text):
+                self.assertTrue(spans_two_sentences(text))
+
+    def test_single_sentence(self):
+        for text in ("dane przesyłane są zaimplementowano przetwarzanie",
+                     "interfejs SPI (ang. Serial Peripheral Interface) którym dane są",
+                     "wynosi 3200 Hz a urządzenie pracuje"):
+            with self.subTest(text=text):
+                self.assertFalse(spans_two_sentences(text))
 
 
 if __name__ == "__main__":
