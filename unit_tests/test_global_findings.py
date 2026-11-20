@@ -44,13 +44,14 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertEqual(finding_kind({"category": "config_file", "comment": "Używany rozmiar czcionki (10)"}), "global")
 
     def test_page_count_is_a_global_document_finding(self):
-        for comment in ("Dokument ma 42 stron, mniej niż wymagane 50.",
-                        "The document has 42 pages, less than the required 50."):
+        shown = "The document has 42 pages, less than the minimum number of 50."
+        for comment in ("Dokument ma 42 stron, mniej niż minimalna liczba 50",
+                        "The document has 42 pages, less than the minimum number of 50"):
             with self.subTest(comment=comment):
                 error = {"category": "config_file", "comment": comment}
                 self.assertEqual(finding_kind(error), "global")
                 panel, _ = build_report_panel({}, lambda: None, [error])
-                self.assertTrue(any(comment in label.text() for label in panel.findChildren(QLabel)))
+                self.assertTrue(any(shown in label.text() for label in panel.findChildren(QLabel)))
                 view = SelectablePdfView()
                 view.add_errors([error], lang="en")
                 self.assertEqual(len(view.markers), 0)
