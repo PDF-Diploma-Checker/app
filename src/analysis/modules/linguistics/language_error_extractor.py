@@ -157,6 +157,9 @@ def language_tool_analisys(blocks):
                         dropped("two sentences, not one compound sentence", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                         continue
                     elif match.rule_id == "ZDANIA_ZLOZONE" and text_language == "pl":
+                        if spans_two_sentences(match.matched_text):
+                            dropped("spans two sentences (LT did not split after a capitalized word with a period)", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                            continue
                         reason = predicative_adjective_reason(match.message, contents, match.offset, match.error_length)
                         if reason:
                             dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
@@ -294,6 +297,14 @@ def is_polish_inflected_loanword(word, use_whitelist=True):
     return False
 
 COMPOUND_SENTENCE_VERBS_RE = re.compile(r"\(„([^”]+)”\)\s+a drugim\s+\(„([^”]+)”\)")
+
+
+UPPERCASE = "A-ZĄĆĘŁŃÓŚŹŻ"
+SENTENCE_BOUNDARY_RE = re.compile(rf"\b[{UPPERCASE}]\w*\.\s+[{UPPERCASE}]")
+
+def spans_two_sentences(text):
+    '''Checks if text contains a capitalized word, a period and a capital letter, e.g. "3200 Hz. Na".'''
+    return SENTENCE_BOUNDARY_RE.search(text) is not None
 
 def is_adjective_verb_homograph(word):
     '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''
