@@ -6,35 +6,25 @@ import traceback
 from common import run_control
 from common.cancellation import check_cancelled
 from common.timing import StageTimer
+from ui.i18n import t
 
 logger = logging.getLogger(__name__)
 
-# status lines of the LLM stages (the progress bar value is the second element); keyed by the thesis language
+# progress bar values of the LLM stages; the status line is "progress.stage_<name>" in the UI language
 STAGES = {
-    "pl": {
-        "purpose": (55, "AI: wyszukiwanie celu pracy..."),
-        "goal": (62, "AI: sprawdzanie realizacji celu..."),
-        "summaries": (70, "AI: streszczanie rozdziałów i ocena treści..."),
-        "sota": (80, "AI: ocena rozdziału o stanie wiedzy (SOTA)..."),
-        "images": (90, "AI: analiza rysunków i wykresów..."),
-        "language_review": (95, "AI: weryfikacja błędów językowych..."),
-    },
-    "en": {
-        "purpose": (55, "AI: finding the thesis purpose..."),
-        "goal": (62, "AI: checking whether the goal was met..."),
-        "summaries": (70, "AI: summarising chapters and rating the content..."),
-        "sota": (80, "AI: rating the state-of-the-art chapter..."),
-        "images": (90, "AI: analysing figures and charts..."),
-        "language_review": (95, "AI: verifying the language errors..."),
-    },
+    "purpose": 55,
+    "goal": 62,
+    "summaries": 70,
+    "sota": 80,
+    "images": 90,
+    "language_review": 95,
 }
 
 
 def _stage(language, name, cancel_token=None):
-    """Stop here if the user cancelled, otherwise announce the next stage."""
+    """Stop here if the user cancelled, otherwise announce the next stage (in the UI language, not the thesis one)."""
     check_cancelled(cancel_token)
-    value, text = STAGES.get(language, STAGES["pl"])[name]
-    run_control.notify(text, value)
+    run_control.notify(t(f"progress.stage_{name}"), STAGES[name])
 
 def cleanup_text_llm_instances():
     """

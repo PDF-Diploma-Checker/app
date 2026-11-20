@@ -91,7 +91,7 @@ def get_axis_report(doc_obj, mapped_doc, language="pl"):
     if not images:
         return report
 
-    with VisionEngine("Osie wykresów") as engine:
+    with VisionEngine("figure_axes") as engine:
         for img in images:
             try:
                 if too_small_to_read(img["bytes"]):
