@@ -485,6 +485,21 @@ class RedactionValidator:
 
         self.errors = filtered_errors
 
+    def _matches_caption_text(self, error, descriptions) -> bool:
+        if not error.text:
+            return False
+        err_norm = " ".join(error.text.split()).casefold()
+        if len(err_norm) < 5:
+            return False
+
+        for desc in descriptions:
+            if not desc:
+                continue
+            desc_norm = " ".join(desc.split()).casefold()
+            if err_norm in desc_norm:
+                return True
+        return False
+
     def remove_errors_from_tables(self):
         def is_inside(error_bbox, table_bbox):
             return (
@@ -506,6 +521,15 @@ class RedactionValidator:
                             if is_inside(error.bounding_box, table.bbox):
                                 error_to_remove = True
                                 break
+
+                        if (
+                            not error_to_remove
+                            and error.category == "shoemaker"
+                            and self._matches_caption_text(
+                                error, [t.description for t in page.tables]
+                            )
+                        ):
+                            error_to_remove = True
                         break
 
             if not error_to_remove:
