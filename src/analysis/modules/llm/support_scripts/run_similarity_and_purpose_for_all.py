@@ -38,7 +38,7 @@ from analysis.modules.llm.similarity import (
     compute_similarity_for_summaries,
 )
 
-from analysis.modules.llm.get_subtitles import (
+from analysis.extraction.helper_llm.get_subtitles import (
     extract_subtitles_from_pdf,
 )
 

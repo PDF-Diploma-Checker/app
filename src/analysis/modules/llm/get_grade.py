@@ -15,7 +15,7 @@ from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 
 from analysis.modules.llm.get_purpose import get_purpose
-from analysis.modules.llm.get_subtitles import get_subtitles
+from analysis.extraction.helper_llm.get_subtitles import get_subtitles
 from analysis.modules.llm.get_summary import get_summaries
 from analysis.modules.llm.section_relevance import review_sections
 from analysis.modules.llm.results_log import log_embedding_results, log_grade_calculation

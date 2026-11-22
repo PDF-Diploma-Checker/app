@@ -5,12 +5,9 @@ from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-try:
-    from analysis.extraction.helper_llm.converter_linguistics_llm import block_text
-    from analysis.modules.llm.get_subtitles import collect_section_text, next_heading_index
-    from analysis.modules.llm.goal_realization import extract_ending_fragment
-except ImportError as e:  # the base variant has no AI libraries
-    raise unittest.SkipTest(f"AI libraries are not available: {e}")
+from analysis.extraction.helper_llm.converter_linguistics_llm import block_text
+from analysis.extraction.helper_llm.ending_fragment import extract_ending_fragment
+from analysis.extraction.helper_llm.get_subtitles import collect_section_text, next_heading_index
 
 APPENDIX = "Dodatek B: Podsumowanie audytu dostępności aplikacji Dnia 30.09.2026 firma przeprowadziła audyt aplikacji."
 FILLER = "Opis prototypu i wyników badań. " * 5
