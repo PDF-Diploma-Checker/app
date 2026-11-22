@@ -3,6 +3,7 @@
 import sys
 import os
 import json
+import re
 import time
 import gc
 import logging
@@ -46,6 +47,20 @@ ENDING_HEADINGS = [
     "FINAL REMARKS",
     "SUMMARY",
 ]
+
+
+# The chapter that ends the thesis has a top-level number ("7. PODSUMOWANIE"). A subsection ("7.3. Wnioski") has a dotted
+# one, and an appendix ("Dodatek B: Podsumowanie audytu ...") none, so neither is taken for the end of the thesis.
+NUMBERED_ENDING_RE = re.compile(
+    r"(?<![\w.])\d{1,2}\.?\s+(?:" + "|".join(re.escape(heading) for heading in ENDING_HEADINGS) + r")(?!\w)",
+    re.IGNORECASE,
+)
+
+# What follows the conclusions: the bibliography, and after it the lists of figures and the appendices.
+BACK_MATTER_RE = re.compile(
+    r"(?<!\w)(?:Wykaz literatury|WYKAZ LITERATURY|Bibliografia|BIBLIOGRAFIA|Bibliography|BIBLIOGRAPHY|References|REFERENCES)(?!\w)"
+)
+MIN_ENDING_CHARS = 300
 
 
 MESSAGES = {
@@ -139,6 +154,25 @@ def normalize_text(text):
     return " ".join(str(text).replace("\xa0", " ").split()).strip()
 
 
+def _ending_start(normalized):
+    """Offset of the chapter that ends the thesis, -1 when there is none."""
+
+    numbered = [match.start() for match in NUMBERED_ENDING_RE.finditer(normalized)]
+    if numbered:
+        return numbered[-1]
+
+    best = -1
+
+    for heading in ENDING_HEADINGS:
+        for match in re.finditer(re.escape(heading), normalized, re.IGNORECASE):
+            # "podsumowanie pracy", "wnioski z analizy": a phrase or a longer title, not the heading
+            if normalized[match.end():].lstrip()[:1].islower():
+                continue
+            best = max(best, match.start())
+
+    return best
+
+
 def extract_ending_fragment(text):
     """Extract thesis ending fragment based on known final-section headings."""
 
@@ -148,17 +182,13 @@ def extract_ending_fragment(text):
         return ""
 
     normalized = normalize_text(text)
-    upper_text = normalized.upper()
-
-    best_start = -1
-
-    for heading in ENDING_HEADINGS:
-        idx = upper_text.rfind(heading)
-        if idx > best_start:
-            best_start = idx
+    best_start = _ending_start(normalized)
 
     if best_start != -1:
         fragment = normalized[best_start:]
+        back_matter = BACK_MATTER_RE.search(fragment)
+        if back_matter and back_matter.start() >= MIN_ENDING_CHARS:
+            fragment = fragment[:back_matter.start()]
     else:
         fragment = normalized[-MAX_END_FRAGMENT_CHARS:]
 
