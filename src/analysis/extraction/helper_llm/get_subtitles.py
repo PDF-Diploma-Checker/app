@@ -1,25 +1,14 @@
 """Extract numbered subtitle sections and their content from mapped PDF blocks."""
 
 import re
-import os
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
-_src_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-for _p in (os.path.dirname(_src_dir), _src_dir):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from common.path import resource_path
-
-from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
-from analysis.extraction.helper_llm.converter_linguistics_llm import PDFMapper_llm, block_text
-from analysis.modules.llm.config import THESIS_PATH
+from .extraction_json_llm import extractPDF_llm
+from .converter_linguistics_llm import PDFMapper_llm, block_text
 
 logger = logging.getLogger(__name__)
-
-file_path = THESIS_PATH
 
 NUMBERED_HEADING_RE = re.compile(r"^\s*(\d+\.\d+(?:\.\d+)*)(?:\.)?\s+(.+?)\s*$")
 HEADING_WITH_PREFIX_RE = re.compile(r"^\s*(?:\d+\.\s+)?(\d+\.\d+(?:\.\d+)*)(?:\.)?\s+(.+?)\s*$")
@@ -314,20 +303,20 @@ def get_subtitles(raw_doc, txt_path: Path | None = None):
 
 
 def main():
-    """Run subtitle extraction for the configured thesis file and print results."""
+    """Run subtitle extraction for the PDF given on the command line and print results."""
 
-    pdf_path = Path(file_path)
-    txt_path = Path(resource_path(os.path.join("llm", "wyniki", "subtitles.txt")))
+    if len(sys.argv) < 2:
+        logger.error("Usage: python -m analysis.extraction.helper_llm.get_subtitles thesis.pdf")
+        return
 
+    pdf_path = Path(sys.argv[1])
     raw_doc = extractPDF_llm(str(pdf_path))
 
     if raw_doc is None:
         logger.error("extractPDF_llm returned None for %s", pdf_path)
-        logger.info(f"Błąd: ekstrakcja PDF zwróciła None dla {pdf_path}.")
         return
 
-    subtitles = get_subtitles(raw_doc)
-    print_subtitles(subtitles)
+    print_subtitles(get_subtitles(raw_doc))
 
 
 if __name__ == "__main__":

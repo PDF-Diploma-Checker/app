@@ -20,7 +20,7 @@ for _p in (os.path.dirname(_src_dir), _src_dir):
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
 
-from analysis.modules.llm.get_subtitles import extract_subtitles_from_pdf
+from analysis.extraction.helper_llm.get_subtitles import extract_subtitles_from_pdf
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.get_summary import summarize_subtitles
 from analysis.modules.llm.config import EMBEDDING_MODEL, THESIS_PATH, OUTPUT_DIR, LANGUAGE, N_GPU_LAYERS
