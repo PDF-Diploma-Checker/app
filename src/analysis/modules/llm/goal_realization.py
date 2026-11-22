@@ -19,6 +19,7 @@ for _p in (os.path.dirname(_src_dir), _src_dir):
 from analysis.modules.llm.config import THESIS_PATH, LANGUAGE, MODEL_PATH, N_GPU_LAYERS
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
 from analysis.extraction.helper_llm.converter_linguistics_llm import get_plain_text
+from analysis.extraction.helper_llm.ending_fragment import extract_ending_fragment
 from analysis.modules.llm.get_purpose import get_purpose
 from analysis.modules.llm.llama_factory import make_llama
 
@@ -29,23 +30,9 @@ N_CTX = 4096
 N_THREADS = None
 MAX_NEW_TOKENS = 350
 
-MAX_END_FRAGMENT_CHARS = 9000
-
 SUPPORTED_LANGUAGES = {"pl", "en"}
 
 _LLM = None
-
-
-ENDING_HEADINGS = [
-    "PODSUMOWANIE",
-    "ZAKOŃCZENIE",
-    "WNIOSKI KOŃCOWE",
-    "WNIOSKI",
-    "CONCLUSIONS",
-    "CONCLUSION",
-    "FINAL REMARKS",
-    "SUMMARY",
-]
 
 
 MESSAGES = {
@@ -137,35 +124,6 @@ def normalize_text(text):
         return ""
 
     return " ".join(str(text).replace("\xa0", " ").split()).strip()
-
-
-def extract_ending_fragment(text):
-    """Extract thesis ending fragment based on known final-section headings."""
-
-    text = str(text or "")
-
-    if not text.strip():
-        return ""
-
-    normalized = normalize_text(text)
-    upper_text = normalized.upper()
-
-    best_start = -1
-
-    for heading in ENDING_HEADINGS:
-        idx = upper_text.rfind(heading)
-        if idx > best_start:
-            best_start = idx
-
-    if best_start != -1:
-        fragment = normalized[best_start:]
-    else:
-        fragment = normalized[-MAX_END_FRAGMENT_CHARS:]
-
-    if len(fragment) > MAX_END_FRAGMENT_CHARS:
-        fragment = fragment[:MAX_END_FRAGMENT_CHARS]
-
-    return fragment.strip()
 
 
 def get_llm():

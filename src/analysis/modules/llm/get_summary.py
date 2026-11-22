@@ -12,7 +12,7 @@ for _p in (os.path.dirname(_src_dir), _src_dir):
 
 
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
-from analysis.modules.llm.get_subtitles import get_subtitles
+from analysis.extraction.helper_llm.get_subtitles import get_subtitles
 
 from analysis.modules.llm.config import THESIS_PATH, MODEL_PATH, LANGUAGE, N_GPU_LAYERS
 from analysis.modules.llm.llama_factory import make_llama

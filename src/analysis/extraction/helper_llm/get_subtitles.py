@@ -1,28 +1,27 @@
 """Extract numbered subtitle sections and their content from mapped PDF blocks."""
 
 import re
-import os
 import logging
-from pathlib import Path
 import sys
+from pathlib import Path
 
-_src_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
-for _p in (os.path.dirname(_src_dir), _src_dir):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from common.path import resource_path
-
-from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
-from analysis.extraction.helper_llm.converter_linguistics_llm import PDFMapper_llm
-from analysis.modules.llm.config import THESIS_PATH
+from .extraction_json_llm import extractPDF_llm
+from .converter_linguistics_llm import PDFMapper_llm, block_text
 
 logger = logging.getLogger(__name__)
 
-file_path = THESIS_PATH
-
 NUMBERED_HEADING_RE = re.compile(r"^\s*(\d+\.\d+(?:\.\d+)*)(?:\.)?\s+(.+?)\s*$")
 HEADING_WITH_PREFIX_RE = re.compile(r"^\s*(?:\d+\.\s+)?(\d+\.\d+(?:\.\d+)*)(?:\.)?\s+(.+?)\s*$")
+
+# Paragraphs and lists are the text of a section; captions, tables and the like are not.
+TEXT_BLOCK_TYPES = (None, "paragraph", "list")
+
+# The heading that ends the last numbered section: after it come the bibliography and the lists of figures and tables.
+BACK_MATTER_TITLES = (
+    "wykaz literatury", "literatura", "bibliografia", "bibliography", "references",
+    "wykaz rysunków", "wykaz tabel", "wykaz listingów", "spis rysunków", "spis tabel",
+    "list of figures", "list of tables",
+)
 
 DOT_LEADER_RE = re.compile(r"\.\s*\.\s*\.\s*\.")
 MULTISPACE_RE = re.compile(r"\s+")
@@ -146,6 +145,12 @@ def is_real_heading_candidate(block) -> bool:
     return is_numbered_heading(text)
 
 
+def is_back_matter_heading(text: str) -> bool:
+    """Return True for the heading of the bibliography or of a list of figures/tables."""
+
+    return clean_ws(text).rstrip(":").lower() in BACK_MATTER_TITLES
+
+
 def next_heading_index(logical_blocks, start_idx: int, current_level: int) -> int:
     """Find the index of the next heading at same or higher hierarchy level."""
 
@@ -153,6 +158,9 @@ def next_heading_index(logical_blocks, start_idx: int, current_level: int) -> in
         text = get_block_content(logical_blocks[i])
         if not text:
             continue
+
+        if is_back_matter_heading(text):
+            return i
 
         parsed = parse_heading(text)
         if not parsed:
@@ -177,10 +185,10 @@ def collect_section_text(logical_blocks, start_idx: int, end_idx: int) -> str:
 
     for block in logical_blocks[start_idx + 1:end_idx]:
         block_type = get_block_type(block)
-        if block_type not in (None, "paragraph"):
+        if block_type not in TEXT_BLOCK_TYPES:
             continue
 
-        text = get_block_content(block)
+        text = block_text(block)
         if not text:
             continue
         if looks_like_toc_entry(text):
@@ -295,20 +303,20 @@ def get_subtitles(raw_doc, txt_path: Path | None = None):
 
 
 def main():
-    """Run subtitle extraction for the configured thesis file and print results."""
+    """Run subtitle extraction for the PDF given on the command line and print results."""
 
-    pdf_path = Path(file_path)
-    txt_path = Path(resource_path(os.path.join("llm", "wyniki", "subtitles.txt")))
+    if len(sys.argv) < 2:
+        logger.error("Usage: python -m analysis.extraction.helper_llm.get_subtitles thesis.pdf")
+        return
 
+    pdf_path = Path(sys.argv[1])
     raw_doc = extractPDF_llm(str(pdf_path))
 
     if raw_doc is None:
         logger.error("extractPDF_llm returned None for %s", pdf_path)
-        logger.info(f"Błąd: ekstrakcja PDF zwróciła None dla {pdf_path}.")
         return
 
-    subtitles = get_subtitles(raw_doc)
-    print_subtitles(subtitles)
+    print_subtitles(get_subtitles(raw_doc))
 
 
 if __name__ == "__main__":

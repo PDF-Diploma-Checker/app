@@ -428,6 +428,22 @@ def clean_ws(text: str) -> str:
     return MULTISPACE_RE.sub(" ", text).strip()
 
 
+# a line of a table of contents or of a list of figures: dot leaders, or a section number and a page number
+TOC_LINE_RE = re.compile(r"(?:\.\s*){4,}|^\d+(?:\.\d+)+\.?\s.+\s\d{1,3}$")
+
+
+def block_text(block):
+    """Text of a logical block. The items of a list are kept apart, so that they do not run into one sentence, and
+    the lines of a table of contents are left out: they are no text of the thesis."""
+    items = getattr(block, "items", None)
+    if getattr(block, "type", None) == "list" and items:
+        texts = [clean_ws(getattr(item, "text", "") or "") for item in items]
+        texts = [text.rstrip(",;") for text in texts if text and not TOC_LINE_RE.search(text)]
+        joined = "; ".join(text for text in texts if text)
+        return joined if not joined or joined.endswith((".", "!", "?")) else joined + "."
+    return clean_ws(getattr(block, "content", "") or "")
+
+
 def get_plain_text(pdf_path):
     raw_doc = extractPDF_llm(str(pdf_path))
     mapped_doc = PDFMapper_llm.map_to_schema(raw_doc)
@@ -436,12 +452,13 @@ def get_plain_text(pdf_path):
 
     for block in mapped_doc.logical_blocks:
         block_type = getattr(block, "type", None)
-        text = clean_ws(getattr(block, "content", "") or "")
+        text = block_text(block)
 
         if not text:
             continue
 
-        if block_type in {"list", "table_description", "img_decription"}:
+        # the lists stay: the conclusions of a thesis are often a list, and without it a section looks empty to the model
+        if block_type in {"table_description", "img_decription"}:
             continue
 
         parts.append(text)
