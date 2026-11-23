@@ -627,9 +627,11 @@ def apply_update_and_restart(staged):
 
     kwargs = {}
     if sys.platform == "win32":
-        # BREAKAWAY: outside the job object of the app, which kills all its processes when the app ends
-        kwargs["creationflags"] = (subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
-                                   | subprocess.CREATE_NEW_PROCESS_GROUP | process_guard.breakaway_flags())
+        # BREAKAWAY: outside the job object of the app, which kills all its processes when the app ends.
+        # Not DETACHED_PROCESS: Windows PowerShell 5.1 started without a console dies during start-up, before it
+        # runs a single line of the script, and the update never happens. CREATE_NO_WINDOW gives it a hidden console.
+        kwargs["creationflags"] = (subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+                                   | process_guard.breakaway_flags())
     else:
         kwargs["start_new_session"] = True
     streams = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)

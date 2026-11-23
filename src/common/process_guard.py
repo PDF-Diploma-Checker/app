@@ -114,7 +114,14 @@ def kill_children(timeout=3.0):
     if psutil is None:
         return
     try:
-        children = [p for p in psutil.Process().children(recursive=True) if p.pid not in _spared]
+        everything = psutil.Process().children(recursive=True)
+        spared = set(_spared)
+        for pid in _spared:             # and their own children (the hidden console of the update helper)
+            try:
+                spared.update(p.pid for p in psutil.Process(pid).children(recursive=True))
+            except Exception:
+                pass
+        children = [p for p in everything if p.pid not in spared]
     except Exception:
         logger.debug("Could not list child processes", exc_info=True)
         return
