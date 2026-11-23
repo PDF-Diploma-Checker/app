@@ -1,7 +1,8 @@
 # Builds the Linux release variants (base, cpu, gpu) in Docker on a GitHub runner: no Linux computer and no NVIDIA card
 # needed. The result of each variant is the set of release files (full archive, parts, checksum, manifest and pack for
-# differential updates). Upload them to the release draft with
-#     gh release upload <tag> <files> -R PDF-Diploma-Checker/diploma-checker-download
+# differential updates). With "upload" ticked (and the DOWNLOAD_REPO_TOKEN secret set) they go straight into the
+# DRAFT of the release in the download repository; the draft is never published by the workflow. Without it, download
+# the artifacts and use  gh release upload <tag> <files> -R PDF-Diploma-Checker/diploma-checker-download
 # The same build runs on your computer with tools/docker_build_linux.sh. The gpu variant can only be tested on a
 # computer with an NVIDIA card (--analysis-test).
 
@@ -21,6 +22,10 @@ on:
         type: choice
         options: [all, base, cpu, gpu]
         default: all
+      upload:
+        description: "Upload the files to the draft of the release (needs the DOWNLOAD_REPO_TOKEN secret and a tag)"
+        type: boolean
+        default: false
 
 jobs:
   plan:
@@ -63,3 +68,27 @@ jobs:
           name: DiplomaChecker-linux-${{ matrix.variant }}
           path: release_files/*
           compression-level: 0   # the archives are compressed already
+
+  # Never publishes: the draft is published by hand when Windows and Linux, all variants, are in it.
+  upload:
+    needs: [plan, build]
+    if: ${{ inputs.upload }}
+    name: upload-linux-${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: DiplomaChecker-linux-${{ matrix.variant }}
+          path: release_files
+
+      - name: Upload to the draft
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}   # a token with write access to the download repository
+        run: |
+          test -n "${{ inputs.tag }}" || { echo "Give the release tag to upload."; exit 1; }
+          tools/upload_release_files.sh "${{ inputs.tag }}" linux ${{ matrix.variant }} release_files
