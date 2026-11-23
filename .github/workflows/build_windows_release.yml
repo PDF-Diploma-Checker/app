@@ -1,0 +1,119 @@
+# Builds the Windows release variants (base, cpu, gpu) on GitHub runners: no Windows computer and no NVIDIA card needed.
+# The result of each variant is the set of release files (full archive, parts, checksum, manifest and pack for
+# differential updates). With "upload" ticked (and the DOWNLOAD_REPO_TOKEN secret set) they go straight into the
+# DRAFT of the release in the download repository; the draft is never published by the workflow. Without it, download
+# the artifacts and use  gh release upload <tag> <files> -R PDF-Diploma-Checker/diploma-checker-download
+# llama.cpp is compiled for a fixed list of CPU/GPU features (build_windows.ps1), so the build machine does not matter.
+# The gpu variant can only be tested on a computer with an NVIDIA card (--analysis-test).
+
+name: Build Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to check the build against (e.g. v0.6.6); empty = only APP_VERSION"
+        required: false
+        default: ""
+      variants:
+        description: "Which variants to build"
+        type: choice
+        options: [all, base, cpu, gpu]
+        default: all
+      upload:
+        description: "Upload the files to the draft of the release (needs the DOWNLOAD_REPO_TOKEN secret and a tag)"
+        type: boolean
+        default: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - id: pick
+        run: |
+          if [ -z "${{ inputs.variants }}" ] || [ "${{ inputs.variants }}" = "all" ]; then
+            echo 'matrix={"variant":["base","cpu","gpu"]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"variant":["${{ inputs.variants }}"]}' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    name: windows-${{ matrix.variant }}
+    runs-on: windows-2022   # VS 2022: CUDA 12.8 does not support the MSVC of VS 2026 (windows-latest)
+    timeout-minutes: ${{ matrix.variant == 'gpu' && 350 || 150 }}   # llama.cpp CUDA for ~8 architectures compiles for hours
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      # the same toolkit as torch (cu128); its cudart/cublas are copied into the build by build_windows.ps1
+      - uses: Jimver/cuda-toolkit@v0.2.24
+        if: matrix.variant == 'gpu'
+        with:
+          cuda: "12.8.1"
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
+      # cl.exe on PATH for nvcc and the Ninja generator (no dependence on the CUDA integration of Visual Studio)
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: matrix.variant == 'gpu'
+
+      - name: Build
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if ("${{ matrix.variant }}" -eq "gpu") {
+            $env:CMAKE_GENERATOR = "Ninja"
+            nvcc --version
+          }
+          .\build_windows.ps1 -Variant ${{ matrix.variant }}
+          # the release files below are packed from dist\; the zip of the script is not needed and takes disk space
+          Remove-Item DiplomaChecker-windows-${{ matrix.variant }}.zip -ErrorAction SilentlyContinue
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          $tagArgs = @()
+          if ("${{ inputs.tag }}") { $tagArgs = @("--tag", "${{ inputs.tag }}") }
+          .\.venv-build-${{ matrix.variant }}\Scripts\python.exe tools/prepare_release_assets.py dist/${{ matrix.variant }}/DiplomaChecker --platform windows --variant ${{ matrix.variant }} --out release_files @tagArgs
+          if ($LASTEXITCODE -ne 0) { throw "prepare_release_assets failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiplomaChecker-windows-${{ matrix.variant }}
+          path: release_files/*
+          compression-level: 0   # the archives are compressed already
+
+  # Never publishes: the draft is published by hand when Windows and Linux, all variants, are in it.
+  upload:
+    needs: [plan, build]
+    if: ${{ inputs.upload }}
+    name: upload-windows-${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: DiplomaChecker-windows-${{ matrix.variant }}
+          path: release_files
+
+      - name: Upload to the draft
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}   # a token with write access to the download repository
+        run: |
+          test -n "${{ inputs.tag }}" || { echo "Give the release tag to upload."; exit 1; }
+          tools/upload_release_files.sh "${{ inputs.tag }}" windows ${{ matrix.variant }} release_files

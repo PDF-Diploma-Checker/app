@@ -39,3 +39,7 @@ DiplomaChecker-linux-base
 DiplomaChecker-linux-cpu
 /release_files/
 *.pdf
+
+# Docker build of the Linux release (tools/docker_build_linux.sh)
+.docker-home/
+.build_linux_ci.sh
