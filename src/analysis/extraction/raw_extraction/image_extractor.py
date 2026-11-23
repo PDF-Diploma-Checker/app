@@ -89,7 +89,7 @@ def find_image_description(image_bbox, text_blocks, priority_side=None):
             return ""
         starts = []
         for idx, (_, _, text, _) in enumerate(block_list):
-            match = re.match(r"^(?:rys(?:unek)?\.?|fot\.?|ilustracja|wykres|rycina|schemat|diagram|grafika|figure|fig\.?|photo|img|image|schema|chart|plot)\s*\d+(?:\.\d+)*\.?", text, re.I)
+            match = re.match(r"^(?:rys(?:unek)?\.?|fot\.?|ilustracja|wykres|rycina|schemat|diagram|grafika|figure|fig\.?|photo|img|image|schema|chart|plot)\s*(?:\d+|(?-i:[A-Z])(?![^\W\d_]))(?:\.\d+)*\.?", text, re.I)
             if match and not re.match(r"(?:przedstawia|pokazuje|ilustruje|prezentuje|shows|illustrates|presents)\b", text[match.end():].lstrip(" .:-–—"), re.I):
                 starts.append(idx)
         if not starts:
