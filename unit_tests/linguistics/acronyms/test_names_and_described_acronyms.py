@@ -77,5 +77,31 @@ class TestDescribedAcronyms(unittest.TestCase):
         self.assertNotIn("RMA", reported([text]))
 
 
+class TestAcronymBeforeParenthesis(unittest.TestCase):
+
+    def test_description_in_parenthesis_is_a_definition(self):
+        first_use = "Użyto modelu BGE (nazwa modelu) do uporządkowania wyników."
+        later = "Model BGE uzyskał najwyższą średnią precyzję."
+        self.assertNotIn("BGE", reported([first_use, later]))
+
+    def test_model_identifier_in_parenthesis_is_a_definition(self):
+        first_use = "W dalszej części modele oznaczono skrótami: e5 (multilingual-e5-large) i BGE (bge-re-ranker-v2-m3)."
+        later = "BGE miał wyższe AP niż LaBSE na 10 z 11 uczelni."
+        self.assertNotIn("BGE", reported([first_use, later]))
+
+    def test_reference_in_parenthesis_is_not_a_definition(self):
+        text = "Wynik wyznaczono miarą IMU (podrozdz. 2.6) oraz IMU (tabela 6.5)."
+        self.assertIn("IMU", reported([text]))
+
+    def test_number_in_parenthesis_is_not_a_definition(self):
+        self.assertIn("IMU", reported(["Wynik uzyskano miarą IMU (2024) na zbiorze testowym."]))
+
+    def test_heading_in_capitals_registers_no_acronyms(self):
+        heading = make_block("EWALUACJA MODELI (ZOFIA NARLOCH)", block_id=1, page=1)
+        heading.block.type = "heading"
+        acronyms_with_defs, _, _ = check_first_definition([heading], [], [])
+        self.assertNotIn("MODELI", acronyms_with_defs)
+
+
 if __name__ == "__main__":
     unittest.main()
