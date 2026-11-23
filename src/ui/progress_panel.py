@@ -11,6 +11,8 @@ from . import styles
 from .i18n import t
 
 GEMMA_LAYERS = eta.GEMMA_LAYERS
+_HINT_SAMPLES = 6                  # readings (about 9 s) that must agree before the explanation is shown
+_HINT_GPU_MAX, _HINT_CPU_MIN = 40, 70
 _LABEL = f"font-size: 13px; color: {styles.TEXT_2}; background: transparent; border: none;"
 _VALUE = f"font-size: 13px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
 
@@ -200,6 +202,8 @@ class ResourcePanel(QWidget):
         self.cpu_load = _Meter(t("analysis.res_load"))
         self.cpu_card.lay.addWidget(self.cpu_load)
         self.cpu_card.lay.addStretch(1)
+        self._base_note = ""
+        self._hint_samples = []        # (gpu load, cpu load) of the last readings, to explain an unbalanced load
 
         cards.addWidget(self.gpu_card, 1)
         cards.addWidget(self.cpu_card, 1)
@@ -226,7 +230,10 @@ class ResourcePanel(QWidget):
             note = t("analysis.res_note_gpu_full")
         else:
             note = t("analysis.res_note_gpu_part", layers=layers, total=GEMMA_LAYERS)
+        self._base_note = note
+        self._hint_samples = []
         self.note.setText(note)
+        self.cpu_card.badge.setVisible(False)
         for meter in (self.gpu_load, self.gpu_mem, self.cpu_load):
             meter.set("–", 0)
 
@@ -237,6 +244,13 @@ class ResourcePanel(QWidget):
         cpu = sample.get("cpu")
         if cpu is not None:
             self.cpu_load.set(f"{cpu:.0f}%", cpu)
+        cpu_temp = sample.get("cpu_temp")
+        badge = self.cpu_card.badge
+        badge.setVisible(cpu_temp is not None)
+        if cpu_temp is not None:
+            badge.setText(f"{cpu_temp:.0f} °C")
+            badge.setToolTip(t("analysis.res_temp"))
+            badge.setStyleSheet(_VALUE.replace(styles.TEXT, styles.WARNING if cpu_temp >= 90 else styles.TEXT_2, 1))
         if not self._watch_gpu:
             return
         gpu = sample.get("gpu")
@@ -251,6 +265,7 @@ class ResourcePanel(QWidget):
         share = 100 * used / total if total else 0
         self.gpu_mem.set(t("analysis.res_vram_value", used=f"{used:.1f}", total=f"{total:.1f}"), share,
                          styles.DANGER_DOT if share >= 95 else styles.PRIMARY)
+        self._explain_unbalanced_load(gpu["util"], cpu)
         temp = gpu.get("temp")
         badge = self.gpu_card.badge
         badge.setVisible(temp is not None)
@@ -258,3 +273,15 @@ class ResourcePanel(QWidget):
             badge.setText(f"{temp:.0f} °C")
             badge.setToolTip(t("analysis.res_temp"))
             badge.setStyleSheet(_VALUE.replace(styles.TEXT, styles.WARNING if temp >= 83 else styles.TEXT_2, 1))
+
+    def _explain_unbalanced_load(self, gpu_util, cpu):
+        """Say why the card is quiet and the processor busy in the GPU mode (the question every user asks)."""
+        if cpu is None:
+            return
+        self._hint_samples = (self._hint_samples + [(gpu_util, cpu)])[-_HINT_SAMPLES:]
+        if len(self._hint_samples) < _HINT_SAMPLES:
+            return
+        avg_gpu = sum(g for g, _ in self._hint_samples) / len(self._hint_samples)
+        avg_cpu = sum(c for _, c in self._hint_samples) / len(self._hint_samples)
+        unbalanced = avg_gpu <= _HINT_GPU_MAX and avg_cpu >= _HINT_CPU_MIN
+        self.note.setText(f"{self._base_note}\n\n{t('analysis.res_note_unbalanced')}" if unbalanced else self._base_note)
