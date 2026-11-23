@@ -194,11 +194,15 @@ def is_weak_gpu(vram_gb):
     return 0 < vram_gb < GOOD_VRAM_GB
 
 
+# A "16 GB" card reports about 15.9 GB (16311 MiB on an RTX 5060 Ti), so the limit sits a little below 16.
+FULL_OFFLOAD_VRAM_GB = 15.5
+
+
 def recommend_gpu_layers(vram_gb):
     """How many of Gemma's 48 layers to put on a card with this much memory (the rest stays on the CPU).
 
     A rule of thumb: the layers, the context buffers and the vision model have to fit together."""
-    if vram_gb >= 16:
+    if vram_gb >= FULL_OFFLOAD_VRAM_GB:
         return -1           # everything
     if vram_gb >= 10:
         return 40

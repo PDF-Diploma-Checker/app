@@ -1,0 +1,60 @@
+# Builds the Windows gpu variant on a GitHub runner: no Windows computer and no NVIDIA card needed.
+# llama.cpp is compiled for a fixed list of GPU architectures (build_windows.ps1), so the build machine's GPU does not
+# matter. The result can only be tested on a computer with an NVIDIA card (--analysis-test).
+
+name: Build Windows GPU variant
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to check the build against (e.g. v0.6.5); empty = only APP_VERSION"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: windows-2022   # VS 2022: CUDA 12.8 does not support the MSVC of VS 2026 (windows-latest)
+    timeout-minutes: 350   # llama.cpp CUDA for ~8 architectures compiles for hours on a 4-core runner
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+
+      # the same toolkit as torch (cu128); its cudart/cublas are copied into the build by build_windows.ps1
+      - uses: Jimver/cuda-toolkit@v0.2.24
+        with:
+          cuda: "12.8.1"
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "thrust", "visual_studio_integration"]'
+
+      # cl.exe on PATH for nvcc and the Ninja generator (no dependence on the CUDA integration of Visual Studio)
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        shell: pwsh
+        env:
+          CMAKE_GENERATOR: Ninja
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          nvcc --version
+          .\build_windows.ps1 -Variant gpu
+          # the release files below are packed from dist\gpu; the zip of the script is not needed and takes disk space
+          Remove-Item DiplomaChecker-windows-gpu.zip -ErrorAction SilentlyContinue
+
+      - name: Prepare release files
+        shell: pwsh
+        run: |
+          $tagArgs = @()
+          if ("${{ inputs.tag }}") { $tagArgs = @("--tag", "${{ inputs.tag }}") }
+          .\.venv-build-gpu\Scripts\python.exe tools/prepare_release_assets.py dist/gpu/DiplomaChecker --platform windows --variant gpu --out release_files @tagArgs
+          if ($LASTEXITCODE -ne 0) { throw "prepare_release_assets failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DiplomaChecker-windows-gpu
+          path: release_files/*
+          compression-level: 0   # the archives are compressed already

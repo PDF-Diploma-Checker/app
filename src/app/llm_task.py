@@ -287,7 +287,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             get_score_from_goal_result,
         )
         from analysis.modules.llm.get_summary import get_summaries
-        from analysis.modules.llm.get_subtitles import get_subtitles
+        from analysis.extraction.helper_llm.get_subtitles import get_subtitles
         from analysis.modules.llm.results_log import log_results
         from analysis.modules.llm.run_sota import get_final_sota_report
         from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper

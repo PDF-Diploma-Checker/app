@@ -25,7 +25,7 @@ from ui.license_dialog import ensure_accepted
 
 SMOKE_MODULES = [
     "ui.main_window", "ui.settings", "ui.report_bug", "ui.log_window", "ui.analysis_dialog",
-    "ui.ai_setup_dialog", "common.gpu_check", "common.run_control", "common.resource_monitor",
+    "ui.ai_setup_dialog", "ui.gpu_startup_dialog", "common.gpu_check", "common.gpu_startup", "common.run_control", "common.resource_monitor",
     "ui.update_dialog", "common.updater",
     "app.entry", "app.pipeline", "app.llm_task", "app.llm_process", "common.process_guard",
     "analysis.modules.linguistics.run_linguistics",
@@ -122,6 +122,8 @@ def main():
     update_result = _finish_pending_update()
     window = PDFReader()
     window.show()
+    from ui import gpu_startup_dialog
+    gpu_startup_dialog.check_on_launch(window)
     if crash_log.previous_analysis_crashed():
         from ui.i18n import t
         QMessageBox.warning(window, t("analysis.crashed_title"), t("analysis.crashed_text"))

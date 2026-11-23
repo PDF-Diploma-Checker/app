@@ -4,12 +4,15 @@ The numbers come from the operating system, not from the settings:
     GPU load, video memory, temperature  <- `nvidia-smi --query-gpu=...` (the same tool you can run in a terminal:
                                             `nvidia-smi -l 1` or `watch -n1 nvidia-smi`)
     CPU load                             <- /proc/stat (Linux) or GetSystemTimes (Windows)
+    CPU temperature                      <- /sys/class/hwmon (Linux); Windows gives no such reading without a driver
 
 ResourceMonitor samples in a background thread, so the UI only reads `latest` (cheap) and never waits for nvidia-smi.
 When it is stopped it writes a one-line summary (peak and average) to the log: proof where the work really ran.
 """
 
+import glob
 import logging
+import os
 import sys
 import threading
 import time
@@ -40,6 +43,58 @@ def gpu_live_stats():
         if best is None or stats["mem_total_mb"] > best["mem_total_mb"]:
             best = stats
     return best
+
+
+_CPU_SENSORS = ("coretemp", "k10temp", "zenpower", "cpu_thermal", "x86_pkg_temp")   # hwmon / thermal chip names
+_CPU_LABELS = ("package", "tctl", "tdie", "cpu")                                       # preferred over single cores
+
+
+def _read_milli(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return int(f.read().strip()) / 1000.0
+    except (OSError, ValueError):
+        return None
+
+
+def cpu_temperature():
+    """Temperature of the processor in degrees C, or None when the system does not expose it (Windows, VMs)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    best = None
+    for hwmon in glob.glob("/sys/class/hwmon/hwmon*"):
+        try:
+            with open(os.path.join(hwmon, "name"), encoding="utf-8") as f:
+                chip = f.read().strip()
+        except OSError:
+            continue
+        if chip not in _CPU_SENSORS:
+            continue
+        for path in glob.glob(os.path.join(hwmon, "temp*_input")):
+            value = _read_milli(path)
+            if value is None or not 0 < value < 150:
+                continue
+            try:
+                with open(path.replace("_input", "_label"), encoding="utf-8") as f:
+                    label = f.read().strip().lower()
+            except OSError:
+                label = ""
+            preferred = any(label.startswith(k) for k in _CPU_LABELS)
+            if best is None or (preferred, value) > best:
+                best = (preferred, value)
+    if best is not None:
+        return best[1]
+    for zone in glob.glob("/sys/class/thermal/thermal_zone*"):          # laptops / ARM boards without a hwmon chip
+        try:
+            with open(os.path.join(zone, "type"), encoding="utf-8") as f:
+                kind = f.read().strip()
+        except OSError:
+            continue
+        if kind in _CPU_SENSORS:
+            value = _read_milli(os.path.join(zone, "temp"))
+            if value is not None and 0 < value < 150:
+                return value
+    return None
 
 
 class CpuSampler:
@@ -92,6 +147,7 @@ class ResourceMonitor:
         self.latest = {}
         self._gpu_samples = []
         self._cpu_samples = []
+        self._cpu_temps = []
         self._stop = threading.Event()
         self._thread = None
         self._cpu = CpuSampler()
@@ -104,7 +160,7 @@ class ResourceMonitor:
 
     def _loop(self):
         while not self._stop.is_set():
-            sample = {"time": time.monotonic(), "cpu": self._cpu.sample()}
+            sample = {"time": time.monotonic(), "cpu": self._cpu.sample(), "cpu_temp": cpu_temperature()}
             if self.watch_gpu:
                 raw = gpu_live_stats()
                 if raw:
@@ -118,6 +174,8 @@ class ResourceMonitor:
                     sample["gpu"] = None
             if sample["cpu"] is not None:
                 self._cpu_samples.append(sample["cpu"])
+            if sample["cpu_temp"] is not None:
+                self._cpu_temps.append(sample["cpu_temp"])
             self.latest = sample
             self._stop.wait(self.interval)
 
@@ -141,6 +199,9 @@ class ResourceMonitor:
         if self._cpu_samples:
             parts.append(f"CPU load avg {sum(self._cpu_samples) / len(self._cpu_samples):.0f}% / "
                          f"peak {max(self._cpu_samples):.0f}%")
+        if self._cpu_temps:
+            parts.append(f"CPU temperature avg {sum(self._cpu_temps) / len(self._cpu_temps):.0f} C / "
+                         f"peak {max(self._cpu_temps):.0f} C")
         return "; ".join(parts) or "no data"
 
 

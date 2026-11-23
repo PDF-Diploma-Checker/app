@@ -232,6 +232,7 @@ PL = {
         "res_note_cpu": "Model AI działa na procesorze, karta graficzna nie jest używana. Wysokie obciążenie CPU jest normalne.",
         "res_note_gpu_full": "Model AI działa w całości na karcie graficznej. Procesor tylko ją obsługuje.",
         "res_note_gpu_part": "Model AI: {layers} z {total} warstw na karcie graficznej, reszta na procesorze, dlatego oba są obciążone. Karta chwilami czeka na procesor, więc jej obciążenie się waha.",
+        "res_note_unbalanced": "Dlaczego karta graficzna jest słabo obciążona, a procesor mocno? To normalne w tej pracy: karta liczy tylko model, a resztę robi procesor: czytanie i dzielenie PDF, przygotowanie tekstu, osadzenia (embeddingi), sprawdzanie pisowni i rysunków, a także warstwy modelu, które nie zmieściły się w pamięci karty. Karta czeka wtedy na procesor, więc jej obciążenie jest niskie, choć model na niej działa. Obciążenie 20–40% karty i 90% procesora nie oznacza błędu.",
         "eta_left": "Pozostało ok. {left}",
         "eta_left_lt1": "Zostało mniej niż minutę",
         "eta_elapsed": "Minęło {elapsed} · łącznie ok. {total}",
@@ -466,6 +467,50 @@ PL = {
             "ok": "Wolne miejsce na modele: {free} GB",
             "warn": "Wolne miejsce na modele: {free} GB",
             "warn_fix": "Modele zajmują około {needed} GB. Zwolnij miejsce albo wybierz inny folder.",
+        },
+    },
+    "gpu_startup": {
+        "title": "Tryb GPU nie jest jeszcze gotowy",
+        "intro": "Ta wersja aplikacji jest przeznaczona do pracy na karcie graficznej, ale na tym komputerze czegoś brakuje. Dopóki tego nie naprawisz, analiza AI będzie wolna albo nie ruszy.",
+        "guide": "Pełna instrukcja: <a href=\"{url}\">setup_guide.md</a>",
+        "dont_remind": "Nie przypominaj mi o tym więcej",
+        "later": "Zamknij",
+        "open_setup": "Otwórz konfigurację AI",
+        "runtime": {
+            "title": "Brakuje bibliotek AI (llama-cpp-python)",
+            "fix": "Zainstaluj je w wariancie GPU: uruchom w folderze aplikacji polecenie {cmd}, a potem uruchom program ponownie.",
+        },
+        "gpu_none": {
+            "title": "Nie wykryto karty NVIDIA",
+            "fix": "Zainstaluj sterownik karty (nvidia.com/drivers), uruchom komputer ponownie i sprawdź, czy polecenie nvidia-smi działa. Bez karty NVIDIA użyj procesora (Konfiguracja AI).",
+        },
+        "gpu_other": {
+            "title": "Wykryto kartę bez obsługi CUDA: {name}",
+            "fix": "AI na GPU działa tylko na kartach NVIDIA. Na tym komputerze wybierz procesor w konfiguracji AI.",
+        },
+        "driver": {
+            "title": "Sterownik NVIDIA {driver} jest za stary (CUDA {cuda})",
+            "fix": "Zaktualizuj sterownik na nvidia.com/drivers. Potrzebna jest obsługa CUDA {needed} lub nowsza.",
+        },
+        "gpu_build": {
+            "title": "Biblioteka llama-cpp-python jest zbudowana bez CUDA",
+            "fix": "Zbuduj ją z obsługą CUDA (potrzebny CUDA Toolkit z nvcc): uruchom {cmd} i uruchom program ponownie.",
+        },
+        "vram": {
+            "title": "Mało wolnej pamięci karty: {vram} GB (model mieści się w całości od {needed} GB)",
+            "fix": "Zamknij programy używające karty albo w konfiguracji AI ustaw {layers} warstw na GPU. Reszta policzy się na procesorze, wolniej.",
+        },
+        "vram_tiny": {
+            "title": "Za mało wolnej pamięci karty: {vram} GB",
+            "fix": "Z taką ilością pamięci karta nie przyspieszy analizy. Zamknij programy używające karty albo wybierz procesor w konfiguracji AI.",
+        },
+        "models": {
+            "title": "Nie pobrano modeli AI: {missing}",
+            "fix": "Otwórz konfigurację AI i kliknij „Zapisz i pobierz modele” (około {size} GB). Pobrane pliki lub ich ręczna kopia muszą leżeć w folderze: {dir}",
+        },
+        "disk": {
+            "title": "Za mało miejsca na dysku na modele: {free} GB",
+            "fix": "Modele potrzebują około {needed} GB. Zwolnij miejsce albo wybierz inny folder modeli w konfiguracji AI.",
         },
     },
     "report": {
@@ -740,6 +785,7 @@ EN = {
         "res_note_cpu": "The AI model runs on the processor; the graphics card is not used. A high CPU load is normal.",
         "res_note_gpu_full": "The AI model runs entirely on the graphics card. The processor only feeds it.",
         "res_note_gpu_part": "AI model: {layers} of {total} layers on the graphics card, the rest on the processor, so both are busy. The card waits for the processor at times, so its load goes up and down.",
+        "res_note_unbalanced": "Why is the graphics card lightly loaded while the processor is busy? This is normal here: the card computes only the model, while the processor does the rest: reading and splitting the PDF, preparing the text, embeddings, spell and figure checks, and any model layers that did not fit into the card's memory. The card then waits for the processor, so its load stays low although the model runs on it. 20–40% on the card with 90% on the processor is not an error.",
         "eta_left": "About {left} left",
         "eta_left_lt1": "Less than a minute left",
         "eta_elapsed": "{elapsed} elapsed · about {total} in total",
@@ -974,6 +1020,50 @@ EN = {
             "ok": "Free space for the models: {free} GB",
             "warn": "Free space for the models: {free} GB",
             "warn_fix": "The models take about {needed} GB. Free some space or choose another folder.",
+        },
+    },
+    "gpu_startup": {
+        "title": "GPU mode is not ready yet",
+        "intro": "This build of the app is meant to run on the graphics card, but something is missing on this computer. Until it is fixed, the AI analysis will be slow or will not start.",
+        "guide": "Full instructions: <a href=\"{url}\">setup_guide.md</a>",
+        "dont_remind": "Do not remind me about this again",
+        "later": "Close",
+        "open_setup": "Open AI setup",
+        "runtime": {
+            "title": "The AI libraries (llama-cpp-python) are missing",
+            "fix": "Install them in the GPU variant: run {cmd} in the app folder, then start the program again.",
+        },
+        "gpu_none": {
+            "title": "No NVIDIA graphics card was found",
+            "fix": "Install the card's driver (nvidia.com/drivers), restart the computer and check that the nvidia-smi command works. Without an NVIDIA card use the processor (AI setup).",
+        },
+        "gpu_other": {
+            "title": "A graphics card without CUDA support was found: {name}",
+            "fix": "AI on the GPU works only on NVIDIA cards. On this computer choose the processor in the AI setup.",
+        },
+        "driver": {
+            "title": "The NVIDIA driver {driver} is too old (CUDA {cuda})",
+            "fix": "Update the driver at nvidia.com/drivers. CUDA {needed} or newer support is needed.",
+        },
+        "gpu_build": {
+            "title": "llama-cpp-python is built without CUDA",
+            "fix": "Build it with CUDA support (the CUDA Toolkit with nvcc is needed): run {cmd} and start the program again.",
+        },
+        "vram": {
+            "title": "Little free video memory: {vram} GB (the model fits whole from {needed} GB)",
+            "fix": "Close programs that use the card, or set {layers} layers on the GPU in the AI setup. The rest runs on the processor, more slowly.",
+        },
+        "vram_tiny": {
+            "title": "Too little free video memory: {vram} GB",
+            "fix": "With this much memory the card will not speed up the analysis. Close programs that use the card, or choose the processor in the AI setup.",
+        },
+        "models": {
+            "title": "The AI models are not downloaded: {missing}",
+            "fix": "Open the AI setup and click \"Save and download the models\" (about {size} GB). The files, or a manual copy of them, must be in the folder: {dir}",
+        },
+        "disk": {
+            "title": "Not enough disk space for the models: {free} GB",
+            "fix": "The models need about {needed} GB. Free some space or choose another models folder in the AI setup.",
         },
     },
     "report": {
