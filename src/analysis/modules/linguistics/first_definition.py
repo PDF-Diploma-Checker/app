@@ -334,6 +334,31 @@ def check_italic_def(content, block, offset, length, block_language):
         return add_match(content, block.block_id, start_page, end_page, word_idxs, error_coordinate, category = "STYLE", message = message)
     return None
 
+REFERENCE_IN_PARENTHESIS = re.compile(
+    r'^(?:rys|tab|wz|równ|(?:pod)?rozdz|(?:pod)?sekc|s\.|str|zob|por|patrz|np\.|tj\.|fig|table|eq|sec|ch|dodat|zał)',
+    re.IGNORECASE)
+MAX_DESCRIPTION_WORDS = 4
+
+def is_explanation_in_parenthesis(text, proper_names):
+    """
+    Tells what stands in the parenthesis after an acronym ("BGE (nazwa modelu)", "BGE (bge-reranker-v2-m3)").
+    It is accepted as an introduction of the acronym when it is a model-like identifier (letters with a hyphen
+    or a digit), contains a known proper name or is a short plain description. References and numbers
+    ("tabela 6.5", "podrozdz. 2.6", "2024") are not.
+    """
+
+    text = text.strip()
+    if not re.search(r'[^\W\d_]{2,}', text) or REFERENCE_IN_PARENTHESIS.match(text):
+        return False
+    tokens = [t.strip(string.punctuation + string.whitespace) for t in text.split()]
+    tokens = [t for t in tokens if t]
+    if any(re.search(r'[^\W\d_]', t) and re.search(r'[\-\d]', t.strip('-')) for t in tokens):
+        return True
+    known = {p[0] for p in proper_names}
+    if any(t in known for t in tokens):
+        return True
+    return len(tokens) <= MAX_DESCRIPTION_WORDS and all(t.isalpha() for t in tokens)
+
 def check_first_definition(blocks, proper_names, extracted_acronyms):
     """
     Scans document blocks to find and extract the first definitions of acronyms.
@@ -362,6 +387,7 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
     broken_no_parenthesis_svm = re.compile(r'\b([A-Z]{2,})\s+([A-Z][a-z]+\s+[A-Z][a-z]+[\w\s\-]*)\s*\)', re.UNICODE)
     paragraph_ang_phrase = re.compile(r'((?:[A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\-]*\s+){1,3})\((?:z\s+)?(?:ang\.|pol\.|niem\.|fr\.|\u0142ac\.)\s+([^)]{3,}?)\)', re.UNICODE)
     paragraph_ang_def_acr = re.compile(r'\((?:z\s+)?(?:ang\.|pol\.|niem\.|fr\.)\s+([A-Za-z\u00d3\u00f3\u0104-\u017e\s\-,]{3,}?),\s*([A-Z]{2,})\s*\)', re.UNICODE)
+    acronym_before_parenthesis = re.compile(r'(?<![\w\-])([A-Z]{2,6})\s?\(([^()]{2,80})\)', re.UNICODE)
     simple_paren_acronym = re.compile(r'([\w][\wąćęłńóśźżĄĆĘŁŃÓŚŹŻ\s\-]{3,}?)\s\(([A-Z]{2,6})\)',re.UNICODE)
     paragraph_acr_expansion_suffix = re.compile(r'\b([A-Z]{2,})\s*\((?:(?:z\s+)?(?:ang\.|pol\.|fr\.|niem\.|łac\.)\s*)?([A-Za-z\u00d3\u00f3\u0104-\u017e][A-Za-z\u00d3\u00f3\u0104-\u017e\s\-]{2,}?)\s*[\-\u2013\u2014,;]\s*(?:z\s+)?(?:ang\.|pol\.|fr\.|niem\.|łac\.)[^)]*\)', re.UNICODE)
     paragraph_def_then_ang = re.compile(r'\b([A-Z]{2,})\s*\([^()]*?[\s,;\-\u2013\u2014]\s*(?:z\s+)?(?:ang\.|pol\.|fr\.|niem\.|łac\.)\s+([^()]{3,}?)\s*\)', re.UNICODE)
@@ -478,6 +504,15 @@ def check_first_definition(blocks, proper_names, extracted_acronyms):
                     if potential_acronym(acronym):
                         proper_names.append((acronym, acronym))
                         acronyms_with_definitions = check_position_if_new(acronym, definition, words, block.block_id, acronyms_with_definitions, all_definitions)
+
+                # an acronym with a parenthesis right after it ("BGE (nazwa modelu)") is most likely introduced there;
+                # headings and text in capitals are skipped, since every word of them looks like an acronym
+                if block.type != "heading" and not text.isupper():
+                    for m in acronym_before_parenthesis.finditer(def_text):
+                        acronym, explanation = m.group(1), m.group(2).strip()
+                        if potential_acronym(acronym) and is_explanation_in_parenthesis(explanation, proper_names):
+                            proper_names.append((acronym, acronym))
+                            acronyms_with_definitions = check_position_if_new(acronym, explanation, words, block.block_id, acronyms_with_definitions, all_definitions)
 
                 for m in foreign_def_in_parenthesis.finditer(text):
                     italic_match = check_italic_def(m.group(1), block, m.start(1), m.end(1) - m.start(1), b.language)
