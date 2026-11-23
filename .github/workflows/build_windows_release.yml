@@ -8,6 +8,8 @@
 name: Build Windows release
 
 on:
+  push:
+    branches: [test/release-builds]
   workflow_dispatch:
     inputs:
       tag:
