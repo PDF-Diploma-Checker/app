@@ -102,6 +102,13 @@ def follows_name(before_text, black_list):
     sentence_start = not preceding or preceding[-1] in ".!?"
     return word[0].isupper() and not sentence_start
 
+def in_name_token(text, start, end, min_letters=3):
+    '''Checks if the number is part of a longer name or designation written as one word (up to whitespace) must contain at least min_letters letters,
+    so short units written without a space are still checked.'''
+    before = re.search(r'\S*$', text[:start]).group()
+    after = re.match(r'\S*', text[end:]).group()
+    return sum(c.isalpha() for c in before + after) >= min_letters
+
 def check_decimal_matches(potential_matches, block, chapter_numbers, error_tolerance, chapter_nums):
     '''Filters candidate decimal matches. Discards section/chapter numbering, values inside quotes or proper names
     and listing references.'''
@@ -135,6 +142,8 @@ def check_decimal_matches(potential_matches, block, chapter_numbers, error_toler
             is_error = 0
         elif in_black_list:
             is_error = 2
+        elif in_name_token(block.contents, match.offset, match_end):
+            is_error = 0
         elif follows_name(before_text, black_list):
             is_error = 0
         elif re.fullmatch(r"\d+\.0", match.content) and previous_text and previous_text[-1].startswith(GENERATION_STEMS):
