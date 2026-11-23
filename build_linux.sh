@@ -49,9 +49,12 @@ build_one() {
   local variant="$1"
   local extra=()
   local build_env=()
+  # GGML_NATIVE=OFF + a fixed instruction set: by default llama.cpp is compiled for the CPU of the build machine
+  # (AVX-512 on many of them), and loading a model then dies on a user's CPU without it (illegal instruction).
+  local cpu_flags="-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
   case "$variant" in
-    cpu) extra=(--extra cpu) ;;
-    gpu) extra=(--extra gpu); build_env=(CMAKE_ARGS=-DGGML_CUDA=on) ;;
+    cpu) extra=(--extra cpu); build_env=(CMAKE_ARGS="$cpu_flags") ;;
+    gpu) extra=(--extra gpu); build_env=(CMAKE_ARGS="-DGGML_CUDA=on $cpu_flags") ;;
   esac
 
   echo
