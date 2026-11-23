@@ -22,6 +22,7 @@ Path(".build_linux_ci.sh").write_text(src.replace(old, new), encoding="utf-8")
 PY
   chmod +x "$SCRIPT"
   trap 'rm -f .build_linux_ci.sh' EXIT
+  export LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"   # see the Dockerfile
 fi
 
 "$SCRIPT" "$VARIANT"
@@ -30,6 +31,10 @@ PY=".venv-build-$VARIANT/bin/python"
 if [ "$VARIANT" = "gpu" ]; then
   LIB="$("$PY" -c 'import llama_cpp, os; print(os.path.join(os.path.dirname(llama_cpp.__file__), "lib"))')"
   "$PY" tools/check_cuda_archs.py "$LIB/libggml-cuda.so"
+fi
+
+if find "dist/$VARIANT" -name 'libcuda.so*' | grep -q .; then
+  echo "The build contains libcuda.so (the stub): it would hide the driver on the user's computer."; exit 1
 fi
 
 rm -f "DiplomaChecker-linux-$VARIANT.tar.gz"      # prepare_release_assets packs the build itself
