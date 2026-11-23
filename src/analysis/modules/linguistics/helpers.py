@@ -33,6 +33,15 @@ spell.word_frequency.load_text_file(WORD_WHITELIST_PATH)
 languages = [Language.ENGLISH, Language.POLISH]
 language_detector = LanguageDetectorBuilder.from_languages(*languages).build()
 
+def is_dot_inside_number(doc, i):
+    """Checks if the token i starts right after a dot written inside a number with a unit or size suffix ("0.6B", "1.7B"),
+    so the dot is a decimal separator and not a sentence end. The tokenizer splits such a number into "0", ".", "6B"."""
+    if i < 2:
+        return False
+    dot, before = doc[i - 1], doc[i - 2]
+    return (dot.text == "." and dot.whitespace_ == "" and before.whitespace_ == ""
+            and before.text.isdigit() and doc[i].text[0].isdigit())
+
 @Spacy_language.component("fix_sentence_limits")
 def fix_sentence_limits(doc):
     """Fixes sentence limits before spacy performs sentence analysis, to wrongly devided sentences."""
@@ -41,7 +50,9 @@ def fix_sentence_limits(doc):
             continue
         prev = doc[i - 1]
         if token != doc[-1]:
-            if prev.text in (',', ':', ';') and not token.is_title:
+            if is_dot_inside_number(doc, i):
+                token.is_sent_start = False
+            elif prev.text in (',', ':', ';') and not token.is_title:
                 token.is_sent_start = False
             elif token.text in (',', ':', ';'):
                 token.is_sent_start = False

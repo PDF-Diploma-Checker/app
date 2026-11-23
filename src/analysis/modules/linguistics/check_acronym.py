@@ -1,5 +1,6 @@
 from .helpers import add_match, normalize_math_letters, has_math_characters, is_latin_word, is_math_font
 import re
+import string
 from .language_error_extractor import typo_check
 import logging
 
@@ -78,6 +79,9 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
     reported_acronyms = set()
     no_parenthesis = re.compile(r'\b([A-Z]{2,})\s*\((?:ang\.|pol\.|fr\.)\s+([^)]{3,}?)(?=[,;]|\s{2,}[A-Z]{2})', re.UNICODE)
     roman_numeral = re.compile(r'^M{0,4}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$')
+    # an acronym written inside the expansion of another one ("GGUF (ang. GGML Unified Format)") is introduced there
+    words_in_definitions = {w.strip(string.punctuation + string.whitespace)
+                            for value in acronyms_with_definitions.values() for w in str(value[0]).split()}
 
     for b in blocks:
         block = b.block
@@ -134,6 +138,9 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
                 if no_parenthesis.search(content[word.start_char:]):
                     prev_word = word
                     continue   
+                if clean_text not in acronyms_with_definitions and clean_text in words_in_definitions:
+                    prev_word = word
+                    continue
                 if clean_text in acronyms_with_definitions:
                     acronym = acronyms_with_definitions[clean_text]
                     acronym_page, acronym_bbox = acronym[2], acronym[3]

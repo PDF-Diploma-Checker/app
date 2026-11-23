@@ -61,7 +61,11 @@ function Build-Variant($name) {
         }
         # "uv sync" is exact: packages that are not part of this variant (e.g. CUDA torch) are removed.
         $syncArgs = @("sync", "--frozen", "--no-dev")
-        if ($name -eq "cpu") { $syncArgs += @("--extra", "cpu") }
+        # GGML_NATIVE=OFF + a fixed instruction set: by default llama.cpp is compiled for the CPU of the build machine
+        # (AVX-512 on many of them), and the model then crashes on a user's CPU without it (0xc000001d, illegal
+        # instruction). AVX2/FMA/F16C runs on practically every x86-64 CPU since ~2015.
+        $cpuFlags = "-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON"
+        if ($name -eq "cpu") { $syncArgs += @("--extra", "cpu"); $env:CMAKE_ARGS = $cpuFlags }
         # GGML_CUDA_NO_VMM: without it ggml-cuda.dll links nvcuda.dll (the NVIDIA driver) directly, so llama_cpp cannot
         # even be imported on a computer without an NVIDIA driver - a build machine without a GPU (GitHub Actions)
         # or a user who installed the gpu variant on another card. With it the driver is loaded at run time by cudart.
