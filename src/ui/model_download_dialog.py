@@ -111,7 +111,8 @@ class ModelDownloadDialog(QDialog):
         super().reject()
 
     def reject(self):
-        """Cancel: the download stops between files (a file being downloaded is finished first)."""
+        """Cancel: the download stops within a fraction of a second, also in the middle of a file (see
+        config.cancellable_downloads); what was downloaded is continued next time."""
         if self.worker.isRunning():
             self.worker.token.cancel()
             self.cancel_btn.setEnabled(False)

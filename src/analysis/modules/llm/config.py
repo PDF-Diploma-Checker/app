@@ -4,6 +4,7 @@ Never import llama_cpp / torch / huggingface_hub at module level:
 the base build ships without them.
 """
 
+import contextlib
 import errno
 import getpass
 import functools
@@ -342,6 +343,42 @@ def _embedding_ignore_patterns(repo):
     return ignore
 
 
+@contextlib.contextmanager
+def cancellable_downloads():
+    """Make the Hugging Face downloads stop within a fraction of a second after a cancel.
+
+    huggingface_hub downloads a whole file (gigabytes for the models) in one call, so a cancel only took effect
+    between two files. While this is active: every chunk that arrives is a checkpoint (the progress bar of the
+    download raises the cancel), chunks are small (256 KB instead of 10 MB, which at a slow connection is seconds of
+    waiting for the next one) and the Xet transfer, whose Rust threads cannot be interrupted from Python, is off.
+    The part already downloaded stays in a .incomplete file and is continued next time."""
+    import sys
+    from huggingface_hub import constants
+    import huggingface_hub.utils.tqdm      # noqa: F401  (makes sure the module is loaded)
+
+    # the progress bar of a download is created in huggingface_hub/utils/tqdm.py (the name "huggingface_hub.utils.tqdm"
+    # in the package namespace is the class, the module itself is only in sys.modules)
+    bars = sys.modules["huggingface_hub.utils.tqdm"]
+    original_tqdm = bars.tqdm
+    original_chunk = constants.DOWNLOAD_CHUNK_SIZE
+    original_xet = getattr(constants, "HF_HUB_DISABLE_XET", False)
+
+    class CancellableTqdm(original_tqdm):
+        def update(self, n=1):
+            run_control.check_cancelled()
+            return super().update(n)
+
+    bars.tqdm = CancellableTqdm
+    constants.DOWNLOAD_CHUNK_SIZE = 256 * 1024
+    constants.HF_HUB_DISABLE_XET = True
+    try:
+        yield
+    finally:
+        bars.tqdm = original_tqdm
+        constants.DOWNLOAD_CHUNK_SIZE = original_chunk
+        constants.HF_HUB_DISABLE_XET = original_xet
+
+
 def download_ai_models_with_progress(progress_callback=None):
     """Download the optional AI models (only when the user asks for it).
 
@@ -360,37 +397,38 @@ def download_ai_models_with_progress(progress_callback=None):
             progress_callback(value, text)
 
     try:
-        if not MODEL_PATH.is_file():
-            run_control.check_cancelled()
-            light = MODEL_PROFILE == "light"
-            report(15, t("progress.download_gemma_light" if light else "progress.download_gemma"))
-            MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(repo_id=LIGHT_REPO if light else GEMMA_REPO, filename=LIGHT_FILE if light else GEMMA_FILE,
-                            local_dir=str(MODEL_PATH.parent))
+        with cancellable_downloads():
+            if not MODEL_PATH.is_file():
+                run_control.check_cancelled()
+                light = MODEL_PROFILE == "light"
+                report(15, t("progress.download_gemma_light" if light else "progress.download_gemma"))
+                MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+                hf_hub_download(repo_id=LIGHT_REPO if light else GEMMA_REPO,
+                                filename=LIGHT_FILE if light else GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
 
-        VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not VISION_MODEL_PATH.is_file():
-            run_control.check_cancelled()
-            report(50, t("progress.download_vision"))
-            hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+            VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if not VISION_MODEL_PATH.is_file():
+                run_control.check_cancelled()
+                report(50, t("progress.download_vision"))
+                hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
-        if not VISION_MMPROJ_PATH.is_file():
-            run_control.check_cancelled()
-            report(70, t("progress.download_projector"))
-            hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+            if not VISION_MMPROJ_PATH.is_file():
+                run_control.check_cancelled()
+                report(70, t("progress.download_projector"))
+                hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
-        _remove_replaced_models()
+            _remove_replaced_models()
 
-        if embedding_path() is None:
-            run_control.check_cancelled()
-            report(80, t("progress.download_embedding"))
-            repo = _embedding_repo()
-            EMBEDDING_DIR.mkdir(parents=True, exist_ok=True)
-            snapshot_download(
-                repo_id=repo, local_dir=str(EMBEDDING_DIR), ignore_patterns=_embedding_ignore_patterns(repo),
-            )
+            if embedding_path() is None:
+                run_control.check_cancelled()
+                report(80, t("progress.download_embedding"))
+                repo = _embedding_repo()
+                EMBEDDING_DIR.mkdir(parents=True, exist_ok=True)
+                snapshot_download(
+                    repo_id=repo, local_dir=str(EMBEDDING_DIR), ignore_patterns=_embedding_ignore_patterns(repo),
+                )
 
-        report(90, t("progress.download_done"))
+            report(90, t("progress.download_done"))
     except run_control.AnalysisCancelled:
         raise
     except OSError as e:
