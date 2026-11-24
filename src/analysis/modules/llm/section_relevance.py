@@ -4,10 +4,10 @@ Embeddings only see the subject area, so a section about a neighbouring subject 
 thesis. The text model reads the purpose, the titles of all sections and the summary of the doubtful one.
 """
 
-import json
 import logging
 
 from analysis.modules.llm import config
+from analysis.modules.llm.json_answer import chat_json
 from analysis.modules.llm.llama_factory import make_llama
 from common import run_control
 
@@ -73,13 +73,10 @@ def review_sections(purpose, titles, sections, language="pl"):
             prompt = (template.replace("{purpose}", purpose).replace("{titles}", title_list)
                       .replace("{title}", section["title"]).replace("{summary}", section["summary"]))
             try:
-                response = llm.create_chat_completion(
-                    messages=[{"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"},
-                    temperature=0.0,
-                    max_tokens=MAX_ANSWER_TOKENS,
-                )
-                answer = json.loads(response["choices"][0]["message"]["content"])
+                answer, _ = chat_json(llm, [{"role": "user", "content": prompt}], temperature=0.0,
+                                      max_tokens=MAX_ANSWER_TOKENS)
+                if answer is None:
+                    raise ValueError("the model gave no JSON object")
             except run_control.AnalysisCancelled:
                 raise
             except Exception:

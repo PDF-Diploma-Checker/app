@@ -1,8 +1,9 @@
 import logging
 import os
+import threading
 
 import fitz
-from PySide6.QtCore import QEvent, QMargins, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QMargins, QObject, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -56,6 +57,7 @@ class PDFReader(QMainWindow):
 
         self.start_page.openRequested.connect(self.open_existing_file)
         self.start_page.commandsRequested.connect(self.open_command_menu)
+        self.start_page.prefetchRequested.connect(self.prefetch_document)
 
         self.start_page.deleteRequested.connect(self.delete_document)
         self.stack.addWidget(self.start_page)
@@ -74,6 +76,8 @@ class PDFReader(QMainWindow):
         self._palette = None
         self._setup_shortcuts()
         QApplication.instance().installEventFilter(self)
+        self._focus_filter = motion.KeyboardFocusFilter(self)
+        QApplication.instance().installEventFilter(self._focus_filter)
 
         language_signals.changed.connect(self.retranslate_ui)
         self.retranslate_ui()
@@ -99,17 +103,55 @@ class PDFReader(QMainWindow):
         bind("Ctrl+-", in_reader(self.zoom_out))
         bind("Ctrl+G", in_reader(self.focus_page_input))
         bind("Ctrl+E", in_reader(self.export_pdf_with_annotations))
+        bind("Ctrl+0", in_reader(self.zoom_reset))
+        bind("Esc", in_reader(self._escape_back))
 
     def eventFilter(self, obj, event):
         """The side 'back' button of a mouse goes back from the reader, as in a browser."""
+        if not isinstance(obj, QObject):        # a stale wrapper from PySide for an object that is none of ours
+            return False
+        if (event.type() == QEvent.KeyPress and obj in getattr(self, "thumb_buttons", ())
+                and self._thumb_key(event)):
+            return True
         if (event.type() == QEvent.MouseButtonPress and event.button() == Qt.BackButton
                 and self.isActiveWindow() and self.stack.currentIndex() == 1):
             self.go_back()
             return True
-        return super().eventFilter(obj, event)
+        return False
+
+    def _escape_back(self):
+        """Esc goes back, unless it is meant for a text field (clearing or leaving it)."""
+        focus = QApplication.focusWidget()
+        if isinstance(focus, QLineEdit) or focus.__class__.__name__ in ("QPlainTextEdit", "QTextEdit"):
+            focus.clearFocus()
+            return
+        self.go_back()
 
     def go_back(self):
+        self._remember_view()
         motion.fade_to(self.stack, 0)
+
+    def _remember_view(self):
+        """Where the reader is (page and zoom), kept with the document for the next time it is opened."""
+        if self.current_pdf_path and self.document.status() == QPdfDocument.Status.Ready:
+            self.manager.set_view_state(
+                self.current_pdf_path, self.pdf_view.pageNavigator().currentPage(), self.pdf_view.zoomFactor())
+
+    def closeEvent(self, event):
+        self._remember_view()
+        super().closeEvent(event)
+
+    def prefetch_document(self, path):
+        """The pointer rested on a document: read its start from disk in the background so that opening it finds the
+        file in the system cache."""
+        def warm():
+            try:
+                with open(path, "rb") as handle:
+                    while handle.read(1 << 20) and handle.tell() < (16 << 20):
+                        pass
+            except OSError:
+                pass
+        threading.Thread(target=warm, daemon=True).start()
 
     def focus_page_input(self):
         self.page_input.setFocus()
@@ -179,30 +221,79 @@ class PDFReader(QMainWindow):
             self.toasts.reposition()
 
     def open_existing_file(self, path):
-        """Loads an already listed file from the disk storage and transitions the interface view
-        into the reading/annotation viewport."""
+        """Opens a listed document. The reader appears at once with a skeleton of the page, the thumbnails and the
+        report; the document itself is parsed a moment later (a long thesis takes seconds, and an unchanged start
+        page for that long looks like a hang)."""
+        if not path or not os.path.exists(path):
+            MessageBox.critical(self, t("common.error"), t("main.file_not_found", path=path))
+            return
+        self._opening = path
+        self._begin_loading(path)
+        QTimer.singleShot(40, lambda p=path: self._finish_open(p))     # let the skeleton paint first
+
+    def _begin_loading(self, path):
+        self.current_pdf_path = path
+        self.title_label.setText(os.path.basename(path))
+        self.total_pages_label.setText(" / …")
+        self.page_input.setText("1")
+        self.pdf_view.clear_markers()
+        self.pdf_view.clear_comments()
+        for button in self.thumb_buttons:
+            self.thumb_group.removeButton(button)
+        self.thumb_buttons = []
+        for i in reversed(range(self.thumb_layout.count())):
+            widget = self.thumb_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        for _ in range(7):
+            self.thumb_layout.addWidget(motion.Skeleton(118, 160, 3), alignment=Qt.AlignHCenter)
+        self.doc_skeleton.cover(self.pdf_view)
+        # the verification panel shows a skeleton at once (a timer would not fire while the document is parsed)
+        self.report_scroll.setWidget(motion.skeleton_report())
+        motion.fade_to(self.stack, 1)
+
+    def _finish_open(self, path):
+        if getattr(self, "_opening", None) != path:         # another document was chosen meanwhile
+            return
         self.load_pdf(path)
-        if self.document.status() == QPdfDocument.Status.Ready:
-            report_data = None
-            for p in self.manager.data.get("documents", []):
-                if p.get("local_path") == path:
-                    report_data = p.get("sota_result")
-                    break
+        if self.document.status() != QPdfDocument.Status.Ready:
+            self.doc_skeleton.hide()
+            motion.fade_to(self.stack, 0)
+            return
+        report_data = None
+        for p in self.manager.data.get("documents", []):
+            if p.get("local_path") == path:
+                report_data = p.get("sota_result")
+                break
+        lang = report_data.get("language", "pl") if report_data else "pl"
+        errors = self.manager.get_errors(path)
+        if errors:
+            self.pdf_view.add_errors(errors, lang=lang)
+        self._build_report_now()
+        self._restore_view(path)
+        self.doc_skeleton.hide()
+        # the markers are placed once the view has its size and its page layout (before that they sat at the edge)
+        QTimer.singleShot(150, self.pdf_view.update_markers_pos)
 
-            lang = report_data.get("language", "pl") if report_data else "pl"
+    def _build_report_now(self):
+        self.load_ai_analysis()
 
-            errors = self.manager.get_errors(path)
-            if errors:
-                self.pdf_view.add_errors(errors, lang=lang)
-                if hasattr(self.pdf_view, "update_markers_pos"):
-                    self.pdf_view.update_markers_pos()
-                else:
-                    self.pdf_view.update()
+    def _restore_view(self, path):
+        """Continue where the reader was left: the page and the zoom saved with the document."""
+        state = self.manager.get_view_state(path)
+        if not state:
+            return
+        zoom = float(state.get("zoom", 1.0))
+        page = int(state.get("page", 0))
 
-            # Show the reader at once with a skeleton; the saved report is built a moment later.
-            self.report_scroll.setWidget(motion.skeleton_report())
-            motion.fade_to(self.stack, 1)
-            QTimer.singleShot(120, self.load_ai_analysis)
+        def apply():
+            if zoom and abs(zoom - self.pdf_view.zoomFactor()) > 0.001:
+                self.pdf_view.setZoomFactor(zoom)
+                self.zoom_label.setText(f"{int(zoom * 100)}%")
+            if 0 < page < self.document.pageCount():
+                self.pdf_view.pageNavigator().jump(page, QPointF(0, 0), self.pdf_view.zoomFactor())
+
+        QTimer.singleShot(60, apply)
 
     def setup_reader_ui(self):
         """Assembles layout components, content areas, sidebar panels and toolbar items."""
@@ -235,6 +326,8 @@ class PDFReader(QMainWindow):
         self.thumb_area.setWidget(self.thumb_widget)
 
         self.pdf_view = SelectablePdfView()
+        self.doc_skeleton = motion.DocumentSkeleton(self.pdf_view)
+        self.doc_skeleton.hide()
         self.pdf_view.setDocument(self.document)
         self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
         self.pdf_view.setStyleSheet(styles.PDF_VIEW_STYLE)
@@ -529,6 +622,7 @@ class PDFReader(QMainWindow):
 
         if self.thumb_buttons:
             self.thumb_buttons[0].setChecked(True)
+            self._set_thumb_tab_stop(0)
         QTimer.singleShot(0, lambda g=self._thumb_generation: self._render_thumbnails(g))
 
     def _page_pixmap(self, index, width, height, blurred=False):
@@ -618,15 +712,49 @@ class PDFReader(QMainWindow):
         """Shows the page (counted from 0, as in the findings) in the viewer."""
         self.pdf_view.pageNavigator().jump(index, QPointF(0, 0), self.pdf_view.zoomFactor())
 
+    ZOOM_DETENTS = (1.0, 1.5, 2.0)
+
+    def _set_zoom(self, factor):
+        """Zoom with magnetic detents: within 3% of 100%, 150% or 200% it lands exactly on it, so the usual sizes
+        are easy to come back to."""
+        for detent in self.ZOOM_DETENTS:
+            if abs(factor - detent) <= 0.03 * detent:
+                factor = detent
+        self.pdf_view.setZoomFactor(factor)
+        self.zoom_label.setText(f"{int(round(self.pdf_view.zoomFactor() * 100))}%")
+
     def zoom_in(self):
         """Increases the zoom of the document viewport."""
-        self.pdf_view.setZoomFactor(self.pdf_view.zoomFactor() * 1.1)
-        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor() * 100)}%")
+        self._set_zoom(self.pdf_view.zoomFactor() * 1.1)
 
     def zoom_out(self):
         """Decreases the zoom of the document viewport."""
-        self.pdf_view.setZoomFactor(self.pdf_view.zoomFactor() / 1.1)
-        self.zoom_label.setText(f"{int(self.pdf_view.zoomFactor() * 100)}%")
+        self._set_zoom(self.pdf_view.zoomFactor() / 1.1)
+
+    def zoom_reset(self):
+        self._set_zoom(1.0)
+
+    def _set_thumb_tab_stop(self, idx, take_focus=False):
+        """Roving tabindex: the thumbnail list is a single stop for Tab (the current page); inside it the arrow keys
+        move. Fifty pages are no longer fifty presses of Tab."""
+        for i, button in enumerate(self.thumb_buttons):
+            button.setFocusPolicy(Qt.StrongFocus if i == idx else Qt.NoFocus)
+        if take_focus and 0 <= idx < len(self.thumb_buttons):
+            self.thumb_buttons[idx].setFocus(Qt.TabFocusReason)
+
+    def _thumb_key(self, event):
+        """Arrow keys, Home and End inside the thumbnail list move to another page."""
+        key = event.key()
+        current = self.pdf_view.pageNavigator().currentPage()
+        last = len(self.thumb_buttons) - 1
+        target = {Qt.Key_Down: current + 1, Qt.Key_Right: current + 1, Qt.Key_Up: current - 1,
+                  Qt.Key_Left: current - 1, Qt.Key_Home: 0, Qt.Key_End: last}.get(key)
+        if target is None:
+            return False
+        target = max(0, min(last, target))
+        self.pdf_view.pageNavigator().jump(target, QPointF(0, 0), self.pdf_view.zoomFactor())
+        self._set_thumb_tab_stop(target, take_focus=True)
+        return True
 
     def update_page_input(self, idx):
         """Syncs the current page index back to the page box and highlights its thumbnail."""
@@ -634,6 +762,7 @@ class PDFReader(QMainWindow):
         if 0 <= idx < len(self.thumb_buttons):
             self.thumb_buttons[idx].setChecked(True)
             self.thumb_area.ensureWidgetVisible(self.thumb_buttons[idx], 0, 40)
+            self._set_thumb_tab_stop(idx)
 
     def export_pdf_with_annotations(self):
         """Writes automated remarks and user comments into a copy of the PDF as annotations."""

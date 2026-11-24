@@ -15,6 +15,12 @@ HEADING_WITH_PREFIX_RE = re.compile(r"^\s*(?:\d+\.\s+)?(\d+\.\d+(?:\.\d+)*)(?:\.
 
 # Paragraphs and lists are the text of a section; captions, tables and the like are not.
 TEXT_BLOCK_TYPES = (None, "paragraph", "list")
+MIN_SECTION_CHARS = 80      # a section with less text than this (a heading, a garbled line) is not worth a summary
+
+
+def has_enough_text(content):
+    """False for a section that has (almost) no text: the model would make a summary up."""
+    return len((content or "").strip()) >= MIN_SECTION_CHARS
 
 # The heading that ends the last numbered section: after it come the bibliography and the lists of figures and tables.
 BACK_MATTER_TITLES = (

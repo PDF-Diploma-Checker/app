@@ -2,15 +2,18 @@
 placeholders, undo toasts, the command menu, tabular numbers, balanced text and squircle corners."""
 
 import math
+import os
+import subprocess
+import sys
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Property, Signal,
+    QEasingCurve, QEvent, QObject, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Property, Signal,
 )
 from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QAbstractButton, QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -18,6 +21,59 @@ from . import styles
 from .i18n import t
 
 HIT_SLOP = 12          # extra pixels around small targets that still count as a click
+
+
+# --------------------------------------------------------------------------- reduced motion
+_reduced = None
+
+
+def animations_enabled():
+    """False when the system asks for less motion (GNOME "enable-animations", Windows "show animations", or the
+    DIPLOMACHECKER_REDUCE_MOTION variable). Read once."""
+    global _reduced
+    if _reduced is None:
+        _reduced = bool(os.environ.get("DIPLOMACHECKER_REDUCE_MOTION"))
+        if not _reduced:
+            try:
+                if sys.platform.startswith("linux"):
+                    out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                                         capture_output=True, text=True, timeout=1).stdout.strip()
+                    _reduced = out == "false"
+                elif sys.platform == "win32":
+                    import ctypes
+                    flag = ctypes.c_int(1)
+                    SPI_GETCLIENTAREAANIMATION = 0x1042
+                    if ctypes.windll.user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(flag), 0):
+                        _reduced = flag.value == 0
+            except Exception:
+                _reduced = False
+    return not _reduced
+
+
+def duration(ms):
+    """Length of an animation: `ms`, or 0 when the system wants reduced motion (the change is then instant)."""
+    return ms if animations_enabled() else 0
+
+
+def tracking(widget, px):
+    """Letter spacing in pixels: tighter for large headings (-0.02 em), looser for small capitals (+0.06 em)."""
+    font = widget.font()
+    font.setLetterSpacing(QFont.AbsoluteSpacing, px)
+    widget.setFont(font)
+    return widget
+
+
+class KeyboardFocusFilter(QObject):
+    """Shows the focus ring only to keyboard users: a button that got focus from a mouse click gives it up again, so a
+    click leaves no outline behind, while Tab and arrows still show where the focus is."""
+
+    def eventFilter(self, obj, event):
+        # An application-wide filter sees every object, and PySide can hand over a stale wrapper for one of them
+        # (a QWidgetItem for a QObject): only trust a real button.
+        if (isinstance(obj, QAbstractButton) and event.type() == QEvent.FocusIn
+                and event.reason() == Qt.MouseFocusReason):
+            QTimer.singleShot(0, obj.clearFocus)
+        return False
 
 
 # --------------------------------------------------------------------------- text helpers
@@ -37,8 +93,8 @@ def tabular(widget):
         for name in ("Roboto-Regular.ttf", "Roboto-Bold.ttf"):
             QFontDatabase.addApplicationFont(resource_path(os.path.join("ui", "assets", name)))
     widget.setProperty("tabular", True)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
+    if widget.isVisible():              # not yet shown: the property is read when it is polished anyway
+        widget.setStyleSheet(widget.styleSheet())
     return widget
 
 
@@ -197,10 +253,13 @@ class HitSlop(QWidget):
 
 
 # --------------------------------------------------------------------------- view transition
-def fade_to(stack, index, duration=180):
+def fade_to(stack, index, duration_ms=180):
     """Switch a QStackedWidget page with a short cross-fade. A new switch while one is running continues
     from the current frame instead of jumping."""
     if stack.currentIndex() == index:
+        return
+    if not animations_enabled():
+        stack.setCurrentIndex(index)
         return
     old = getattr(stack, "_fade_label", None)
     if old is not None:
@@ -217,7 +276,7 @@ def fade_to(stack, index, duration=180):
     stack.setCurrentIndex(index)
     stack._fade_label = shot
     anim = QPropertyAnimation(effect, b"opacity", shot)
-    anim.setDuration(duration)
+    anim.setDuration(duration(duration_ms))
     anim.setStartValue(1.0)
     anim.setEndValue(0.0)
     anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -250,7 +309,8 @@ class Skeleton(QWidget):
         self._anim.setStartValue(-0.4)
         self._anim.setEndValue(1.4)
         self._anim.setLoopCount(-1)
-        self._anim.start()
+        if animations_enabled():
+            self._anim.start()
 
     def _get_phase(self):
         return self._phase
@@ -309,6 +369,106 @@ def skeleton_report():
     return box
 
 
+class DocumentSkeleton(QWidget):
+    """What the reader shows while a document is being opened: whole sheets of paper, as large as the real pages will
+    be at the current zoom, with a title and paragraphs of grey lines. It is painted in one go (no widget per line)
+    and a soft highlight moves over it, like on the other skeletons."""
+
+    A4_WIDTH_PT, A4_RATIO = 595.0, 1.414
+    PAGE_GAP = 16
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self._phase = -0.3
+        self._anim = QPropertyAnimation(self, b"phase", self)
+        self._anim.setDuration(1500)
+        self._anim.setStartValue(-0.3)
+        self._anim.setEndValue(1.3)
+        self._anim.setLoopCount(-1)
+        parent.installEventFilter(self)
+
+    def _get_phase(self):
+        return self._phase
+
+    def _set_phase(self, value):
+        self._phase = value
+        self.update()
+
+    phase = Property(float, _get_phase, _set_phase)
+
+    def eventFilter(self, obj, event):
+        if obj is self.parentWidget() and event.type() == QEvent.Resize:
+            self.setGeometry(obj.rect())
+        return False
+
+    def cover(self, widget):
+        """Sit on top of `widget` and follow its size."""
+        self.setGeometry(widget.rect())
+        self.raise_()
+        self.show()
+        if animations_enabled():
+            self._anim.start()
+
+    def hideEvent(self, event):
+        self._anim.stop()
+        super().hideEvent(event)
+
+    def _page_size(self):
+        parent = self.parentWidget()
+        zoom = parent.zoomFactor() if hasattr(parent, "zoomFactor") else 1.0
+        dpi = parent.logicalDpiX() if parent is not None else 96
+        width = self.A4_WIDTH_PT * dpi / 72.0 * zoom
+        width = min(width, self.width() - 2 * self.PAGE_GAP)
+        return width, width * self.A4_RATIO
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(styles.VIEWER_BG))
+        page_w, page_h = self._page_size()
+        if page_w <= 0:
+            return
+        bars = []                                       # every grey bar, to paint the highlight over them once
+        scale = page_w / 793.0
+        x0 = (self.width() - page_w) / 2.0
+        y = float(self.PAGE_GAP)
+        while y < self.height():
+            page = QRectF(x0, y, page_w, page_h)
+            p.fillRect(page, QColor(styles.SURFACE))
+            p.setPen(QPen(QColor(styles.BORDER), 1))
+            p.drawRect(page)
+            inner_l, inner_r = page.left() + page_w * 0.14, page.right() - page_w * 0.14
+            text_w = inner_r - inner_l
+            top = page.top() + page_h * 0.11
+            bottom = page.bottom() - page_h * 0.10
+            bars.append(QRectF(page.center().x() - text_w * 0.3, top, text_w * 0.6, 20 * scale))   # title
+            line_h, pitch = 9 * scale, 21 * scale
+            cursor, n = top + 70 * scale, 0
+            tails = (0.55, 0.8, 0.35, 0.65, 0.9)
+            while cursor + line_h < bottom:
+                paragraph = 5 + (n * 3) % 4
+                for i in range(paragraph):
+                    if cursor + line_h >= bottom:
+                        break
+                    last = i == paragraph - 1
+                    bars.append(QRectF(inner_l, cursor, text_w * (tails[n % len(tails)] if last else 1.0), line_h))
+                    cursor += pitch
+                cursor += pitch * 0.8
+                n += 1
+            y += page_h + self.PAGE_GAP
+        path = QPainterPath()
+        for rect in bars:
+            path.addRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.fillPath(path, QColor("#E9EDF2"))
+        grad = QLinearGradient(self.width() * (self._phase - 0.25), 0, self.width() * (self._phase + 0.25), 0)
+        grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+        grad.setColorAt(0.5, QColor(255, 255, 255, 200))
+        grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setClipPath(path)
+        p.fillRect(self.rect(), grad)
+
+
 # --------------------------------------------------------------------------- toast
 class Toast(QFrame):
     """Message at the bottom of the window with an optional action ("Undo"). Hovering pauses the timer;
@@ -348,7 +508,7 @@ class Toast(QFrame):
         self._effect.setOpacity(0.0)
         self.setGraphicsEffect(self._effect)
         self._fade = QPropertyAnimation(self._effect, b"opacity", self)
-        self._fade.setDuration(160)
+        self._fade.setDuration(duration(160))
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(timeout)
@@ -397,7 +557,7 @@ class Toast(QFrame):
             return
         self._closing = True
         self._timer.stop()
-        self._fade.setDuration(80 if quick else 200)
+        self._fade.setDuration(duration(80 if quick else 200))
         self._animate(0.0)
         self._fade.finished.connect(self._finish)
 
@@ -507,13 +667,8 @@ class CommandPalette(QDialog):
         lay.addWidget(foot)
 
         self.setFixedWidth(560)
-        self._filter("")
-        self._effect = QGraphicsOpacityEffect(card)
-        card.setGraphicsEffect(self._effect)
-        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
-        self._fade.setDuration(130)
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
+        self._filter("")          # no fade: opened hundreds of times a day, it has to answer in 0 ms
+        self._previous_focus = QApplication.focusWidget()
 
     def _row_widget(self, command):
         row = QWidget()
@@ -571,6 +726,12 @@ class CommandPalette(QDialog):
                 return True
         return super().eventFilter(obj, event)
 
+    def done(self, result):
+        super().done(result)
+        previous = getattr(self, "_previous_focus", None)
+        if previous is not None:
+            QTimer.singleShot(0, previous.setFocus)     # focus goes back to where it was
+
     def _run(self, item):
         command = item.data(Qt.UserRole)
         self.accept()
@@ -583,4 +744,3 @@ class CommandPalette(QDialog):
             top_left = parent.mapToGlobal(QPointF(0, 0).toPoint())
             self.move(top_left.x() + (parent.width() - self.width()) // 2, top_left.y() + 110)
         self.input.setFocus()
-        self._fade.start()

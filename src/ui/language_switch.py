@@ -5,6 +5,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QAbstractButton
 
 from . import styles
+from . import motion
 from .i18n import current_locale, language_signals, set_locale, t
 
 TRACK_COLOR = QColor(styles.NEUTRAL_BG)
@@ -31,8 +32,8 @@ class LanguageSwitch(QAbstractButton):
         self._offset = 1.0 if self.isChecked() else 0.0
 
         self._anim = QPropertyAnimation(self, b"offset", self)
-        self._anim.setDuration(150)
-        self._anim.setEasingCurve(QEasingCurve.InOutCubic)
+        self._anim.setDuration(motion.duration(150))
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)      # ease-out only: an ease-in would delay the response
 
         self.toggled.connect(self._on_toggled)
         language_signals.changed.connect(self._sync)

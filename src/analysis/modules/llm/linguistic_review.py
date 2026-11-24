@@ -6,7 +6,6 @@ whole document, the rules of a bibliography) are not asked about.
 """
 
 import itertools
-import json
 import logging
 import string
 
@@ -14,6 +13,7 @@ from analysis.modules.linguistics.decision_log import confirmed_by_model, not_re
 from analysis.modules.linguistics.helpers import morf, nlp_pl
 from analysis.modules.linguistics.language_error_extractor import typo_check
 from analysis.modules.llm import config
+from analysis.modules.llm.json_answer import chat_json
 from analysis.modules.llm.llama_factory import make_llama
 from analysis.modules.llm.results_log import log_results
 from common import run_control
@@ -172,13 +172,10 @@ def _ask(llm, template, match, language):
         keys = _SPELLING_KEY.get(language, _SPELLING_KEY["pl"]) + keys
     prompt = (template.replace("{keys}", keys).replace("{context}", match.context).replace("{found}", match.content)
               .replace("{message}", match.message).replace("{why}", match.why or "-"))
-    response = llm.create_chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-        temperature=0.0,
-        max_tokens=MAX_ANSWER_TOKENS,
-    )
-    return json.loads(response["choices"][0]["message"]["content"])
+    answer, text = chat_json(llm, [{"role": "user", "content": prompt}], temperature=0.0, max_tokens=MAX_ANSWER_TOKENS)
+    if answer is None:
+        raise ValueError(f"the model gave no JSON object: {text!r}")
+    return answer
 
 
 def review_findings(matches, language="pl"):
