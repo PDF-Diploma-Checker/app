@@ -23,15 +23,15 @@ class FindingsSectionTest(unittest.TestCase):
         content, _ = build_report_panel({} if report_data is None else report_data, lambda: None, errors, on_page)
         return content
 
-    def test_count_and_a_button_per_page_that_shows_it(self):
+    def test_count_and_a_numbered_button_per_finding_that_shows_its_page(self):
         shown = []
         content = self.panel([{"page": 4}, {"page": 4}, {"page": 0}], on_page=shown.append)
         texts = " | ".join(label.text() for label in content.findChildren(QLabel))
         self.assertIn("Uwagi: 3, strony: 2", texts)
         buttons = {b.text(): b for b in content.findChildren(QPushButton)}
-        self.assertIn("str. 1 (1)", buttons)
-        self.assertIn("str. 5 (2)", buttons)
-        buttons["str. 5 (2)"].click()
+        self.assertEqual(sorted(name for name in buttons if name.startswith("#")),
+                         ["#1  str. 1", "#2  str. 5", "#3  str. 5"])
+        buttons["#3  str. 5"].click()
         self.assertEqual(shown, [4])
 
     def test_no_findings_is_said_aloud(self):
