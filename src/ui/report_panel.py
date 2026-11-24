@@ -447,7 +447,6 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         else:
             grade = _number(grade_info)
 
-    root.addWidget(_note(t("main.disclaimer"), "warn"))
 
     failure = data.get("analysis_error")
     if isinstance(failure, dict):
@@ -563,6 +562,8 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                     lay.addWidget(_note(_global_text(item), "warn"))
             root.addWidget(card)
 
+    # a quiet line next to the results instead of an amber box above them (the full sentence stays in the PDF report)
+    root.addWidget(_label(t("main.disclaimer_short"), f"font-size: 12px; color: {styles.TEXT_2}; {TRANSPARENT}"))
     button = QPushButton(t("main.download_report"))
     button.setCursor(Qt.PointingHandCursor)
     button.setStyleSheet(styles.RAPORT_BTN_STYLE)
