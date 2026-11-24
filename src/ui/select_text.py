@@ -95,7 +95,9 @@ class ErrorMarker(QPushButton):
         QToolTip.showText(self.mapToGlobal(QPoint(20, 0)), info)
 
 class CommentMarker(QPushButton):
-    """represents a custom comment marker added by the user"""
+    """represents a custom comment marker added by the user; a right click offers to delete it"""
+    deleteRequested = Signal(object)
+
     def __init__(self, comment_data, parent=None, lang="pl"):
         super().__init__(parent)
         self.data = comment_data
@@ -105,13 +107,22 @@ class CommentMarker(QPushButton):
         self.setStyleSheet(styles.COMMENT_MARKER_STYLE)
         self.setText("C")
         self.clicked.connect(self.show_details)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.show_menu)
 
     def show_details(self):
         """displays the user's comment text"""
-        t = TOOLTIP_LANG.get(self.lang, TOOLTIP_LANG["pl"])
-        info = (f"<b>{t['my_comment']}</b> {self.data.get('tekst_komentarza', '')}<br>"
-                f"<b>{t['fragment']}</b> {self.data.get('znaleziony_tekst', '')}")
+        labels = TOOLTIP_LANG.get(self.lang, TOOLTIP_LANG["pl"])
+        info = (f"<b>{labels['my_comment']}</b> {self.data.get('tekst_komentarza', '')}<br>"
+                f"<b>{labels['fragment']}</b> {self.data.get('znaleziony_tekst', '')}<br>"
+                f"<i>{t('pdf_menu.delete_comment_hint')}</i>")
         QToolTip.showText(self.mapToGlobal(QPoint(20, 0)), info)
+
+    def show_menu(self, position):
+        menu = QMenu(self)
+        delete_action = menu.addAction(t("pdf_menu.delete_comment"))
+        delete_action.triggered.connect(lambda: self.deleteRequested.emit(self))
+        menu.exec(self.mapToGlobal(position))
 
 class HighlightBox(QFrame):
     """A transparent frame overlay used to visually highlight a specific text on PDF"""
@@ -197,6 +208,7 @@ class SelectablePdfView(QPdfView):
     """An extended PDF view that enables area-based text selection, adding custom user comments, and overlaying error markers."""
     textCopied = Signal(str)
     commentAdded = Signal(dict)
+    commentDeleted = Signal(dict)
     backRequested = Signal()
 
     def __init__(self, parent=None):
@@ -622,17 +634,45 @@ class SelectablePdfView(QPdfView):
                 "znaleziony_tekst": self.selected_text
             }
             
-            box = HighlightBox(comment_data, self.viewport())
-            box.is_error = False
-            box.setStyleSheet(styles.HIGHLIGHT_BOX_COMMENT)
-            self.highlight_boxes.append(box)
-
-            marker = CommentMarker(comment_data, self.viewport())
-            self.comment_markers.append(marker)
-            
+            self.add_comment_marker(comment_data, styles.HIGHLIGHT_BOX_COMMENT)
             self.update_markers_pos()
             self.selection_box.hide()
             self.commentAdded.emit(comment_data)
+
+    def add_comment_marker(self, comment_data, box_style=None):
+        """Shows a comment: its marker and, for a comment on selected text, the box around that text."""
+        coords = comment_data.get("wspolrzedne", {})
+        if box_style and coords.get("w", 0) > 0:
+            box = HighlightBox(comment_data, self.viewport())
+            box.is_error = False
+            box.setStyleSheet(box_style)
+            self.highlight_boxes.append(box)
+        marker = CommentMarker(comment_data, self.viewport())
+        marker.deleteRequested.connect(self.delete_comment)
+        self.comment_markers.append(marker)
+        return marker
+
+    def delete_comment(self, marker, confirm=True):
+        """Removes a comment the user added (after asking), with its box, and tells the window to forget it."""
+        if marker not in self.comment_markers:
+            return False
+        if confirm:
+            from .message_box import MessageBox
+            reply = MessageBox.question(self, t("pdf_menu.delete_comment"), t("pdf_menu.delete_comment_confirm"))
+            if reply != MessageBox.Yes:
+                return False
+        data = marker.data
+        self.comment_markers.remove(marker)
+        marker.deleteLater()
+        kept = []
+        for box in self.highlight_boxes:
+            if not getattr(box, "is_error", False) and getattr(box, "data", None) is data:
+                box.deleteLater()
+            else:
+                kept.append(box)
+        self.highlight_boxes = kept
+        self.commentDeleted.emit(data)
+        return True
 
     def copy_to_clipboard(self):
         """Copies the currently selected text fragment to the system clipboard."""
