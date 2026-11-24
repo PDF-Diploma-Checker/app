@@ -53,8 +53,12 @@ class FindIssuesTest(unittest.TestCase):
         self.assertEqual(ids(found), ["driver"])
         self.assertEqual(found[0].params["needed"], "12.0")
 
-    def test_missing_runtime_and_gpu_build(self):
-        self.assertEqual(ids(gpu_startup.find_issues(facts(ai_runtime=False), {})), ["runtime"])
+    def test_base_build_is_silent(self):
+        """The base build has no AI libraries and no detailed mode: nothing to report, even with a CUDA config."""
+        base = facts(ai_runtime=False, gpu_build=False, models={"gemma": False})
+        self.assertEqual(gpu_startup.find_issues(base, {"device": "cuda"}), [])
+
+    def test_gpu_build_missing(self):
         self.assertEqual(ids(gpu_startup.find_issues(facts(gpu_build=False), {})), ["gpu_build"])
 
     def test_weak_card_gets_a_layer_count(self):
