@@ -331,6 +331,14 @@ def parse_text_block(
                         if raw_text_stripped and raw_text_stripped in combined:
                             missing_start = ""
                             missing_end = ""
+                        if missing_end and all(ch in OPENING_PUNCTUATION for ch in missing_end):
+                            # "Algorytm DAgger (" + italic "Dataset Aggregation": the bracket that opens the next
+                            # span is already the start of its first word "(Dataset"; adding it here as well gave
+                            # "DAgger( (Dataset" (and a false contents mismatch)
+                            position = block_words.index(span_words[-1]) if span_words[-1] in block_words else -1
+                            following = block_words[position + 1] if 0 <= position < len(block_words) - 1 else None
+                            if following is not None and following[4].startswith(missing_end):
+                                missing_end = ""
 
                         for idx, original_x in enumerate(span_words):
                             x = list(original_x)
