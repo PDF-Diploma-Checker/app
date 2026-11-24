@@ -14,7 +14,6 @@ PDF = REPO_ROOT / "unit_tests" / "extraction" / "math_accents" / "tp_math_accent
 _HOME = tempfile.mkdtemp(prefix="dc_test_home_")
 os.environ["DIPLOMACHECKER_HOME"] = _HOME
 
-from PySide6.QtCore import QEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 
@@ -34,9 +33,14 @@ class ReaderOpenTest(unittest.TestCase):
         cls.window.resize(1100, 700)
         cls.window.show()
 
-    def test_event_filter_ignores_objects_that_are_not_qobjects(self):
-        # PySide can pass a stale wrapper (a QWidgetItem) for a QObject: the filter must not raise
-        self.assertFalse(self.window.eventFilter(object(), QEvent(QEvent.Type.None_)))
+    def test_mouse_back_button_returns_from_the_reader(self):
+        # handled by the window itself: an application-wide event filter would slow every event of the UI down
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        self.window.stack.setCurrentIndex(1)
+        QTest.mouseClick(self.window, Qt.BackButton)
+        _wait(self.app, 50)
+        self.assertEqual(self.window.stack.currentIndex(), 0)
 
     def test_tabular_on_a_visible_widget_does_not_raise(self):
         from ui import motion

@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 
 
 
+class _ThumbButton(QToolButton):
+    """A page thumbnail that hands arrow keys, Home and End to the reader (roving tabindex)."""
+
+    def __init__(self, on_key):
+        super().__init__()
+        self._on_key = on_key
+
+    def keyPressEvent(self, event):
+        if not self._on_key(event):
+            super().keyPressEvent(event)
+
+
 class PDFReader(QMainWindow):
     """The main window component of the Diploma Checker application.
     Manages the user interface flow, PDF rendering, and view states."""
@@ -57,6 +69,7 @@ class PDFReader(QMainWindow):
 
         self.start_page.openRequested.connect(self.open_existing_file)
         self.start_page.commandsRequested.connect(self.open_command_menu)
+        self.start_page.addRequested.connect(self.open_file_dialog)
         self.start_page.prefetchRequested.connect(self.prefetch_document)
 
         self.start_page.deleteRequested.connect(self.delete_document)
@@ -75,9 +88,8 @@ class PDFReader(QMainWindow):
         self._last_deleted = None
         self._palette = None
         self._setup_shortcuts()
-        QApplication.instance().installEventFilter(self)
-        self._focus_filter = motion.KeyboardFocusFilter(self)
-        QApplication.instance().installEventFilter(self._focus_filter)
+        motion.start_reading_motion_setting()
+        motion.keyboard_focus(self)
 
         language_signals.changed.connect(self.retranslate_ui)
         self.retranslate_ui()
@@ -106,18 +118,13 @@ class PDFReader(QMainWindow):
         bind("Ctrl+0", in_reader(self.zoom_reset))
         bind("Esc", in_reader(self._escape_back))
 
-    def eventFilter(self, obj, event):
-        """The side 'back' button of a mouse goes back from the reader, as in a browser."""
-        if not isinstance(obj, QObject):        # a stale wrapper from PySide for an object that is none of ours
-            return False
-        if (event.type() == QEvent.KeyPress and obj in getattr(self, "thumb_buttons", ())
-                and self._thumb_key(event)):
-            return True
-        if (event.type() == QEvent.MouseButtonPress and event.button() == Qt.BackButton
-                and self.isActiveWindow() and self.stack.currentIndex() == 1):
+    def mousePressEvent(self, event):
+        """The side 'back' button of a mouse goes back from the reader, as in a browser (the PDF view reports it
+        through backRequested; everywhere else the press reaches the window)."""
+        if event.button() == Qt.BackButton and self.stack.currentIndex() == 1:
             self.go_back()
-            return True
-        return False
+            return
+        super().mousePressEvent(event)
 
     def _escape_back(self):
         """Esc goes back, unless it is meant for a text field (clearing or leaving it)."""
@@ -324,11 +331,13 @@ class PDFReader(QMainWindow):
         self.thumb_layout.setSpacing(6)
         self.thumb_layout.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
         self.thumb_area.setWidget(self.thumb_widget)
+        self.thumb_area.verticalScrollBar().valueChanged.connect(lambda _v: self._kick_thumbnails())
 
         self.pdf_view = SelectablePdfView()
         self.doc_skeleton = motion.DocumentSkeleton(self.pdf_view)
         self.doc_skeleton.hide()
         self.pdf_view.setDocument(self.document)
+        self.pdf_view.backRequested.connect(self.go_back)
         self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
         self.pdf_view.setStyleSheet(styles.PDF_VIEW_STYLE)
         # QPdfView paints its backdrop with the palette's Dark role; style sheets do not reach it.
@@ -582,8 +591,9 @@ class PDFReader(QMainWindow):
                                    t("analysis.ai_failed_text", error=failure.get("error", "?")))
 
     def generate_thumbnails(self):
-        """Creates a button for every page at once, each with a blurred low-resolution preview, and then
-        renders the sharp previews a few at a time while the window stays responsive."""
+        """Creates a button for every page with a plain placeholder, then fills the previews in small steps so that the
+        window keeps answering clicks: first a blurred low-resolution preview of every page (quick), then the sharp
+        ones, the pages near the current one first."""
         for btn in self.thumb_buttons:
             self.thumb_group.removeButton(btn)
         self.thumb_buttons = []
@@ -593,18 +603,21 @@ class PDFReader(QMainWindow):
                 w.setParent(None)
 
         self._thumb_generation = getattr(self, "_thumb_generation", 0) + 1
-        self._thumb_queue = []
         thumb_w = 118
+        placeholder = QPixmap(thumb_w, int(thumb_w * 1.414))
+        placeholder.fill(QColor("#E9EDF2"))
+        sizes = []
         for i in range(self.document.pageCount()):
             size_pt = self.document.pagePointSize(i)
             ratio = (size_pt.height() / size_pt.width()) if size_pt.width() > 0 else 1.414
             thumb_h = max(40, int(round(thumb_w * ratio)))
+            sizes.append((thumb_w, thumb_h))
 
-            btn = QToolButton()
+            btn = _ThumbButton(self._thumb_key)
             btn.setCheckable(True)
             btn.setText(str(i + 1))
             btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            btn.setIcon(self._page_pixmap(i, thumb_w, thumb_h, blurred=True))
+            btn.setIcon(placeholder.scaled(thumb_w, thumb_h))
             btn.setIconSize(QSize(thumb_w, thumb_h))
             btn.setAccessibleName(t("main.page_n", n=i + 1))
             btn.setCursor(Qt.PointingHandCursor)
@@ -618,11 +631,15 @@ class PDFReader(QMainWindow):
             self.thumb_group.addButton(btn)
             self.thumb_buttons.append(btn)
             self.thumb_layout.addWidget(btn, alignment=Qt.AlignHCenter)
-            self._thumb_queue.append((i, thumb_w, thumb_h))
 
         if self.thumb_buttons:
             self.thumb_buttons[0].setChecked(True)
             self._set_thumb_tab_stop(0)
+        motion.keyboard_focus(self.thumb_widget)
+        self._thumb_sizes = sizes
+        self._thumb_blur_queue = [(i, *sizes[i]) for i in range(len(sizes))]
+        self._thumb_sharp_pending = set(range(len(sizes)))
+        self._thumb_busy = True
         QTimer.singleShot(0, lambda g=self._thumb_generation: self._render_thumbnails(g))
 
     def _page_pixmap(self, index, width, height, blurred=False):
@@ -640,17 +657,48 @@ class PDFReader(QMainWindow):
         painter.end()
         return pixmap
 
-    def _render_thumbnails(self, generation, batch=3):
-        """Renders the next few sharp previews; stops when another document has been opened meanwhile."""
+    def _visible_pending_thumbs(self):
+        """Pages whose thumbnail is on screen (or just outside) and still blurred, nearest to the top first."""
+        view = self.thumb_area.viewport().rect().adjusted(0, -200, 0, 200)
+        offset = self.thumb_widget.mapTo(self.thumb_area.viewport(), self.thumb_widget.rect().topLeft())
+        visible = []
+        for index in sorted(self._thumb_sharp_pending):
+            if index < len(self.thumb_buttons) and view.intersects(self.thumb_buttons[index].geometry().translated(offset)):
+                visible.append(index)
+        return visible
+
+    def _kick_thumbnails(self):
+        """The list was scrolled: sharpen what has come into view."""
+        if getattr(self, "_thumb_sharp_pending", None) and not getattr(self, "_thumb_busy", False):
+            self._thumb_busy = True
+            QTimer.singleShot(30, lambda g=self._thumb_generation: self._render_thumbnails(g))
+
+    def _render_thumbnails(self, generation):
+        """One small step of the preview work, then control goes back to the event loop (clicks, scrolling and
+        typing are handled between the steps). A blurred preview of every page first (tiny renders), then a sharp one
+        only for the pages that are on screen; the others are sharpened when they scroll into view. Stops when another
+        document has been opened meanwhile."""
         if generation != self._thumb_generation:
             return
-        for _ in range(batch):
-            if not self._thumb_queue:
+        if self._thumb_blur_queue:
+            for _ in range(8):
+                if not self._thumb_blur_queue:
+                    break
+                index, width, height = self._thumb_blur_queue.pop(0)
+                if index < len(self.thumb_buttons):
+                    self.thumb_buttons[index].setIcon(self._page_pixmap(index, width, height, blurred=True))
+            delay = 1
+        else:
+            pending = self._visible_pending_thumbs()
+            if not pending:
+                self._thumb_busy = False
                 return
-            index, width, height = self._thumb_queue.pop(0)
-            if index < len(self.thumb_buttons):
-                self.thumb_buttons[index].setIcon(self._page_pixmap(index, width, height))
-        QTimer.singleShot(0, lambda: self._render_thumbnails(generation))
+            index = pending[0]
+            self._thumb_sharp_pending.discard(index)
+            width, height = self._thumb_sizes[index]
+            self.thumb_buttons[index].setIcon(self._page_pixmap(index, width, height))
+            delay = 8
+        QTimer.singleShot(delay, lambda: self._render_thumbnails(generation))
 
     def add_comment(self, pos):
         """Converts a context-menu click position to PDF coordinates and adds a note there."""

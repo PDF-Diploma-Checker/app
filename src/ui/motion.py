@@ -24,29 +24,43 @@ HIT_SLOP = 12          # extra pixels around small targets that still count as a
 
 
 # --------------------------------------------------------------------------- reduced motion
-_reduced = None
+_reduced = False
+
+
+def _read_reduced_motion():
+    reduced = bool(os.environ.get("DIPLOMACHECKER_REDUCE_MOTION"))
+    if not reduced:
+        try:
+            if sys.platform.startswith("linux"):
+                out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                                     capture_output=True, text=True, timeout=1).stdout.strip()
+                reduced = out == "false"
+            elif sys.platform == "win32":
+                import ctypes
+                flag = ctypes.c_int(1)
+                SPI_GETCLIENTAREAANIMATION = 0x1042
+                if ctypes.windll.user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(flag), 0):
+                    reduced = flag.value == 0
+        except Exception:
+            reduced = False
+    return reduced
+
+
+def _load_reduced_motion():
+    global _reduced
+    _reduced = _read_reduced_motion()
+
+
+def start_reading_motion_setting():
+    """Read the system's reduced-motion setting in the background (asking gsettings can take a moment); until it is
+    known, animations are on."""
+    import threading
+    threading.Thread(target=_load_reduced_motion, daemon=True).start()
 
 
 def animations_enabled():
     """False when the system asks for less motion (GNOME "enable-animations", Windows "show animations", or the
-    DIPLOMACHECKER_REDUCE_MOTION variable). Read once."""
-    global _reduced
-    if _reduced is None:
-        _reduced = bool(os.environ.get("DIPLOMACHECKER_REDUCE_MOTION"))
-        if not _reduced:
-            try:
-                if sys.platform.startswith("linux"):
-                    out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
-                                         capture_output=True, text=True, timeout=1).stdout.strip()
-                    _reduced = out == "false"
-                elif sys.platform == "win32":
-                    import ctypes
-                    flag = ctypes.c_int(1)
-                    SPI_GETCLIENTAREAANIMATION = 0x1042
-                    if ctypes.windll.user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(flag), 0):
-                        _reduced = flag.value == 0
-            except Exception:
-                _reduced = False
+    DIPLOMACHECKER_REDUCE_MOTION variable)."""
     return not _reduced
 
 
@@ -63,17 +77,13 @@ def tracking(widget, px):
     return widget
 
 
-class KeyboardFocusFilter(QObject):
-    """Shows the focus ring only to keyboard users: a button that got focus from a mouse click gives it up again, so a
-    click leaves no outline behind, while Tab and arrows still show where the focus is."""
-
-    def eventFilter(self, obj, event):
-        # An application-wide filter sees every object, and PySide can hand over a stale wrapper for one of them
-        # (a QWidgetItem for a QObject): only trust a real button.
-        if (isinstance(obj, QAbstractButton) and event.type() == QEvent.FocusIn
-                and event.reason() == Qt.MouseFocusReason):
-            QTimer.singleShot(0, obj.clearFocus)
-        return False
+def keyboard_focus(root):
+    """Buttons under `root` take focus from Tab, not from a mouse click: the focus ring is for keyboard users, a click
+    leaves no outline behind. (An application-wide event filter would do the same, but it runs Python code for every
+    event of every widget and makes the whole UI sluggish.)"""
+    for button in root.findChildren(QAbstractButton):
+        if button.focusPolicy() == Qt.StrongFocus:
+            button.setFocusPolicy(Qt.TabFocus)
 
 
 # --------------------------------------------------------------------------- text helpers
@@ -253,42 +263,10 @@ class HitSlop(QWidget):
 
 
 # --------------------------------------------------------------------------- view transition
-def fade_to(stack, index, duration_ms=180):
-    """Switch a QStackedWidget page with a short cross-fade. A new switch while one is running continues
-    from the current frame instead of jumping."""
-    if stack.currentIndex() == index:
-        return
-    if not animations_enabled():
-        stack.setCurrentIndex(index)
-        return
-    old = getattr(stack, "_fade_label", None)
-    if old is not None:
-        old.hide()
-        old.deleteLater()
-    shot = QLabel(stack)
-    shot.setPixmap(stack.grab())
-    shot.setGeometry(stack.rect())
-    shot.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-    effect = QGraphicsOpacityEffect(shot)
-    shot.setGraphicsEffect(effect)
-    shot.show()
-    shot.raise_()
+def fade_to(stack, index, duration_ms=0):
+    """Switch a QStackedWidget page. (A cross-fade needs a screenshot of the whole window and a graphics effect over
+    it, which costs more than the change is worth: the views switch at once.)"""
     stack.setCurrentIndex(index)
-    stack._fade_label = shot
-    anim = QPropertyAnimation(effect, b"opacity", shot)
-    anim.setDuration(duration(duration_ms))
-    anim.setStartValue(1.0)
-    anim.setEndValue(0.0)
-    anim.setEasingCurve(QEasingCurve.OutCubic)
-
-    def done():
-        shot.hide()
-        shot.deleteLater()
-        if getattr(stack, "_fade_label", None) is shot:
-            stack._fade_label = None
-
-    anim.finished.connect(done)
-    anim.start()
 
 
 # --------------------------------------------------------------------------- skeleton
@@ -386,7 +364,6 @@ class DocumentSkeleton(QWidget):
         self._anim.setStartValue(-0.3)
         self._anim.setEndValue(1.3)
         self._anim.setLoopCount(-1)
-        parent.installEventFilter(self)
 
     def _get_phase(self):
         return self._phase
@@ -396,11 +373,6 @@ class DocumentSkeleton(QWidget):
         self.update()
 
     phase = Property(float, _get_phase, _set_phase)
-
-    def eventFilter(self, obj, event):
-        if obj is self.parentWidget() and event.type() == QEvent.Resize:
-            self.setGeometry(obj.rect())
-        return False
 
     def cover(self, widget):
         """Sit on top of `widget` and follow its size."""
@@ -423,6 +395,9 @@ class DocumentSkeleton(QWidget):
         return width, width * self.A4_RATIO
 
     def paintEvent(self, event):
+        parent = self.parentWidget()
+        if parent is not None and self.size() != parent.size():
+            self.setGeometry(parent.rect())            # follow the view without a filter on all its events
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.fillRect(self.rect(), QColor(styles.VIEWER_BG))
