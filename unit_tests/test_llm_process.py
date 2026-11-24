@@ -139,15 +139,17 @@ class OverlapTest(unittest.TestCase):
 
     def test_needs_depend_on_the_layers_and_the_free_memory(self):
         self.assertGreater(llm_process.overlap_needs_mb(-1), llm_process.overlap_needs_mb(25))
-        self.assertLess(llm_process.overlap_needs_mb(-1), 15000)           # fits a 16 GB card
+        self.assertGreater(llm_process.overlap_needs_mb(-1), 16 * 1024)    # both models do not fit a 16 GB card
         self.assertEqual(llm_process.overlap_needs_mb(-1), llm_process.overlap_needs_mb(49))
 
     def test_decision(self):
         self.assertFalse(llm_process.can_overlap_figures(-1))                          # no card (nvidia-smi), no overlap
-        self.assertTrue(llm_process.can_overlap_figures(-1, free_mb=15500))
+        self.assertFalse(llm_process.can_overlap_figures(-1, free_mb=15500))           # a 16 GB card: sequential
+        self.assertTrue(llm_process.can_overlap_figures(-1, free_mb=22000))            # a 24 GB card
         self.assertFalse(llm_process.can_overlap_figures(-1, free_mb=12000))           # another program holds memory
         self.assertFalse(llm_process.can_overlap_figures(0, free_mb=24000))            # everything on the processor
-        self.assertTrue(llm_process.can_overlap_figures(25, free_mb=12500))
+        self.assertTrue(llm_process.can_overlap_figures(25, free_mb=15000))
+        self.assertFalse(llm_process.can_overlap_figures(25, free_mb=12500))
 
     def test_figures_are_read_while_the_text_runs(self):
         from types import SimpleNamespace

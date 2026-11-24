@@ -513,8 +513,11 @@ def run_language_review_isolated(matches, language="pl", cancel_token=None):
     return matches
 
 
-# what the text model and the vision model take of the video memory (MB), to see whether they fit together
-_TEXT_BASE_MB, _TEXT_ALL_LAYERS_MB, _VISION_MB, _OVERLAP_MARGIN_MB = 1200, 7300, 5300, 600
+# what the text model and the vision model take of the video memory (MB), to see whether they fit together. Measured
+# on a 16 GB card: the text model with all layers needs about 10 GB (weights 7.3, the context 1.5, compute buffers 1.4),
+# the vision model about 6 GB while it reads. Together that does not fit 16 GB: the text model then failed to create its
+# context and fell back to 24 layers, which made the whole analysis twice as slow. So the margin is generous.
+_TEXT_BASE_MB, _TEXT_ALL_LAYERS_MB, _VISION_MB, _OVERLAP_MARGIN_MB = 3000, 7300, 6200, 1000
 _MODEL_LAYERS = 49
 
 
