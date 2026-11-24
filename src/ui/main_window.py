@@ -26,7 +26,7 @@ from .log_window import LogWindow
 from .message_box import MessageBox
 from .report_bug import send_report
 from .saving_files import SavingFiles
-from .select_text import CommentMarker, HighlightBox, SelectablePdfView, page_index
+from .select_text import SelectablePdfView, page_index
 from .start_page import StartPage
 
 logger = logging.getLogger(__name__)
@@ -355,6 +355,7 @@ class PDFReader(QMainWindow):
         self.pdf_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.pdf_view.customContextMenuRequested.connect(self.add_comment)
         self.pdf_view.commentAdded.connect(self.save_custom_comment)
+        self.pdf_view.commentDeleted.connect(self.delete_custom_comment)
 
         # the thesis assistant (GPU mode): a round button in the bottom-right corner of the preview
         self.assistant_panel = AssistantPanel(self.pdf_view)
@@ -748,8 +749,7 @@ class PDFReader(QMainWindow):
                 "tekst_komentarza": tekst.strip(),
                 "znaleziony_tekst": t("main.comment_empty_spot"),
             }
-            marker = CommentMarker(comment_data, self.pdf_view.viewport())
-            self.pdf_view.comment_markers.append(marker)
+            self.pdf_view.add_comment_marker(comment_data)
             self.pdf_view.update_markers_pos()
             self.save_custom_comment(comment_data)
 
@@ -924,6 +924,11 @@ class PDFReader(QMainWindow):
         if self.current_pdf_path:
             self.manager.save_comment(self.current_pdf_path, comment_data)
 
+    def delete_custom_comment(self, comment_data):
+        """Forgets a comment the user deleted."""
+        if self.current_pdf_path:
+            self.manager.delete_comment(self.current_pdf_path, comment_data)
+
     def load_custom_comments(self):
         """Clears all comment visuals and re-paints the saved ones for the current file."""
         self.pdf_view.clear_comments()
@@ -932,15 +937,7 @@ class PDFReader(QMainWindow):
 
         saved_comments = self.manager.get_comments(self.current_pdf_path)
         for c_data in saved_comments:
-            coords = c_data.get("wspolrzedne", {})
-            if coords.get("w", 0) > 0:
-                box = HighlightBox(c_data, self.pdf_view.viewport())
-                box.is_error = False
-                box.setStyleSheet(styles.HIGHLIGHT_BOX_CUSTOM_COMMENT_STYLE)
-                self.pdf_view.highlight_boxes.append(box)
-
-            marker = CommentMarker(c_data, self.pdf_view.viewport())
-            self.pdf_view.comment_markers.append(marker)
+            self.pdf_view.add_comment_marker(c_data, styles.HIGHLIGHT_BOX_CUSTOM_COMMENT_STYLE)
 
         self.pdf_view.update_markers_pos()
 

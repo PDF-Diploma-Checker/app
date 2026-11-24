@@ -144,6 +144,21 @@ class SavingFiles:
         doc.setdefault("comments", []).append(comment_data)
         self._save_to_disk(self.data)
 
+    def delete_comment(self, path, comment_data):
+        """Remove a comment from the document with the given path (the same one, or else an equal one)."""
+        doc = self._find(path)
+        if doc is None:
+            return False
+        comments = doc.get("comments", [])
+        index = next((i for i, c in enumerate(comments) if c is comment_data), None)
+        if index is None:
+            index = next((i for i, c in enumerate(comments) if c == comment_data), None)
+        if index is None:
+            return False
+        del comments[index]
+        self._save_to_disk(self.data)
+        return True
+
     def get_comments(self, path):
         """Return the comments assigned to the document."""
         doc = self._find(path)
