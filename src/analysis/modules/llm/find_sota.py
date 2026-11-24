@@ -2,6 +2,7 @@ import json
 import logging
 from .extract_citations import extract_citations
 from .evaluate_sota import get_llm
+from .json_answer import chat_json
 
 logger = logging.getLogger(__name__)
 
@@ -100,11 +101,11 @@ def get_sota_chapter(blocks: list, language: str = "pl"):
             truncated_content = block.content[:4000]
             prompt = PROMPT_EVALUATE_PL.format(title=block.title or "Brak", content=truncated_content) if language == "pl" else PROMPT_EVALUATE_EN.format(title=block.title or "None", content=truncated_content)
             try:
-                response = llm.create_chat_completion(
-                    messages=[{"role": "system", "content": "Zwracaj JSON."}, {"role": "user", "content": prompt}],
-                    response_format={"type": "json_object"}, temperature=0.0
-                )
-                data = json.loads(response["choices"][0]["message"]["content"])
+                data, _ = chat_json(
+                    llm, [{"role": "system", "content": "Zwracaj JSON."}, {"role": "user", "content": prompt}],
+                    temperature=0.0)
+                if data is None:
+                    raise json.JSONDecodeError("the model gave no JSON object", "", 0)
                 score = data.get("pewnosc_procentowa", 0)
                 if score >= 90 and data.get("czy_sota"):
                     llm_candidates.append({"block": block, "score": score})
