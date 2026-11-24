@@ -211,6 +211,42 @@ def build_patch_pack(package_dir, out_dir, platform, variant, version, base_mani
     return manifest, changed
 
 
+def build_patch_from_overrides(overrides_dir, removed, out_dir, platform, variant, version, base_manifest, base_tag,
+                               part_size=PART_SIZE, log=print):
+    """Like build_patch_pack, but without the build: `overrides_dir` holds only the files that are new or changed (at
+    their place in the package), `removed` is a collection of paths that are gone. Everything else stays as the
+    manifest of release `base_tag` says. For a release that changes only a few files, whose build is not at hand.
+    Returns (manifest, the changed paths)."""
+    overrides_dir, out_dir = Path(overrides_dir), Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    removed = set(removed)
+    known = {entry["p"]: entry for entry in base_manifest["files"]}
+    parts = [{**part, "release": part.get("release") or base_tag} for part in base_manifest["parts"]]
+    writer = _PartWriter(out_dir, pack_name(platform, variant), part_size, first_number=len(parts) + 1)
+    base_total = int(base_manifest["total"])
+    fresh, changed = {}, []
+    for rel, path, is_link in _package_files(overrides_dir):
+        if is_link:
+            raise ValueError(f"{rel}: a link cannot be patched in")
+        old = known.get(rel)
+        if old and old["s"] == path.stat().st_size and old["m"] == _file_mode(path) and old["h"] == _sha256_of(path):
+            continue                    # the same file as before
+        start = writer.offset
+        method, size, digest = _write_file(writer, path)
+        fresh[rel] = {"p": rel, "s": size, "h": digest, "m": _file_mode(path), "o": base_total + start,
+                      "c": writer.offset - start, "z": method}
+        changed.append(rel)
+    files = [fresh.pop(entry["p"], entry) for entry in base_manifest["files"] if entry["p"] not in removed]
+    files += list(fresh.values())       # new files after the old ones
+    links = [link for link in base_manifest.get("links", []) if link["p"] not in removed]
+    new_parts = writer.close() if writer.offset else []
+    manifest = _write_manifest(out_dir, platform, variant, version, parts + new_parts, base_total + writer.offset,
+                               files, links)
+    log(f"Patch: {len(changed)} of {len(files)} files changed, {len(removed & set(known))} removed, "
+        f"{writer.offset / 1024 / 1024:.1f} MiB in {len(new_parts)} new part(s)")
+    return manifest, changed
+
+
 # =========================================================================== manifest
 def _safe_rel(path):
     """True for a relative posix path without '..', drive letters or backslashes, outside the user's data folders."""

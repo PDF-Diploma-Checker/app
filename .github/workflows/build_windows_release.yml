@@ -9,23 +9,45 @@
 name: Build Windows release
 
 on:
-  push:
-    branches: [test/release-builds]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to check the build against (e.g. v0.6.6); empty = only APP_VERSION"
+        description: "Release tag to check the build against (e.g. v0.6.8); empty = only APP_VERSION"
         required: false
         default: ""
       variants:
-        description: "Which variants to build"
-        type: choice
-        options: [all, base, cpu, gpu]
-        default: all
+        description: "Which variants to build: all, or a comma separated list (base,cpu,gpu)"
+        required: false
+        default: "all"
       upload:
         description: "Upload the files to the draft of the release (needs the DOWNLOAD_REPO_TOKEN secret and a tag)"
         type: boolean
         default: false
+      ref:
+        description: "Commit to build (empty = the head of the branch the workflow runs on)"
+        required: false
+        default: ""
+  workflow_call:       # the release workflow builds with it what cannot be patched
+    inputs:
+      tag:
+        type: string
+        required: false
+        default: ""
+      variants:
+        type: string
+        required: false
+        default: "all"
+      upload:
+        type: boolean
+        required: false
+        default: false
+      ref:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      DOWNLOAD_REPO_TOKEN:
+        required: false
 
 jobs:
   plan:
@@ -34,12 +56,11 @@ jobs:
       matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       - id: pick
+        env:
+          VARIANTS: ${{ inputs.variants }}
         run: |
-          if [ -z "${{ inputs.variants }}" ] || [ "${{ inputs.variants }}" = "all" ]; then
-            echo 'matrix={"variant":["base","cpu","gpu"]}' >> "$GITHUB_OUTPUT"
-          else
-            echo 'matrix={"variant":["${{ inputs.variants }}"]}' >> "$GITHUB_OUTPUT"
-          fi
+          if [ -z "$VARIANTS" ] || [ "$VARIANTS" = "all" ]; then VARIANTS="base,cpu,gpu"; fi
+          echo "matrix={\"variant\":$(echo "$VARIANTS" | jq -Rc 'split(",") | map(select(length > 0))')}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
@@ -52,6 +73,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -89,6 +112,9 @@ jobs:
           if ("${{ inputs.tag }}") { $tagArgs = @("--tag", "${{ inputs.tag }}") }
           .\.venv-build-${{ matrix.variant }}\Scripts\python.exe tools/prepare_release_assets.py dist/${{ matrix.variant }}/DiplomaChecker --platform windows --variant ${{ matrix.variant }} --out release_files @tagArgs
           if ($LASTEXITCODE -ne 0) { throw "prepare_release_assets failed" }
+          # which modules the build holds: the next release is planned from it (patch or full build)
+          .\.venv-build-${{ matrix.variant }}\Scripts\python.exe tools/list_bundled_modules.py dist/${{ matrix.variant }}/DiplomaChecker --platform windows --variant ${{ matrix.variant }} --out release_files
+          if ($LASTEXITCODE -ne 0) { throw "list_bundled_modules failed" }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -107,6 +133,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/download-artifact@v4
         with:

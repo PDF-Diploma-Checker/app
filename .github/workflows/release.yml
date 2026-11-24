@@ -1,0 +1,155 @@
+# The release, without anyone doing anything: after a merge to main (and the version bump that follows it) this
+# decides, per platform and variant, whether the app can be PATCHED from the newest release (only our Python files
+# changed, importing nothing the build lacks) or has to be built FULLY (other libraries, new data files, the launcher,
+# build scripts), does it, checks the result and publishes the release.
+#
+#   plan      tools/release_plan.py      nothing to release / patch / full build, for each of the six variants
+#   patch     tools/patch_release.py     the changed files on top of the base release: a minute, no build
+#   full-*    the build workflows        the Windows and Linux variants that cannot be patched (hours for gpu)
+#   finalize  tools/verify_release.py    every manifest complete and consistent, then the draft is published
+#
+# Needs the secret DOWNLOAD_REPO_TOKEN: a token that can write to PDF-Diploma-Checker/diploma-checker-download.
+# Run it by hand for a full build of everything ("force_full") or to release without publishing ("publish" off).
+
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Bump the version"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_full:
+        description: "Build everything from scratch (no patch)"
+        type: boolean
+        default: false
+      publish:
+        description: "Publish the release when it is complete (off: leave the draft)"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false      # a release that is running is finished first, the next one waits
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.plan.outputs.skip }}
+      reason: ${{ steps.plan.outputs.reason }}
+      tag: ${{ steps.plan.outputs.tag }}
+      base: ${{ steps.plan.outputs.base }}
+      since: ${{ steps.plan.outputs.since }}
+      head: ${{ steps.plan.outputs.head }}
+      sha: ${{ steps.plan.outputs.sha }}
+      patch: ${{ steps.plan.outputs.patch }}
+      full_linux: ${{ steps.plan.outputs.full_linux }}
+      full_windows: ${{ steps.plan.outputs.full_windows }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main            # the head of main after the version bump
+          fetch-depth: 0       # the plan compares with the commit of the newest release
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}      # reading the public download repository
+          FORCE_FULL: ${{ inputs.force_full }}
+        run: |
+          if [ "$FORCE_FULL" = "true" ]; then python tools/release_plan.py --force-full; else python tools/release_plan.py; fi
+
+      - name: The token for the download repository
+        if: steps.plan.outputs.skip != 'true'
+        env:
+          TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+        run: |
+          test -n "$TOKEN" || { echo "::error::Add the secret DOWNLOAD_REPO_TOKEN (write access to diploma-checker-download)"; exit 1; }
+
+  patch:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.patch != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Patch ${{ needs.plan.outputs.patch }}
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+        run: >
+          python tools/patch_release.py
+          --tag "${{ needs.plan.outputs.tag }}" --base "${{ needs.plan.outputs.base }}"
+          --since "${{ needs.plan.outputs.since }}" --variants "${{ needs.plan.outputs.patch }}"
+
+  full-linux:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.full_linux != ''
+    uses: ./.github/workflows/build_linux_release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      variants: ${{ needs.plan.outputs.full_linux }}
+      upload: true
+      ref: ${{ needs.plan.outputs.sha }}
+    secrets: inherit
+
+  full-windows:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.full_windows != ''
+    uses: ./.github/workflows/build_windows_release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      variants: ${{ needs.plan.outputs.full_windows }}
+      upload: true
+      ref: ${{ needs.plan.outputs.sha }}
+    secrets: inherit
+
+  finalize:
+    needs: [plan, patch, full-linux, full-windows]
+    if: >
+      always() && needs.plan.outputs.skip == 'false'
+      && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: Every platform and variant is complete
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+        run: python tools/verify_release.py --tag "${{ needs.plan.outputs.tag }}"
+
+      - name: Publish ${{ needs.plan.outputs.tag }}
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
+        env:
+          GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
+        run: |
+          gh release edit "${{ needs.plan.outputs.tag }}" -R PDF-Diploma-Checker/diploma-checker-download \
+            --notes "DiplomaChecker ${{ needs.plan.outputs.tag }}"$'\n\n'"Built from ${{ needs.plan.outputs.head }}" \
+            --draft=false --latest
