@@ -160,7 +160,8 @@ class SelectablePdfView(QPdfView):
     """An extended PDF view that enables area-based text selection, adding custom user comments, and overlaying error markers."""
     textCopied = Signal(str)
     commentAdded = Signal(dict)
-    
+    backRequested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.markers = []
@@ -373,6 +374,9 @@ class SelectablePdfView(QPdfView):
 
     def mousePressEvent(self, event):
         """Handles mouse press events."""
+        if event.button() == Qt.BackButton:
+            self.backRequested.emit()
+            return
         if event.button() == Qt.RightButton:
             if self.selection_box.isVisible() and self.selection_box.geometry().contains(event.position().toPoint()):
                 self.show_context_menu(event.globalPosition().toPoint())

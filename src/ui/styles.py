@@ -54,7 +54,7 @@ def _q(sheet):
 # ------------------------------------------------------- application-wide
 APP_STYLE = _q("""
     QWidget { font-family: $font; }
-    *[tabular="true"] { font-family: "Roboto", $font; }
+    QLabel[tabular="true"], QLineEdit[tabular="true"], QToolButton[tabular="true"] { font-family: "Roboto", $font; }
     QToolTip {
         background-color: $text; color: white; border: none;
         padding: 6px 8px; border-radius: 6px; font-size: 13px;

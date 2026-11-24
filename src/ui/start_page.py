@@ -179,6 +179,7 @@ class StartPage(QWidget):
     deleteRequested = Signal(str)
     commandsRequested = Signal()
     prefetchRequested = Signal(str)
+    addRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -371,7 +372,7 @@ class StartPage(QWidget):
         up_layout.addWidget(self.add_btn, alignment=Qt.AlignCenter)
         up_layout.addStretch()
 
-        self.upload_frame.clicked.connect(self.add_btn.click)
+        self.upload_frame.clicked.connect(self.addRequested.emit)
         return self.upload_frame
 
     def _build_docs_card(self):
@@ -544,6 +545,7 @@ class StartPage(QWidget):
                 date=p.get('date_added', t("start.no_date")),
                 has_config=has_config,
             )
+        motion.keyboard_focus(self.table_container)
 
     def _add_empty_state(self, has_documents):
         box = QWidget()
@@ -594,7 +596,7 @@ class StartPage(QWidget):
             action.clicked.connect(self.search_input.clear)
         else:
             action.setStyleSheet(styles.BLUE_BUTTON_STYLE)
-            action.clicked.connect(self.add_btn.click)
+            action.clicked.connect(self.addRequested.emit)
         lay.addWidget(action, alignment=Qt.AlignCenter)
         self.table_layout.addWidget(box)
 
