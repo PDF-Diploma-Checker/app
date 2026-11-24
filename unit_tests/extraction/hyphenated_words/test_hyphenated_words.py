@@ -36,6 +36,13 @@ class FindingTest(unittest.TestCase):
         self.assertEqual(idxs, [1])                         # one word
         self.assertEqual(len(coords), 2)                    # two highlights
 
+    def test_both_parts_get_a_box_also_with_the_same_line_number(self):
+        # a centred caption: its second line is another block of the PDF, so both parts have line 0
+        words = [w(0, "srodowiskach,", 0, 0, 0, 500, [(0, 0, [146, 40, 181, 50])])]
+        coords = get_match_info(Block(words), 0, 13)[3]
+        self.assertEqual(len(coords), 2)
+        self.assertLess(coords[0]["coordinates"][1], coords[1]["coordinates"][1])      # the first part first
+
     def test_a_word_without_a_line_break_has_one_box(self):
         words = [w(0, "Ala", 0, 0, 1, 400), w(1, "kot", 4, 0, 1, 450)]
         self.assertEqual(len(get_match_info(Block(words), 4, 3)[3]), 1)
