@@ -277,7 +277,9 @@ LIST_MAX_HEIGHT = 300
 
 def _finding_buttons(errors, on_page):
     """One button per finding with its number and page ('#3  p. 5'), in the order of the numbers. A click shows the
-    page; the tooltip has the note. The numbers are the ones on the markers. A long list scrolls on its own."""
+    page; the tooltip has the note. The numbers are the ones on the markers. The list is as tall as its buttons: the
+    panel scrolls, a second scroll bar inside it would only get in the way (a flow layout also cannot size itself in a
+    scroll area, it has no width to wrap at)."""
     box = QWidget()
     box.setStyleSheet("background: transparent;")
     flow = _FlowLayout(box, spacing=6)
@@ -295,16 +297,7 @@ def _finding_buttons(errors, on_page):
         button.clicked.connect(lambda _checked=False, target=page: on_page(target))
         flow.addWidget(button)
     box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
-    if flow.heightForWidth(300) <= LIST_MAX_HEIGHT:        # a few findings: no scroll bar
-        return box
-    scroll = QScrollArea()
-    scroll.setWidget(box)
-    scroll.setWidgetResizable(True)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    scroll.setFrameShape(QFrame.NoFrame)
-    scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-    scroll.setFixedHeight(LIST_MAX_HEIGHT)
-    return scroll
+    return box
 
 
 def _toggle(text, details, colour=None, background=None):
