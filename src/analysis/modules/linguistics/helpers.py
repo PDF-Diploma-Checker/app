@@ -163,6 +163,22 @@ def font_family(font):
     name = re.sub(r"(bold|italic|ital|oblique)$", "", name, flags=re.IGNORECASE)
     return re.sub(r"\d+$", "", name).lower()
 
+def _printed_rows(words):
+    """The words split into printed rows (their heights overlap by at least half), top to bottom."""
+    rows = []
+    for word in sorted(words, key=lambda w: (w.bbox[1] + w.bbox[3]) / 2):
+        top, bottom = word.bbox[1], word.bbox[3]
+        if rows:
+            r_top = min(w.bbox[1] for w in rows[-1])
+            r_bottom = max(w.bbox[3] for w in rows[-1])
+            overlap = min(bottom, r_bottom) - max(top, r_top)
+            if overlap > 0.5 * min(bottom - top, r_bottom - r_top):
+                rows[-1].append(word)
+                continue
+        rows.append([word])
+    return rows
+
+
 def get_match_info(block, offset, length):
     '''Adjust coordinates of text content to its position in pdf based on extraction structure.
     Returns coordinates to be later passed to highlight bboxes.'''
@@ -224,15 +240,18 @@ def get_match_info(block, offset, length):
                 lines[(page, line)].append(SimpleNamespace(bbox=bbox))
     error_coordinate = []
     for (page, line), words in sorted(lines.items()):
-        error_coordinate.append({
-            "page": page,
-            "coordinates": [
-                min(w.bbox[0] for w in words),
-                min(w.bbox[1] for w in words),
-                max(w.bbox[2] for w in words),
-                max(w.bbox[3] for w in words),
-            ]
-        })
+        # one box per printed row: a line number is counted per block of the PDF, so the two parts of a word broken
+        # at a line end can carry the same number (a centred caption whose second line is a block of its own)
+        for row in _printed_rows(words):
+            error_coordinate.append({
+                "page": page,
+                "coordinates": [
+                    min(w.bbox[0] for w in row),
+                    min(w.bbox[1] for w in row),
+                    max(w.bbox[2] for w in row),
+                    max(w.bbox[3] for w in row),
+                ]
+            })
     if not error_coordinate:
         error_coordinate = [{"page": -1, "coordinates": [0, 0, 0, 0]}]
 
