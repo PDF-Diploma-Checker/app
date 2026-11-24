@@ -602,6 +602,12 @@ class AnalysisDialog(QDialog):
         self.gpu_info_label.setWordWrap(True)
         self.gpu_info_label.setVisible(False)
 
+        # what counts as a widow: some universities count a last line of two words, some only a single word
+        self.cb_widow_two = QCheckBox(t("analysis.widow_two_words"))
+        self.cb_widow_two.setStyleSheet(styles.checkbox_style())
+        self.cb_widow_two.setToolTip(t("analysis.widow_two_words_hint"))
+        self.cb_widow_two.setChecked(int(load_config().get("widow_max_words", 2)) != 1)
+
         self.gpu_warning_label = QLabel()
         self.gpu_warning_label.setWordWrap(True)
         self.gpu_warning_label.setVisible(False)
@@ -623,6 +629,9 @@ class AnalysisDialog(QDialog):
         mode_section.addWidget(self.gpu_info_label)
         mode_section.addWidget(self.gpu_warning_label)
         mode_section.addWidget(self.setup_link, alignment=Qt.AlignLeft)
+        mode_section.addSpacing(4)
+        mode_section.addWidget(self._field_label(t("analysis.typography")))
+        mode_section.addWidget(self.cb_widow_two)
 
         self.eta_label = QLabel(t("analysis.eta_calc"))
 
@@ -836,6 +845,7 @@ class AnalysisDialog(QDialog):
 
     def start_analysis(self):
         self._remember_config_file()
+        self._remember_widow_choice()
         is_detailed = self.btn_dokladny.isChecked() and self.ai_available
         chosen_lang = "pl" if self.btn_lang_pl.isChecked() else "en"
         self._resize_keep_center(self.PROGRESS_SIZE_AI if is_detailed else self.PROGRESS_SIZE)
@@ -856,6 +866,15 @@ class AnalysisDialog(QDialog):
         self.stage_list.setVisible(is_detailed)
 
         self.run_pipeline_worker(is_detailed, chosen_lang)
+
+    def _remember_widow_choice(self):
+        """The widow rule is read by the analysis from app_config.json ("widow_max_words": 1 or 2)."""
+        try:
+            cfg = load_config()
+            cfg["widow_max_words"] = 2 if self.cb_widow_two.isChecked() else 1
+            save_config(cfg)
+        except Exception:
+            logger.exception("Could not save the widow setting")
 
     def run_pipeline_worker(self, is_detailed, chosen_lang):
         eta.take_model_loads()
