@@ -94,6 +94,12 @@ class TestCombiningMarks(unittest.TestCase):
         self.assertEqual(unicodedata.normalize("NFD", words[0].text), "l" + HAT)
         self.assert_offsets(words, full_text)
 
+    def test_math_accent_after_a_symbol_in_the_same_math_font_goes_to_the_next_symbol(self):
+        # "𝜖) ̂𝐴" in a thesis whose text and formulas are both set in one math font: the hat is not the previous word's
+        words, full_text = extract(("𝜖)", MATH_FONT), (HAT, MATH_FONT), ("𝐴", MATH_FONT))
+        self.assertEqual([unicodedata.normalize("NFD", w.text) for w in words], ["𝜖)", "𝐴" + HAT])
+        self.assert_offsets(words, full_text)
+
     def test_mark_without_following_word_falls_back_to_previous_word(self):
         words, full_text = extract(("Przez", TEXT_FONT), (HAT, MATH_FONT))
         self.assertEqual(unicodedata.normalize("NFD", words[0].text), "Przez" + HAT)
