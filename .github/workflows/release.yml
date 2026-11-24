@@ -150,6 +150,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
         run: |
-          gh release edit "${{ needs.plan.outputs.tag }}" -R PDF-Diploma-Checker/diploma-checker-download \
-            --notes "DiplomaChecker ${{ needs.plan.outputs.tag }}"$'\n\n'"Built from ${{ needs.plan.outputs.head }}" \
+          TAG="${{ needs.plan.outputs.tag }}"
+          gh release edit "$TAG" -R PDF-Diploma-Checker/diploma-checker-download \
+            --notes "DiplomaChecker ${TAG#v}"$'\n\n'"Built from ${{ needs.plan.outputs.head }}" \
             --draft=false --latest
