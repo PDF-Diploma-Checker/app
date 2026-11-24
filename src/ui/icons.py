@@ -9,6 +9,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 _PATHS = {
     "search": '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+    "help": '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.5M12 17v.1"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
     "minus": '<path d="M5 12h14"/>',
     "upload": '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
