@@ -52,6 +52,23 @@ SMALL_MARK_RATIO = 0.7      # text this much smaller than the main size is a mar
 # the names are the categories the checks give their errors
 TYPOGRAPHY_CATEGORIES = ("orphan", "widow", "bastard", "shoemaker", "corridor", "justification")
 
+# LaTeX writes "??" in place of a \ref / \eqref whose label it does not know (missing label or one compilation too few)
+UNRESOLVED_REF = re.compile(r"(?<![\w?!])\?\?(?![\w?!])")
+# and "[?]" in place of a \cite whose key is missing from the bibliography, also mixed with numbers: "[3, ?]"
+_CITE_ITEM = r"\s*(?:\?|\d+(?:\s*[–-]\s*\d+)?)\s*"
+UNRESOLVED_CITE = re.compile(rf"\[(?:{_CITE_ITEM}[,;])*\s*\?\s*(?:[,;]{_CITE_ITEM})*\]")
+UNRESOLVED_SKIPPED_TYPES = {"math", "code_snippet", "keywords"}
+UNRESOLVED_COMMENTS = {
+    "unresolved_reference": {
+        "pl": "Niewygenerowane odwołanie (??): brak etykiety albo dokument nie został ponownie skompilowany.",
+        "en": "Unresolved reference (??): missing label or the document was not compiled again.",
+    },
+    "unresolved_citation": {
+        "pl": "Niewygenerowany odnośnik do literatury ([?]): brak wpisu w bibliografii albo dokument nie został ponownie skompilowany.",
+        "en": "Unresolved citation ([?]): missing bibliography entry or the document was not compiled again.",
+    },
+}
+
 
 def _font_family(font):
     """Font name without style, size and subset prefix (TimesNewRomanPS-BoldMT -> timesnewromanps, CMBX12 -> cm),
@@ -364,6 +381,7 @@ class RedactionValidator:
             self.check_bekarts()
             self.check_szewce()
             self.check_bibliography()
+            self.check_unresolved_references()
             # self.check_korytarze()
             self.check_bibliography_summary()
             self.check_caption_sources()
@@ -835,6 +853,48 @@ class RedactionValidator:
         if words <= 0:
             return False
         return words == 1 or getattr(self, "widow_max_words", 2) >= 2
+    
+    def check_unresolved_references(self):
+        """
+        Finds cross-references and citations that LaTeX could not resolve: "w podrozdziale ??" (\\ref) and
+        "[?]", "[3, ?]" (\\cite). Such a reference is never caught by check_bibliography, which only knows numbers.
+        """
+        for block in self.document_data_linguistics.logical_blocks:
+            if getattr(block, "type", None) in UNRESOLVED_SKIPPED_TYPES or getattr(block, "is_bibliography", False):
+                continue
+            if getattr(block, "items", None):
+                targets = [(item.text, item.words) for item in block.items]
+            else:
+                targets = [(getattr(block, "content", ""), getattr(block, "words", []))]
+            for text, words in targets:
+                if not text or not words:
+                    continue
+                found = [(m, "unresolved_reference") for m in UNRESOLVED_REF.finditer(text)]
+                found += [(m, "unresolved_citation") for m in UNRESOLVED_CITE.finditer(text)]
+                for match, category in sorted(found, key=lambda f: f[0].start()):
+                    error = self._handle_unresolved_reference(match, category, words)
+                    if error:
+                        self.errors.append(error)
+
+    def _handle_unresolved_reference(self, match, category, words):
+        """Error for "??" or "[?]" at match, marked on the words it covers (on the page of the first one)."""
+        covered = [w for w in words if w.start_char < match.end() and w.end_char > match.start()]
+        if not covered:
+            logger.info("[DROPPED] %s text=%r reason=no word under the match", category, match.group())
+            return None
+        page = covered[0].page_number
+        boxes = [w.bbox for w in covered if w.page_number == page]
+        lang = "en" if getattr(self, "language", "pl") == "en" else "pl"
+        return Error(
+            id=self._get_next_id(),
+            module=self.module,
+            category=category,
+            page_number=page,
+            bounding_box=[min(b[0] for b in boxes), min(b[1] for b in boxes),
+                          max(b[2] for b in boxes), max(b[3] for b in boxes)],
+            text=match.group(),
+            comments=UNRESOLVED_COMMENTS[category][lang],
+        )
 
     def check_widows(self):
         """
