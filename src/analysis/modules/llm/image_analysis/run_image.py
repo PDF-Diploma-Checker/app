@@ -33,11 +33,15 @@ def _unreadable_entry(image_id, language):
     return {"obrazek": image_id, "odwolanie": "wystapilo", "poprawnosc_danych": "Unreadable", "bledy": image_text(language, "unreadable_figure")}
 
 
-def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
-    """Analyze image references and verify paragraph-to-image consistency."""
+def read_figures(doc_obj, mapped_doc, verbose=False, language="pl"):
+    """First half of the figure analysis: find the figures that the text refers to and read them with the vision model.
+
+    Needs only the vision model (about 5 GB of video memory), so it can run next to the text model of the other stages.
+    Returns a plain dict (it is passed between processes): `report` (entries of the figures that are already decided),
+    `images_with_refs`, `extracted` (what was read from each figure) and `printed` (the numbers printed in it)."""
     matcher = ReferenceMatcher()
     paragraphs, images = adapt_data_for_images(doc_obj, mapped_doc)
-    
+
     images_with_refs = []
     final_report = []
 
@@ -55,12 +59,14 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
             images_with_refs.append({"id": img["id"], "number": img["number"], "family": img["family"],
                                      "bytes": img["bytes"], "refs": refs})
 
-    if not images_with_refs:
-        return final_report
-
-    logger.info("Loading the vision model for image analysis (%d images)", len(images_with_refs))
     extracted_image_data = {}
     printed_numbers = {}
+    reading = {"report": final_report, "images_with_refs": images_with_refs,
+               "extracted": extracted_image_data, "printed": printed_numbers}
+    if not images_with_refs:
+        return reading
+
+    logger.info("Loading the vision model for image analysis (%d images)", len(images_with_refs))
 
     with VisionEngine("image_analysis") as engine:
         for idx, img in enumerate(images_with_refs, 1):
@@ -83,9 +89,21 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
                 # one unreadable figure must not cost the results of all the others
                 logger.exception("Could not read figure %s", img["id"])
                 final_report.append(_failed_entry(img["id"], language))
+    return reading
+
+
+def check_figures(reading, doc_obj, mapped_doc, verbose=False, language="pl"):
+    """Second half: compare the paragraphs that mention a figure with what was read from it (the text model, then the
+    vision model again for the statements about curves and diagrams). Returns the report entries of all the figures."""
+    final_report = list(reading["report"])
+    images_with_refs = reading["images_with_refs"]
+    extracted_image_data = reading["extracted"]
+    printed_numbers = reading["printed"]
 
     if not extracted_image_data:
         return final_report
+
+    _, images = adapt_data_for_images(doc_obj, mapped_doc)
 
     if verbose:
         logger.info("[AI] Ładowanie modelu sprawdzającego spójność (Gemma) do VRAM...")
@@ -130,6 +148,12 @@ def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
 
     final_report += _check_statements(statements, language, verbose)
     return final_report
+
+
+def analyze_images(doc_obj, mapped_doc, verbose=False, language="pl"):
+    """Analyze image references and verify paragraph-to-image consistency (both halves, one after the other)."""
+    reading = read_figures(doc_obj, mapped_doc, verbose=verbose, language=language)
+    return check_figures(reading, doc_obj, mapped_doc, verbose=verbose, language=language)
 
 
 def _check_statements(statements, language, verbose):
