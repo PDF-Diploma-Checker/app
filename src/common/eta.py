@@ -59,11 +59,11 @@ LOW_HIGH = {0: (0.6, 1.8), 1: (0.8, 1.35), 2: (0.8, 1.35)}      # range around t
 LOW_HIGH_MANY = (0.9, 1.15)
 
 # progress bar values at which the stages of run_task_llm() start (see app/llm_task.py STAGES)
-STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("images", 80), ("sota", 90), ("language_review", 95))
+STAGE_VALUES = (("purpose", 55), ("goal", 62), ("summaries", 70), ("sota", 80), ("images", 90), ("language_review", 95))
 HISTORY_LIMIT = 60
 # raise it whenever raw_estimate() changes: real/predicted ratios measured against an older model would distort the
 # calibration, so only the runs recorded with the same model version are used
-MODEL_VERSION = 5
+MODEL_VERSION = 6
 
 
 @dataclass
@@ -198,11 +198,11 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
         # the stage lasts until the next one starts, so it also holds the review of the doubtful sections
         summaries = work(doc.sections * SECTION_PROMPT_TOKENS, doc.sections * SECTION_TOKENS)
         stages.append(("summaries", summaries + work(0, doc.sections * REVIEWED_SECTIONS * REVIEW_TOKENS)))
+    base, per_char = SOTA_TOKENS
+    stages.append(("sota", work(0, base + per_char * doc.chars)))
     if check_images and doc.figures:
         vision_load = VISION_GB * 1024 ** 3 / load
         stages.append(("images", VISION_LOADS * vision_load + gemma_load + doc.figures * FIGURE_TOKENS / gen))
-    base, per_char = SOTA_TOKENS
-    stages.append(("sota", work(0, base + per_char * doc.chars)))
     findings = doc.pages * LANGUAGE_FINDINGS_PER_PAGE
     stages.append(("language_review", work(findings * LANGUAGE_FINDING_PROMPT_TOKENS, findings * LANGUAGE_FINDING_TOKENS)))
     return stages
