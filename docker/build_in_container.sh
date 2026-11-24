@@ -43,3 +43,5 @@ TAG_ARGS=()
 [ -n "$TAG" ] && TAG_ARGS=(--tag "$TAG")
 "$PY" tools/prepare_release_assets.py "dist/$VARIANT/DiplomaChecker" --platform linux --variant "$VARIANT" \
   --out release_files ${TAG_ARGS[@]+"${TAG_ARGS[@]}"}
+# which modules the build holds: the next release is planned from it (patch or full build)
+"$PY" tools/list_bundled_modules.py "dist/$VARIANT/DiplomaChecker" --platform linux --variant "$VARIANT" --out release_files

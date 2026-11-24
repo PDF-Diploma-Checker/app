@@ -64,18 +64,24 @@ def bundled_modules(since):
     return names
 
 
-def needs_full_build(since, changes):
+def version_only_change(since, path):
+    """True when only the version number changed in `path` (pyproject.toml, uv.lock)."""
+    lines = git("diff", "--unified=0", since, "--", path).splitlines()
+    return not any(line[0] in "+-" and not line.startswith(("+++", "---", "+version = ", "-version = "))
+                   for line in lines if line)
+
+
+def needs_full_build(since, changes, bundled_names=None):
     """Why these changes cannot be patched into a build (a module that is not in it would only fail on the user's
-    computer)."""
+    computer). `bundled_names`: the modules the build really holds (tools/list_bundled_modules.py), when known; they
+    count as bundled besides the ones our code imported at `since`."""
     reasons = []
     bundled = None
     for status, path in changes:
         if path.startswith(IGNORED):
             continue
         if path in VERSION_ONLY:
-            lines = git("diff", "--unified=0", since, "--", path).splitlines()
-            if any(line[0] in "+-" and not line.startswith(("+++", "---", "+version = ", "-version = "))
-                   for line in lines if line):
+            if not version_only_change(since, path):
                 reasons.append(f"{path}: more than the version changed")
         elif status == "M" and path.startswith("src/") and path.endswith(".txt"):
             continue                    # a list of words: the build reads the file, a new copy just replaces it
@@ -83,7 +89,7 @@ def needs_full_build(since, changes):
             reasons.append(path)
         elif status != "D":
             if bundled is None:
-                bundled = bundled_modules(since)
+                bundled = bundled_modules(since) | set(bundled_names or ())
             # a module built into the interpreter is in every build, whatever our code imported at `since`
             new = external_imports((ROOT / path).read_text(encoding="utf-8")) - bundled - set(sys.builtin_module_names)
             if new:
