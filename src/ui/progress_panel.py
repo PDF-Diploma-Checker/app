@@ -49,6 +49,7 @@ class StageList(QWidget):
         self._predicted = dict(stages)
         for i, (key, _) in enumerate(stages):
             mark, name, time = QLabel(), QLabel(t(f"analysis.stage_{key}")), QLabel()
+            motion.tabular(time)
             mark.setFixedWidth(18)
             mark.setAlignment(Qt.AlignCenter)
             time.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -118,6 +119,7 @@ class _Meter(QWidget):
         self.label = QLabel(label)
         self.label.setStyleSheet(_LABEL)
         self.value = QLabel("–")
+        motion.tabular(self.value)
         self.value.setStyleSheet(_VALUE)
         self.value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         row.addWidget(self.label, 1)

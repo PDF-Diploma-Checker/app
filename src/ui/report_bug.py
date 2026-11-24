@@ -7,6 +7,7 @@ that checks size and rate limits and forwards it by e-mail. See relay/README.md.
 import io
 import logging
 import sys
+import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -113,8 +114,12 @@ def _error_text(status, response):
     return t("report.err_server", code=status)
 
 
-def _post_report(url, thesis_path, user_message):
-    """Collect the report and POST it to the relay. Raises ReportError on failure."""
+def _post_report(url, thesis_path, user_message, idempotency_key=None):
+    """Collect the report and POST it to the relay. Raises ReportError on failure.
+
+    idempotency_key: one per report. A retry of the same report (double click, resend after a timeout) sends the
+    same key, so a relay that honours it records the report only once."""
+    idempotency_key = idempotency_key or str(uuid.uuid4())
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     system_info = _build_system_info()
@@ -145,7 +150,7 @@ def _post_report(url, thesis_path, user_message):
     try:
         response = requests.post(
             url, data=data, files=files, timeout=REQUEST_TIMEOUT_S,
-            headers={"User-Agent": f"{APP_NAME}-report"},
+            headers={"User-Agent": f"{APP_NAME}-report", "Idempotency-Key": idempotency_key},
         )
     except requests.Timeout as e:
         raise ReportError(t("report.err_timeout")) from e
@@ -163,15 +168,16 @@ class ReportSender(QObject):
 
     finished = Signal(bool, str)
 
-    def __init__(self, url, thesis_path, user_message=""):
+    def __init__(self, url, thesis_path, user_message="", idempotency_key=None):
         super().__init__()
+        self.idempotency_key = idempotency_key
         self.url = url
         self.thesis_path = thesis_path
         self.user_message = user_message
 
     def run(self):
         try:
-            _post_report(self.url, self.thesis_path, self.user_message)
+            _post_report(self.url, self.thesis_path, self.user_message, self.idempotency_key)
         except ReportError as e:
             self.finished.emit(False, str(e))
             return
@@ -196,6 +202,7 @@ class ReportDialog(QDialog):
         self.setMinimumWidth(480)
 
         self.url = url
+        self.idempotency_key = str(uuid.uuid4())     # the same for every attempt of this dialog
         self.thesis_path = thesis_path
         self._thread = None
         self._sender = None
@@ -286,7 +293,8 @@ class ReportDialog(QDialog):
         self.send_btn.setText(t("report.sending"))
 
         self._thread = QThread(self)
-        self._sender = ReportSender(self.url, self.selected_thesis(), self.message_edit.toPlainText())
+        self._sender = ReportSender(self.url, self.selected_thesis(), self.message_edit.toPlainText(),
+                                    self.idempotency_key)
         self._sender.moveToThread(self._thread)
         self._thread.started.connect(self._sender.run)
         self._sender.finished.connect(self._on_finished)
