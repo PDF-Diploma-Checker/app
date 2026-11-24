@@ -175,25 +175,22 @@ def no_figure_checks(language="pl", failed=False):
     return {"image_analysis": summary, "jakosc_obrazkow": [], "czcionki_obrazkow": [], "osie_wykresow": []}
 
 
-def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token=None):
-    """The figure part of the result: what the vision model found in the figures and charts."""
-    from analysis.modules.llm.results_log import log_results
-
+def run_figure_reading(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token=None):
+    """First half of the figure checks, the one that needs only the vision model: reading the figures, the quality of
+    the images and the fonts in them. Returns a plain dict for run_figure_analysis (it may cross a process border)."""
     _stage(language, "images", cancel_token)
     analysis_failed = False
+    reading = None
 
     try:
-        from analysis.modules.llm.image_analysis.run_image import analyze_images
+        from analysis.modules.llm.image_analysis.run_image import read_figures
 
-        raw_image_report = analyze_images(doc_obj, mapped_doc, language=language)
+        reading = read_figures(doc_obj, mapped_doc, language=language)
     except Exception:
         logger.exception("Image consistency analysis failed")
-        raw_image_report = []
         analysis_failed = True
 
-    image_summary_data = build_image_summary(raw_image_report, language)
     check_cancelled(cancel_token)
-
     cleanup_text_llm_instances()
 
     try:
@@ -237,10 +234,37 @@ def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token
         analysis_failed = True
 
     cleanup_text_llm_instances()
+    return {"reading": reading, "quality_errors": quality_errors, "font_errors": font_errors,
+            "analysis_failed": analysis_failed}
+
+
+def run_figure_analysis(doc_obj, mapped_doc, figures, language="pl", cancel_token=None):
+    """Second half: what the text says about each figure against what was read from it (the text model needs the
+    video memory the vision model had). `figures` is the result of run_figure_reading. Returns the figure part of
+    the result."""
+    from analysis.modules.llm.results_log import log_results
+
+    _stage(language, "images", cancel_token)
+    analysis_failed = bool(figures.get("analysis_failed"))
+    reading = figures.get("reading")
+    raw_image_report = []
+
+    if reading is not None:
+        try:
+            from analysis.modules.llm.image_analysis.run_image import check_figures
+
+            raw_image_report = check_figures(reading, doc_obj, mapped_doc, language=language)
+        except Exception:
+            logger.exception("Image consistency analysis failed")
+            raw_image_report = []
+            analysis_failed = True
+
+    image_summary_data = build_image_summary(raw_image_report, language)
     check_cancelled(cancel_token)
+    cleanup_text_llm_instances()
 
     image_summary_data["analysis_failed"] = image_summary_data["analysis_failed"] or analysis_failed
-    cleanup_text_llm_instances()
+    quality_errors, font_errors = figures.get("quality_errors", []), figures.get("font_errors", [])
 
     log_results(
         "Figures",
@@ -252,6 +276,12 @@ def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token
             "czcionki_obrazkow": font_errors, "osie_wykresow": []}
 
 
+def run_figure_checks(doc_obj, mapped_doc, pdf_path, language="pl", cancel_token=None):
+    """The figure part of the result: what the vision model found in the figures and charts."""
+    figures = run_figure_reading(doc_obj, mapped_doc, pdf_path, language, cancel_token)
+    return run_figure_analysis(doc_obj, mapped_doc, figures, language, cancel_token)
+
+
 def run_figures(doc_obj, pdf_path, language="pl", cancel_token=None):
     """The figure checks alone, in their own AI process after the rest: when the vision model crashes there, the
     results of the text are already safe."""
@@ -261,6 +291,32 @@ def run_figures(doc_obj, pdf_path, language="pl", cancel_token=None):
     try:
         timer.next("figures")
         return run_figure_checks(doc_obj, PDFMapper().map_to_schema(doc_obj), pdf_path, language, cancel_token)
+    finally:
+        timer.finish()
+        cleanup_text_llm_instances()
+
+
+def run_figures_reading(doc_obj, pdf_path, language="pl", cancel_token=None):
+    """run_figure_reading alone, in its own AI process: it can run while the text stages use the text model."""
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
+
+    timer = StageTimer(logger, "LLM")
+    try:
+        timer.next("reading the figures")
+        return run_figure_reading(doc_obj, PDFMapper().map_to_schema(doc_obj), pdf_path, language, cancel_token)
+    finally:
+        timer.finish()
+        cleanup_text_llm_instances()
+
+
+def run_figures_analysis(doc_obj, pdf_path, figures, language="pl", cancel_token=None):
+    """run_figure_analysis alone, in its own AI process, after the text stages."""
+    from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
+
+    timer = StageTimer(logger, "LLM")
+    try:
+        timer.next("comparing the figures with the text")
+        return run_figure_analysis(doc_obj, PDFMapper().map_to_schema(doc_obj), figures, language, cancel_token)
     finally:
         timer.finish()
         cleanup_text_llm_instances()

@@ -32,6 +32,7 @@ from common.cancellation import AnalysisCancelled, CancelToken
 logger = logging.getLogger(__name__)
 
 STDERR_LOG_NAME = "llm_process.log"
+FIGURES_LOG_NAME = "llm_process_figures.log"   # the figures process that runs next to the text one has its own log
 _CANCEL_GRACE_S = 5.0          # after a cancel the process may still end on its own, then it is killed
 _TAIL_BYTES = 6000             # how much of llm_process.log goes into the app log after a crash
 _FONT_PATCH = "get_most_common_font_size"
@@ -47,9 +48,9 @@ def patch_most_common_font_size(doc_obj):
     )
 
 
-def stderr_log_path():
+def stderr_log_path(name=STDERR_LOG_NAME):
     from common.logging_setup import get_log_dir
-    return get_log_dir() / STDERR_LOG_NAME
+    return get_log_dir() / name
 
 
 # =========================================================================== child process
@@ -154,7 +155,8 @@ def _simulate_crash(kind, send):
     os.abort()
 
 
-def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job="analysis"):
+def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job="analysis",
+                extra=None):
     """Entry point of the AI process."""
     lock = threading.Lock()
 
@@ -219,6 +221,16 @@ def _child_main(conn, cancel_event, payload, pdf_path, language, check_images, g
         if job == "figures":
             from app.llm_task import run_figures
             send(("result", run_figures(doc_obj, pdf_path, language, token)))
+            return
+
+        if job == "figures_read":
+            from app.llm_task import run_figures_reading
+            send(("result", run_figures_reading(doc_obj, pdf_path, language, token)))
+            return
+
+        if job == "figures_check":
+            from app.llm_task import run_figures_analysis
+            send(("result", run_figures_analysis(doc_obj, pdf_path, extra, language, token)))
             return
 
         from app.llm_task import run_task_llm
@@ -402,17 +414,19 @@ class _Outcome:
         self.kind, self.value, self.detail = kind, value, detail
 
 
-def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_token, job="analysis"):
-    """Run the AI part in a child process once. Returns an _Outcome: result / error / crash. Raises on a cancel."""
+def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_token, job="analysis", extra=None,
+              quiet=False, stderr_name=STDERR_LOG_NAME):
+    """Run the AI part in a child process once. Returns an _Outcome: result / error / crash. Raises on a cancel.
+    quiet: its status lines are not shown (a process running next to the main one would confuse the progress view)."""
     import multiprocessing
 
     ctx = multiprocessing.get_context("spawn")
     receiver, sender = ctx.Pipe(duplex=False)
     cancel_event = ctx.Event()
-    stderr_path = str(stderr_log_path())
+    stderr_path = str(stderr_log_path(stderr_name))
     process = ctx.Process(
         target=_child_main, name="llm-worker",
-        args=(sender, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job),
+        args=(sender, cancel_event, payload, pdf_path, language, check_images, gpu_layers, stderr_path, job, extra),
     )
     process.start()
     sender.close()              # only the child writes: the pipe reports EOF once the child is gone
@@ -443,6 +457,8 @@ def _run_once(payload, pdf_path, language, check_images, gpu_layers, cancel_toke
                 _, value, text = message
                 if text:
                     last_status = text
+                if quiet:
+                    continue
                 try:
                     run_control.notify(text, None if value is None or value < 0 else value)
                 except AnalysisCancelled:
@@ -497,37 +513,148 @@ def run_language_review_isolated(matches, language="pl", cancel_token=None):
     return matches
 
 
-def run_figures_isolated(payload, pdf_path, language, layers, cancel_token=None):
-    """The figure checks in their own process, after the text. When it crashes they run once more with the model and
-    its projector on the processor: slower, but a card short of memory cannot abort them there. The results of the
-    text are kept either way."""
-    from app.llm_task import no_figure_checks
+# what the text model and the vision model take of the video memory (MB), to see whether they fit together
+_TEXT_BASE_MB, _TEXT_ALL_LAYERS_MB, _VISION_MB, _OVERLAP_MARGIN_MB = 1200, 7300, 5300, 600
+_MODEL_LAYERS = 49
+
+
+def overlap_needs_mb(layers):
+    """Video memory needed to read the figures next to the text stages: the text model with `layers` layers on the
+    card (-1: all) plus the vision model."""
+    share = 1.0 if layers < 0 else min(layers / _MODEL_LAYERS, 1.0)
+    return _TEXT_BASE_MB + _TEXT_ALL_LAYERS_MB * share + _VISION_MB + _OVERLAP_MARGIN_MB
+
+
+def can_overlap_figures(layers, free_mb=None):
+    """True when the vision model fits next to the text model: then reading the figures runs at the same time as the
+    text stages instead of after them (the card is far from busy during the text stages). `free_mb`: free video memory,
+    read from nvidia-smi when not given."""
+    if not layers:
+        return False
+    if free_mb is None:
+        gpu = _gpu_facts()
+        if not gpu:
+            return False
+        free_mb = gpu["vram_gb"] * 1024 - gpu.get("used_mb", 0)
+    return free_mb >= overlap_needs_mb(layers)
+
+
+class _LinkedToken:
+    """Cancelled when the analysis is, or on its own (to stop work that is no longer needed)."""
+
+    def __init__(self, parent):
+        self._parent = parent
+        self._own = False
+
+    def cancel(self):
+        self._own = True
+
+    def is_cancelled(self):
+        return self._own or (self._parent is not None and self._parent.is_cancelled())
+
+
+class _Background:
+    """A job in a thread next to the main one; `wait()` returns its value or raises what it raised."""
+
+    def __init__(self, target, parent_token, name):
+        self.token = _LinkedToken(parent_token)
+        self._value = None
+        self._error = None
+        self._thread = threading.Thread(target=self._run, args=(target,), name=name, daemon=True)
+        self._thread.start()
+
+    def _run(self, target):
+        try:
+            self._value = target(self.token)
+        except BaseException as error:
+            self._error = error
+
+    def wait(self):
+        self._thread.join()
+        if self._error is not None:
+            raise self._error
+        return self._value
+
+    def stop(self):
+        self.token.cancel()
+        self._thread.join(timeout=_CANCEL_GRACE_S * 3)
+
+
+def _figure_job(job, payload, pdf_path, language, layers, cancel_token, extra=None, quiet=False):
+    """One half of the figure checks in its own process. When it crashes it runs once more with the models on the
+    processor: slower, but a card short of memory cannot abort them there. Returns the result, or None."""
     from ui.i18n import t
 
+    log_name = FIGURES_LOG_NAME if quiet else STDERR_LOG_NAME      # two processes must not write one log
     while True:
-        outcome = _run_once(payload, pdf_path, language, True, layers, cancel_token, job="figures")
+        outcome = _run_once(payload, pdf_path, language, True, layers, cancel_token, job=job, extra=extra, quiet=quiet,
+                            stderr_name=log_name)
         if outcome.kind == "result":
             return outcome.value
         if outcome.kind == "error":
-            logger.error("The figure checks reported an error: %s\n%s", outcome.value, outcome.detail)
-            break
+            logger.error("The figure checks (%s) reported an error: %s\n%s", job, outcome.value, outcome.detail)
+            return None
         exit_text = describe_exit_code(outcome.value)
-        logger.error("The figure checks crashed: exit code %s, GPU layers %s, last status %r.\nLast lines of %s:\n%s",
-                     exit_text, layers, outcome.detail or "?", stderr_log_path(), read_tail(stderr_log_path()))
+        logger.error("The figure checks (%s) crashed: exit code %s, GPU layers %s, last status %r.\nLast lines of %s:\n%s",
+                     job, exit_text, layers, outcome.detail or "?", stderr_log_path(log_name),
+                     read_tail(stderr_log_path(log_name)))
         if not layers:
-            break
+            return None
         logger.warning("Checking the figures again with the model on the processor")
-        run_control.notify(t("llm_error.figures_on_cpu"))
+        if not quiet:
+            run_control.notify(t("llm_error.figures_on_cpu"))
         layers = 0
-    _report("llm_error.title", t("llm_error.figures_failed", log=stderr_log_path()))
-    return no_figure_checks(language, failed=True)
+
+
+def run_figures_isolated(payload, pdf_path, language, layers, cancel_token=None, reading=None):
+    """The figure checks after the text, in two processes one after the other (the vision model alone, then the text
+    model for the comparison with the text): the first half may already be done, passed in `reading`, when it ran next
+    to the text stages. When a half fails the figures are reported as not checked; the text results are kept."""
+    from app.llm_task import STAGES, no_figure_checks
+    from ui.i18n import t
+
+    if reading is None:
+        reading = _figure_job("figures_read", payload, pdf_path, language, layers, cancel_token)
+    else:
+        run_control.notify(t("progress.stage_images"), STAGES["images"])
+    result = None
+    if reading is not None:
+        result = _figure_job("figures_check", payload, pdf_path, language, layers, cancel_token, extra=reading)
+    if result is None:
+        _report("llm_error.title", t("llm_error.figures_failed", log=stderr_log_path()))
+        return no_figure_checks(language, failed=True)
+    return result
 
 
 def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_images=True, cancel_token=None):
-    """app.llm_task.run_task_llm in a separate process; a native crash there does not end the app."""
+    """app.llm_task.run_task_llm in a separate process; a native crash there does not end the app.
+
+    When the video memory holds the text model and the vision model together, the figures are read in a second process
+    at the same time as the text stages run (see can_overlap_figures)."""
     if not use_llm:
         return None, None, "Tryb Szybki."
 
+    from analysis.modules.llm import config
+
+    layers = config.N_GPU_LAYERS
+    payload = _serialize(doc_obj)
+    background = None
+    if check_images and can_overlap_figures(layers):
+        logger.info("The figures are read next to the text stages (the video memory holds both models)")
+        background = _Background(
+            lambda token: _figure_job("figures_read", payload, pdf_path, language, layers, token, quiet=True),
+            cancel_token, "figures-read")
+    elif check_images and layers:
+        logger.info("The figures are read after the text stages: the video memory does not hold both models "
+                    "(needs about %.0f GB free)", overlap_needs_mb(layers) / 1024)
+    try:
+        return _run_task_llm_isolated(payload, pdf_path, language, check_images, cancel_token, background)
+    finally:
+        if background is not None:
+            background.stop()
+
+
+def _run_task_llm_isolated(payload, pdf_path, language, check_images, cancel_token, background):
     from analysis.modules.llm import config
     from ui.i18n import t
 
@@ -536,7 +663,6 @@ def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_
     if warning:
         _report("llm_error.title_layers", warning, popup=False)
 
-    payload = _serialize(doc_obj)
     attempts = 0
     while True:
         attempts += 1
@@ -555,7 +681,8 @@ def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_
             elif attempts > 1:
                 _report("llm_error.title_recovered", t("llm_error.recovered", layers=_layers_text(layers)))
             if isinstance(data, dict) and check_images and not data.get("analysis_error"):
-                data.update(run_figures_isolated(payload, pdf_path, language, layers, cancel_token))
+                reading = background.wait() if background is not None else None
+                data.update(run_figures_isolated(payload, pdf_path, language, layers, cancel_token, reading))
             return tuple(result)
 
         if outcome.kind == "error":
