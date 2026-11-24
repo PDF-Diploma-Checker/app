@@ -1037,6 +1037,7 @@ class PDFReader(QMainWindow):
             return
 
         self.current_pdf_path = path
+        self.pdf_view.set_source_path(path)
         self.document.load(path)
 
         if self.document.status() == QPdfDocument.Status.Ready:
