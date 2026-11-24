@@ -21,6 +21,7 @@ from . import icons, motion, report_panel, report_pdf, styles
 from .i18n import current_locale, language_signals, set_locale, t
 from .language_switch import LanguageSwitch
 from .analysis_dialog import AnalysisDialog
+from .assistant_panel import AssistantController, AssistantPanel
 from .log_window import LogWindow
 from .message_box import MessageBox
 from .report_bug import send_report
@@ -146,6 +147,7 @@ class PDFReader(QMainWindow):
 
     def closeEvent(self, event):
         self._remember_view()
+        self.assistant.shutdown()
         super().closeEvent(event)
 
     def prefetch_document(self, path):
@@ -278,6 +280,7 @@ class PDFReader(QMainWindow):
         errors = self.manager.get_errors(path)
         if errors:
             self.pdf_view.add_errors(errors, lang=lang)
+        self.assistant.set_document(path, report_data)
         self._build_report_now()
         self._restore_view(path)
         self.doc_skeleton.hide()
@@ -353,6 +356,11 @@ class PDFReader(QMainWindow):
         self.pdf_view.customContextMenuRequested.connect(self.add_comment)
         self.pdf_view.commentAdded.connect(self.save_custom_comment)
         self.pdf_view.commentDeleted.connect(self.delete_custom_comment)
+
+        # the thesis assistant (GPU mode): a round button in the bottom-right corner of the preview
+        self.assistant_panel = AssistantPanel(self.pdf_view)
+        self.assistant_panel.follow(self.pdf_view)
+        self.assistant = AssistantController(self.assistant_panel, self.pdf_view)
 
         self.right_panel = QWidget()
         self.right_panel.setObjectName("RightPanel")
@@ -556,10 +564,12 @@ class PDFReader(QMainWindow):
         """Imports a new document into the index manager, loads its content,
         and switches the active UI view stack to the PDF reader interface."""
         self.overlay.show()
+        self.assistant.suspend()            # the analysis needs the video memory of the assistant
         dialog = AnalysisDialog(path, self)
         result = dialog.exec()
 
         self.overlay.hide()
+        self.assistant.resume()
 
         if result == QDialog.Accepted:
             self.load_pdf(path)
@@ -584,6 +594,7 @@ class PDFReader(QMainWindow):
 
             self.manager.save_errors(path, errors)
             self.manager.save_ai_result(path, report_data)
+            self.assistant.set_document(path, report_data)
 
             motion.fade_to(self.stack, 1)
 

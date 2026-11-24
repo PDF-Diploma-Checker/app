@@ -472,6 +472,12 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "r2": r2,
             "r3": r3,
             "content_grade": content_grade_dict,
+            # for the thesis assistant: questions about the whole thesis are answered with these
+            "section_summaries": [
+                {"display": str(item.get("display") or ""), "summary": str(item.get("summary") or "")}
+                for item in (summaries or [])
+                if item.get("summary") and not str(item.get("summary")).startswith("[")
+            ],
             **figures,
         }
 
