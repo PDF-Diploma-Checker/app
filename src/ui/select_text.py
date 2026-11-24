@@ -11,6 +11,7 @@ from common.findings import assign_finding_ids, finding_kind, finding_label
 
 from . import styles
 from .i18n import t
+from .word_selection import select_words
 
 TOOLTIP_LANG = {
     "pl": {
@@ -172,11 +173,32 @@ class SelectablePdfView(QPdfView):
         self.selection_pdf_rect = None 
         self.selection_page_idx = -1
         self.selected_text = ""
-        
+        self._source_path = None
+        self._words_cache = {}
+
         self.verticalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.horizontalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.verticalScrollBar().valueChanged.connect(self.update_markers_pos)
         self.horizontalScrollBar().valueChanged.connect(self.update_markers_pos)
+
+    def set_source_path(self, path):
+        """The PDF file shown: its words (with their exact positions) are read from it for the selection."""
+        self._source_path = path
+        self._words_cache = {}
+
+    def _page_words(self, index):
+        """Words of a page as PyMuPDF tuples (x0, y0, x1, y1, text, block, line, word); None when unreadable."""
+        if index not in self._words_cache:
+            words = None
+            if self._source_path:
+                try:
+                    import fitz
+                    with fitz.open(self._source_path) as pdf:
+                        words = pdf[index].get_text("words")
+                except Exception:
+                    words = None
+            self._words_cache[index] = words
+        return self._words_cache[index]
 
     def clear_markers(self):
         """Removes all error marker"""
@@ -456,23 +478,39 @@ class SelectablePdfView(QPdfView):
                 self.selection_page_idx = i
                 self.selection_pdf_rect = QRectF(start_x, start_y, end_x - start_x, end_y - start_y)
                 
-                collected_lines = []
-                current_scan_y = start_y
-                while current_scan_y <= end_y:
-                    pt_start = QPointF(max(0, start_x), current_scan_y)
-                    pt_end = QPointF(min(size_pt.width(), end_x), current_scan_y)
-                    selection = doc.getSelection(i, pt_start, pt_end)
-                    
-                    if selection and selection.text():
-                        chunk = selection.text().strip()
-                        if chunk and (not collected_lines or collected_lines[-1] != chunk):
-                            collected_lines.append(chunk)
-                    current_scan_y += 4.0 
-                
-                self.selected_text = " ".join(collected_lines)
+                words = self._page_words(i)
+                if words is not None:
+                    # The words whose centre is in the drawn rectangle. The box is then drawn around exactly these
+                    # words, so what is outlined is what is selected (before, the outline stayed where the mouse
+                    # was and the text snapped to the nearest letters, sometimes to nothing).
+                    text, bounds = select_words(words, (start_x, start_y, end_x, end_y))
+                    self.selected_text = text
+                    if bounds:
+                        pad = 1.0
+                        self.selection_pdf_rect = QRectF(bounds[0] - pad, bounds[1] - pad,
+                                                         bounds[2] - bounds[0] + 2 * pad,
+                                                         bounds[3] - bounds[1] + 2 * pad)
+                else:
+                    self.selected_text = self._scan_text(doc, i, size_pt, start_x, end_x, start_y, end_y)
                 self.update_selection_box_pos()
                 break
             current_y_px += page_h_px + self.pageSpacing()
+
+    @staticmethod
+    def _scan_text(doc, page, size_pt, start_x, end_x, start_y, end_y):
+        """Fallback when the words cannot be read from the file: the text line by line from QPdfDocument."""
+        collected_lines = []
+        current_scan_y = start_y
+        while current_scan_y <= end_y:
+            pt_start = QPointF(max(0, start_x), current_scan_y)
+            pt_end = QPointF(min(size_pt.width(), end_x), current_scan_y)
+            selection = doc.getSelection(page, pt_start, pt_end)
+            if selection and selection.text():
+                chunk = selection.text().strip()
+                if chunk and (not collected_lines or collected_lines[-1] != chunk):
+                    collected_lines.append(chunk)
+            current_scan_y += 4.0
+        return " ".join(collected_lines)
 
     def show_context_menu(self, global_pos):
         """Displays a pop-up context menu."""
