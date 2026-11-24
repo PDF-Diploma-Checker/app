@@ -6,6 +6,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+FIGURE_MAX_PAGE_SHARE = 0.6     # a drawing bigger than this part of the page is a frame or a background, not a figure
+
+
+def _inside_any(bbox, boxes):
+    """True when the centre of `bbox` lies inside one of `boxes`."""
+    if not bbox or len(bbox) != 4:
+        return False
+    x, y = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
+    return any(box[0] <= x <= box[2] and box[1] <= y <= box[3] for box in boxes)
+
 @dataclass
 class TextSpan:
     span_id: int
@@ -155,31 +165,55 @@ class DocumentData:
             logger.error(f"Error calculating page count: {e}")
             return max(0, len(self.pages) - 1)
 
-    # zwraca słownik z nazwami czcionek i ich ilością wystąpień
+    @staticmethod
+    def _figure_boxes(page):
+        """Areas of the page taken by figures and charts (raster and vector): the text inside them is the text of the
+        figure, not of the thesis. A drawing that covers most of the page (a frame, a background) is not a figure."""
+        boxes = []
+        page_area = (page.width or 0) * (page.height or 0)
+        for image in getattr(page, "images", None) or []:
+            box = getattr(image, "bbox", None)
+            if not box or len(box) != 4:
+                continue
+            area = max(box[2] - box[0], 0) * max(box[3] - box[1], 0)
+            if page_area and area > FIGURE_MAX_PAGE_SHARE * page_area:
+                continue
+            boxes.append(box)
+        return boxes
+
+    def _body_spans(self):
+        """The text spans of the thesis itself: those inside a figure or a chart are left out, so that the fonts and the
+        font sizes of a chart (often another font family and smaller) do not count as the fonts of the thesis."""
+        for page in self.pages:
+            boxes = self._figure_boxes(page)
+            for block in page.text_blocks:
+                for line in block.lines:
+                    for span in line.spans:
+                        if boxes and _inside_any(span.bbox, boxes):
+                            continue
+                        yield span
+
+    # zwraca słownik z nazwami czcionek i ich ilością wystąpień (bez tekstu w rysunkach i wykresach)
     def get_font_usage(self) -> Dict[str, int]:
-        """This function returns a dictionary with font names as keys and their occurrence counts as values."""
+        """This function returns a dictionary with font names as keys and their occurrence counts as values.
+        The text inside figures and charts is not counted."""
         try:
             font_usage = {}
-            for page in self.pages:
-                for block in page.text_blocks:
-                    for line in block.lines:
-                        for span in line.spans:
-                            font_usage[span.font] = font_usage.get(span.font, 0) + 1
+            for span in self._body_spans():
+                font_usage[span.font] = font_usage.get(span.font, 0) + 1
             return font_usage
         except Exception as e:
             logger.error(f"Error getting font usage: {e}")
             return {}
 
-    # zwraca słownik z rozmiarami czcionek i ich ilością wystąpień
+    # zwraca słownik z rozmiarami czcionek i ich ilością wystąpień (bez tekstu w rysunkach i wykresach)
     def get_font_size_usage(self) -> Dict[float, int]:
-        """This function returns a dictionary with font sizes as keys and their occurrence counts as values."""
+        """This function returns a dictionary with font sizes as keys and their occurrence counts as values.
+        The text inside figures and charts is not counted."""
         try:
             font_usage = {}
-            for page in self.pages:
-                for block in page.text_blocks:
-                    for line in block.lines:
-                        for span in line.spans:
-                            font_usage[span.size] = font_usage.get(span.size, 0) + 1
+            for span in self._body_spans():
+                font_usage[span.size] = font_usage.get(span.size, 0) + 1
             return font_usage
         except Exception as e:
             logger.error(f"Error getting font size usage: {e}")
