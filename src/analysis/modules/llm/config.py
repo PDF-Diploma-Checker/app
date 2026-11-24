@@ -4,6 +4,7 @@ Never import llama_cpp / torch / huggingface_hub at module level:
 the base build ships without them.
 """
 
+import contextlib
 import errno
 import getpass
 import functools
@@ -31,6 +32,17 @@ EMBEDDING_REPO_PREFIX = "sentence-transformers/"
 
 GEMMA_REPO = "nocturne23/gemma-3-12b-it-Q4_K_M-GGUF"
 GEMMA_FILE = "gemma-3-12b-it-q4_k_m.gguf"  # exact name from the repo (case matters on Linux)
+GEMMA_SUBDIR = "gemma3_12b"
+# The light profile: the whole analysis on the small Gemma 3 4B (a third of the download, about twice as fast, less
+# accurate). The model that reviews the language findings is not used with it until it is shown to be reliable there.
+LIGHT_REPO = "ggml-org/gemma-3-4b-it-GGUF"
+LIGHT_FILE = "gemma-3-4b-it-Q4_K_M.gguf"
+LIGHT_SUBDIR = "gemma3_4b"
+PROFILES = ("full", "light")
+DEFAULT_PROFILE = "full"
+LANGUAGE_REVIEW_PROFILES = ("full",)        # the profiles in which the text model reviews the language findings
+GOAL_CHECK_PROFILES = ("full",)             # ... and rates how well the thesis achieves its purpose (the small model
+                                            # described a robot that the end of the thesis does not mention)
 VISION_REPO = "unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
 VISION_FILE = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
 VISION_MMPROJ_FILE = "mmproj-F16.gguf"
@@ -54,9 +66,27 @@ def _default_device():
         return "cpu"
 
 
+def text_model_path(model_dir, profile):
+    """Where the text model of `profile` lies in `model_dir`."""
+    if profile == "light":
+        return Path(model_dir) / LIGHT_SUBDIR / LIGHT_FILE
+    return Path(model_dir) / GEMMA_SUBDIR / GEMMA_FILE
+
+
+def language_review_enabled(profile=None):
+    """Whether the text model reviews the language findings (with the light model all of them stay)."""
+    return (profile or MODEL_PROFILE) in LANGUAGE_REVIEW_PROFILES
+
+
+def goal_check_enabled(profile=None):
+    """Whether the text model rates the realization of the purpose of the thesis."""
+    return (profile or MODEL_PROFILE) in GOAL_CHECK_PROFILES
+
+
 def default_config():
     device = _default_device()
     return {
+        "model_profile": DEFAULT_PROFILE,
         "device": device,
         "n_gpu_layers": 25 if device == "cuda" else 0,
         "model_dir": "",                    # empty = the default folder (see default_model_dir())
@@ -66,10 +96,12 @@ def default_config():
     }
 
 
-def _models_present(model_dir):
-    """True when `model_dir` holds the Gemma model. Only that counts: a folder of an earlier version must stay in use
-    when the vision model changes, otherwise 8 GB would be downloaded again next to the missing file."""
-    return (Path(model_dir) / "gemma3_12b" / GEMMA_FILE).is_file()
+def _models_present(model_dir, profile=None):
+    """True when `model_dir` holds the Gemma model of `profile` (of any profile when none is given). Only that
+    counts: a folder of an earlier version must stay in use when the vision model changes, otherwise 8 GB would be
+    downloaded again next to the missing file."""
+    profiles = (profile,) if profile else PROFILES
+    return any(text_model_path(model_dir, p).is_file() for p in profiles)
 
 
 def default_model_dir():
@@ -138,13 +170,13 @@ def load_config():
 
 # module-level names of this file that other modules copy with "from ...config import NAME"
 _EXPORTED = (
-    "DEVICE", "N_GPU_LAYERS", "MODEL_DIR", "LANGUAGE", "EMBEDDING_MODEL", "MODEL_PATH",
+    "MODEL_PROFILE", "DEVICE", "N_GPU_LAYERS", "MODEL_DIR", "LANGUAGE", "EMBEDDING_MODEL", "MODEL_PATH",
     "VISION_MODEL_PATH", "VISION_MMPROJ_PATH", "EMBEDDING_DIR", "OUTPUT_DIR", "THESIS_PATH",
 )
 
 
 def _apply(cfg):
-    global DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL, EMBEDDING_DIR
+    global MODEL_PROFILE, DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL, EMBEDDING_DIR
     global MODEL_PATH, VISION_MODEL_PATH, VISION_MMPROJ_PATH, OUTPUT_DIR, THESIS_PATH
 
     DEVICE = str(cfg.get("device", "cpu")).lower().strip()
@@ -158,7 +190,8 @@ def _apply(cfg):
     LANGUAGE = str(cfg.get("language", "pl")).lower().strip()
     EMBEDDING_MODEL = str(cfg.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
 
-    MODEL_PATH = MODEL_DIR / "gemma3_12b" / GEMMA_FILE
+    MODEL_PROFILE = cfg.get("model_profile") if cfg.get("model_profile") in PROFILES else DEFAULT_PROFILE
+    MODEL_PATH = text_model_path(MODEL_DIR, MODEL_PROFILE)
     VISION_MODEL_PATH = MODEL_DIR / VISION_SUBDIR / VISION_FILE
     VISION_MMPROJ_PATH = MODEL_DIR / VISION_SUBDIR / VISION_MMPROJ_FILE
     EMBEDDING_DIR = MODEL_DIR / "embeddings" / EMBEDDING_MODEL.split("/")[-1]
@@ -310,6 +343,42 @@ def _embedding_ignore_patterns(repo):
     return ignore
 
 
+@contextlib.contextmanager
+def cancellable_downloads():
+    """Make the Hugging Face downloads stop within a fraction of a second after a cancel.
+
+    huggingface_hub downloads a whole file (gigabytes for the models) in one call, so a cancel only took effect
+    between two files. While this is active: every chunk that arrives is a checkpoint (the progress bar of the
+    download raises the cancel), chunks are small (256 KB instead of 10 MB, which at a slow connection is seconds of
+    waiting for the next one) and the Xet transfer, whose Rust threads cannot be interrupted from Python, is off.
+    The part already downloaded stays in a .incomplete file and is continued next time."""
+    import sys
+    from huggingface_hub import constants
+    import huggingface_hub.utils.tqdm      # noqa: F401  (makes sure the module is loaded)
+
+    # the progress bar of a download is created in huggingface_hub/utils/tqdm.py (the name "huggingface_hub.utils.tqdm"
+    # in the package namespace is the class, the module itself is only in sys.modules)
+    bars = sys.modules["huggingface_hub.utils.tqdm"]
+    original_tqdm = bars.tqdm
+    original_chunk = constants.DOWNLOAD_CHUNK_SIZE
+    original_xet = getattr(constants, "HF_HUB_DISABLE_XET", False)
+
+    class CancellableTqdm(original_tqdm):
+        def update(self, n=1):
+            run_control.check_cancelled()
+            return super().update(n)
+
+    bars.tqdm = CancellableTqdm
+    constants.DOWNLOAD_CHUNK_SIZE = 256 * 1024
+    constants.HF_HUB_DISABLE_XET = True
+    try:
+        yield
+    finally:
+        bars.tqdm = original_tqdm
+        constants.DOWNLOAD_CHUNK_SIZE = original_chunk
+        constants.HF_HUB_DISABLE_XET = original_xet
+
+
 def download_ai_models_with_progress(progress_callback=None):
     """Download the optional AI models (only when the user asks for it).
 
@@ -328,35 +397,38 @@ def download_ai_models_with_progress(progress_callback=None):
             progress_callback(value, text)
 
     try:
-        if not MODEL_PATH.is_file():
-            run_control.check_cancelled()
-            report(15, t("progress.download_gemma"))
-            MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(repo_id=GEMMA_REPO, filename=GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
+        with cancellable_downloads():
+            if not MODEL_PATH.is_file():
+                run_control.check_cancelled()
+                light = MODEL_PROFILE == "light"
+                report(15, t("progress.download_gemma_light" if light else "progress.download_gemma"))
+                MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+                hf_hub_download(repo_id=LIGHT_REPO if light else GEMMA_REPO,
+                                filename=LIGHT_FILE if light else GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
 
-        VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        if not VISION_MODEL_PATH.is_file():
-            run_control.check_cancelled()
-            report(50, t("progress.download_vision"))
-            hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+            VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if not VISION_MODEL_PATH.is_file():
+                run_control.check_cancelled()
+                report(50, t("progress.download_vision"))
+                hf_hub_download(repo_id=VISION_REPO, filename=VISION_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
-        if not VISION_MMPROJ_PATH.is_file():
-            run_control.check_cancelled()
-            report(70, t("progress.download_projector"))
-            hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
+            if not VISION_MMPROJ_PATH.is_file():
+                run_control.check_cancelled()
+                report(70, t("progress.download_projector"))
+                hf_hub_download(repo_id=VISION_REPO, filename=VISION_MMPROJ_FILE, local_dir=str(VISION_MODEL_PATH.parent))
 
-        _remove_replaced_models()
+            _remove_replaced_models()
 
-        if embedding_path() is None:
-            run_control.check_cancelled()
-            report(80, t("progress.download_embedding"))
-            repo = _embedding_repo()
-            EMBEDDING_DIR.mkdir(parents=True, exist_ok=True)
-            snapshot_download(
-                repo_id=repo, local_dir=str(EMBEDDING_DIR), ignore_patterns=_embedding_ignore_patterns(repo),
-            )
+            if embedding_path() is None:
+                run_control.check_cancelled()
+                report(80, t("progress.download_embedding"))
+                repo = _embedding_repo()
+                EMBEDDING_DIR.mkdir(parents=True, exist_ok=True)
+                snapshot_download(
+                    repo_id=repo, local_dir=str(EMBEDDING_DIR), ignore_patterns=_embedding_ignore_patterns(repo),
+                )
 
-        report(90, t("progress.download_done"))
+            report(90, t("progress.download_done"))
     except run_control.AnalysisCancelled:
         raise
     except OSError as e:
