@@ -11,7 +11,9 @@ import re
 from collections import Counter
 
 from common.figure_findings import figure_details
-from common.findings import assign_finding_ids, finding_kind, finding_label, finding_text
+from common.findings import (
+    assign_finding_ids, finding_kind, finding_label, finding_text, margin_summary, page_ranges,
+)
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
@@ -365,6 +367,46 @@ def _figure_list(name, title, items, on_page):
     return toggle, details
 
 
+def _range_buttons(ranges, on_page):
+    """One button per run of pages ('p. 2-10', 'p. 14'): a click shows its first page. Pages are counted from 0 in the
+    findings, from 1 on the buttons."""
+    box = QWidget()
+    box.setStyleSheet("background: transparent;")
+    flow = _FlowLayout(box, spacing=6)
+    for start, end in ranges:
+        text = t("main.margins_range", start=start + 1, end=end + 1) if end > start else t("main.margins_page", page=start + 1)
+        button = QPushButton(text)
+        button.setCursor(Qt.PointingHandCursor)
+        button.setStyleSheet(
+            f"QPushButton {{ background-color: {styles.WARNING_BG}; color: {styles.WARNING}; "
+            "border: none; border-radius: 10px; padding: 3px 10px; font-size: 12px; font-weight: 700; }"
+        )
+        button.clicked.connect(lambda _checked=False, target=start: on_page(target))
+        flow.addWidget(button)
+    box.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+    return box
+
+
+def _margins_section(root, errors, on_page):
+    """Inconsistent margins: either the whole thesis is marked (most of the measured pages are wrong) or the pages, as
+    ranges. Not a marker on every page."""
+    summary = margin_summary(errors)
+    if summary is None:
+        return
+    root.addWidget(_section(t("main.margins_header")))
+    card, lay = _card()
+    pages, total = summary["pages"], summary["evaluated"]
+    if summary["whole"]:
+        percent = round(100 * len(pages) / total)
+        lay.addWidget(_note(t("main.margins_whole", percent=percent, bad=len(pages), total=total), "bad"))
+    else:
+        key = "main.margins_pages_of" if total else "main.margins_pages"
+        lay.addWidget(_note(t(key, bad=len(pages), total=total or 0), "warn"))
+        lay.addWidget(_label(t("main.margins_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
+        lay.addWidget(_range_buttons(page_ranges(pages), on_page))
+    root.addWidget(card)
+
+
 def _findings_section(root, errors, on_page):
     """How many findings the text has and where: the markers on the pages alone do not tell it."""
     root.addWidget(_section(t("main.findings_header")))
@@ -425,6 +467,7 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
         root.addWidget(_note(t("main.ai_gpu_fallback", layers=data["gpu_layers_fallback"]), "warn"))
     if errors is not None and (report_data is not None or errors):
         _findings_section(root, errors, on_page)
+        _margins_section(root, errors, on_page)
 
     # ---- content grade
     root.addWidget(_section(t("main.overall_grade")))
