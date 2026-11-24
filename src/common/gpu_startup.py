@@ -45,12 +45,12 @@ def gpu_mode_wanted(facts, cfg):
 
 def find_issues(facts, cfg):
     """Issues that stand in the way of the GPU mode, most fundamental first; [] when nothing is missing."""
-    if not gpu_mode_wanted(facts, cfg):
+    ai_runtime = bool(facts.get("ai_runtime"))
+    if not ai_runtime or not gpu_mode_wanted(facts, cfg):
+        # without the AI libraries this is the base build: it has no detailed mode at all, so there is nothing to set
+        # up (the analysis dialog already says the detailed mode is unavailable)
         return []
     issues = []
-    ai_runtime = bool(facts.get("ai_runtime"))
-    if not ai_runtime:
-        issues.append(Issue("runtime", {"cmd": setup_command()}))
 
     nvidia = facts.get("nvidia")
     free_vram = 0.0

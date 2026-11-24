@@ -132,15 +132,27 @@ class GpuStartupDialog(QDialog):
 
 
 def _show(window, issues):
+    """Not modal: the notice must never lock the window. A modal dialog that the window manager put behind the main
+    window (or on another screen) left the whole app unresponsive right after the launch."""
     dialog = GpuStartupDialog(issues, window)
-    dialog.exec()
-    if dialog.open_setup:
-        from .ai_setup_dialog import AiSetupDialog
-        from .model_download_dialog import download_models
-        setup = AiSetupDialog(window, first_run=False)
-        setup.exec()
-        if setup.saved and setup.download_requested:
-            download_models(window)
+    dialog.setModal(False)
+    dialog.setAttribute(Qt.WA_DeleteOnClose)
+    window._gpu_startup_dialog = dialog
+
+    def closed(_result):
+        window._gpu_startup_dialog = None
+        if dialog.open_setup:
+            from .ai_setup_dialog import AiSetupDialog
+            from .model_download_dialog import download_models
+            setup = AiSetupDialog(window, first_run=False)
+            setup.exec()
+            if setup.saved and setup.download_requested:
+                download_models(window)
+
+    dialog.finished.connect(closed)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
 
 
 def check_on_launch(window):
