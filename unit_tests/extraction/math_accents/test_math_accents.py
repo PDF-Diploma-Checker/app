@@ -111,6 +111,38 @@ class TestCombiningMarks(unittest.TestCase):
         self.assert_offsets(words, full_text)
 
 
+class TestAccentAfterAWord(unittest.TestCase):
+    '''PyMuPDF puts an accent drawn right after a word into that word ("gdzie" + hat of \\hat{\\mathbb{E}} = "gdziê").'''
+
+    @staticmethod
+    def block(*spans):
+        return {"lines": [{"spans": [{"text": text, "font": font, "bbox": bbox} for text, font, bbox in spans]}]}
+
+    def test_the_accent_moves_to_the_symbol_of_its_math_span(self):
+        from analysis.extraction.raw_extraction.text_extractor import move_math_accents_to_symbols
+        raw = self.block(("gdzie", "ArialMT", (85.0, 652.9, 108.8, 662.8)),
+                         (HAT + " \U0001D53C", MATH_FONT, (108.8, 652.5, 117.8, 662.5)),
+                         ("oznacza", "ArialMT", (124.2, 652.9, 161.3, 662.8)))
+        words = [(85.0, 652.5, 108.8, 662.8, "gdzie" + HAT, 0, 0, 0),
+                 (111.7, 652.5, 117.8, 662.5, "\U0001D53C", 0, 0, 1),
+                 (124.2, 652.9, 161.3, 662.8, "oznacza", 0, 0, 2)]
+        moved = move_math_accents_to_symbols(words, raw)
+        self.assertEqual([w[4] for w in moved], ["gdzie", "\U0001D53C" + HAT, "oznacza"])
+
+    def test_an_accent_of_a_formula_elsewhere_is_dropped_from_the_word(self):
+        from analysis.extraction.raw_extraction.text_extractor import move_math_accents_to_symbols
+        raw = self.block(("sumę ważoną wykładniczo:", "ArialMT", (85.0, 361.0, 266.0, 371.0)))
+        words = [(210.0, 360.0, 266.0, 371.0, "wykładniczo:" + HAT, 0, 0, 0)]
+        self.assertEqual(move_math_accents_to_symbols(words, raw)[0][4], "wykładniczo:")
+
+    def test_a_mark_in_the_text_font_stays(self):
+        from analysis.extraction.raw_extraction.text_extractor import move_math_accents_to_symbols
+        raw = self.block(("gdzie" + HAT, "ArialMT", (85.0, 652.9, 108.8, 662.8)),
+                         ("x", MATH_FONT, (111.0, 652.5, 117.8, 662.5)))
+        words = [(85.0, 652.5, 108.8, 662.8, "gdzie" + HAT, 0, 0, 0), (111.0, 652.5, 117.8, 662.5, "x", 0, 0, 1)]
+        self.assertEqual(move_math_accents_to_symbols(words, raw), words)
+
+
 class TestGeneratedPdfs(unittest.TestCase):
     '''Full extraction of PDFs built by different compilers.'''
 
