@@ -25,7 +25,7 @@ from .log_window import LogWindow
 from .message_box import MessageBox
 from .report_bug import send_report
 from .saving_files import SavingFiles
-from .select_text import CommentMarker, HighlightBox, SelectablePdfView
+from .select_text import CommentMarker, HighlightBox, SelectablePdfView, page_index
 from .start_page import StartPage
 
 logger = logging.getLogger(__name__)
@@ -724,34 +724,14 @@ class PDFReader(QMainWindow):
         tekst, ok = QInputDialog.getMultiLineText(self, t("main.own_comment_title"), t("main.own_comment_prompt"))
 
         if ok and tekst.strip():
-            aktualna_strona = self.pdf_view.pageNavigator().currentPage()
-            zoom = self.pdf_view.zoomFactor()
-
-            scroll_x = self.pdf_view.horizontalScrollBar().value()
-            scroll_y = self.pdf_view.verticalScrollBar().value()
-            dpi_x, dpi_y = self.pdf_view.logicalDpiX(), self.pdf_view.logicalDpiY()
-
-            doc = self.document
-            size_pt = doc.pagePointSize(aktualna_strona)
-            page_w_px = size_pt.width() * zoom * (dpi_x / 72.0)
-            viewport_w = self.pdf_view.viewport().width()
-
-            x_start_px = (
-                self.pdf_view.documentMargins().left()
-                if self.pdf_view.horizontalScrollBar().maximum() > 0
-                else (viewport_w - page_w_px) / 2
-            )
-
-            target_page_y_px = self.pdf_view.documentMargins().top()
-            for i in range(aktualna_strona):
-                page_size = doc.pagePointSize(i)
-                page_h_px = int((page_size.height() * zoom * (dpi_y / 72.0)) + 0.5)
-                target_page_y_px += page_h_px + self.pdf_view.pageSpacing()
-
-            pdf_x = ((pos.x() + scroll_x - x_start_px) / zoom) * (72.0 / dpi_x)
-            pdf_y = ((pos.y() + scroll_y - target_page_y_px) / zoom) * (72.0 / dpi_y)
+            # the page under the mouse (pos is in viewport coordinates), not the one at the top of the view
+            aktualna_strona = self.pdf_view._page_at(pos)
+            if aktualna_strona < 0:
+                return
+            pdf_x, pdf_y = self.pdf_view._to_pdf(aktualna_strona, pos)
 
             comment_data = {
+                "page": aktualna_strona,
                 "strona": aktualna_strona + 1,
                 "wspolrzedne": {"x": pdf_x, "y": pdf_y},
                 "tekst_komentarza": tekst.strip(),
@@ -894,7 +874,7 @@ class PDFReader(QMainWindow):
             saved_comments = self.manager.get_comments(self.current_pdf_path)
             for notatka in saved_comments:
                 try:
-                    page_idx = int(notatka.get("strona", 1))
+                    page_idx = page_index(notatka)
                     if 0 <= page_idx < len(doc):
                         page = doc[page_idx]
                         coords = notatka.get("wspolrzedne", {})
