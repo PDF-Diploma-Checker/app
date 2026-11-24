@@ -25,6 +25,16 @@ TOOLTIP_LANG = {
     }
 }
 
+def page_index(data):
+    """Page of a finding or a comment, counted from 0. Findings carry "page" (from 0). Comments carry "strona", the
+    page number counted from 1 (newer ones also "page"); it used to be read as an index, so a comment was drawn
+    and exported on the page after the one it was made on."""
+    if "page" in data:
+        return int(data["page"])
+    strona = int(data.get("strona", 1))
+    return strona - 1 if "tekst_komentarza" in data else strona
+
+
 _VISIBLE_MARGIN = 200      # pixels around the view where markers are already placed (no pop-in while scrolling)
 
 
@@ -320,7 +330,7 @@ class SelectablePdfView(QPdfView):
 
         def origin(data):
             """Pixel position of the page's coordinate (0, 0) in the viewport, or None for a missing page."""
-            page_idx = data.get("page", data.get("strona", 1))
+            page_idx = page_index(data)
             if page_idx < 0 or page_idx >= len(tops):
                 return None
             x_start = self.documentMargins().left() if has_hscroll else (viewport_w - widths[page_idx]) // 2
@@ -600,7 +610,8 @@ class SelectablePdfView(QPdfView):
         text, ok = QInputDialog.getText(self, t("pdf_menu.add_comment"), t("pdf_menu.comment_prompt"))
         if ok and text:
             comment_data = {
-                "strona": self.selection_page_idx + 1, 
+                "page": self.selection_page_idx,
+                "strona": self.selection_page_idx + 1,
                 "wspolrzedne": {
                     "x": self.selection_pdf_rect.x(), 
                     "y": self.selection_pdf_rect.y(),
