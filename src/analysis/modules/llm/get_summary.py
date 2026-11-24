@@ -12,7 +12,7 @@ for _p in (os.path.dirname(_src_dir), _src_dir):
 
 
 from analysis.extraction.helper_llm.extraction_json_llm import extractPDF_llm
-from analysis.extraction.helper_llm.get_subtitles import get_subtitles
+from analysis.extraction.helper_llm.get_subtitles import get_subtitles, has_enough_text
 
 from analysis.modules.llm.config import THESIS_PATH, MODEL_PATH, LANGUAGE, N_GPU_LAYERS
 from analysis.modules.llm.llama_factory import make_llama
@@ -171,7 +171,9 @@ def get_summaries(subtitles, language):
         if not display:
             display = f"{number or ''} {title or ''}".strip() or f"Sekcja {i}"
 
-        if not content:
+        if not has_enough_text(content):
+            # nothing to summarise: the model would invent a summary (a section of a thesis about a robot got one about
+            # patients with Parkinson's disease, and was then marked as off topic because of it)
             item = {
                 "index": i,
                 "number": number,
