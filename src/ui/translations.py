@@ -512,8 +512,8 @@ PL = {
         },
     },
     "gpu_startup": {
-        "title": "Tryb GPU nie jest jeszcze gotowy",
-        "intro": "Ta wersja aplikacji jest przeznaczona do pracy na karcie graficznej, ale na tym komputerze czegoś brakuje. Dopóki tego nie naprawisz, analiza AI będzie wolna albo nie ruszy.",
+        "title": "Tryb dokładny nie jest jeszcze gotowy",
+        "intro": "Tryb dokładny (analiza AI) działa na karcie graficznej, ale na tym komputerze czegoś mu brakuje. Dopóki tego nie naprawisz, analiza dokładna będzie wolna albo nie ruszy. Tryb szybki działa normalnie.",
         "guide": "Pełna instrukcja: <a href=\"{url}\">setup_guide.md</a>",
         "dont_remind": "Nie przypominaj mi o tym więcej",
         "later": "Zamknij",
@@ -1107,8 +1107,8 @@ EN = {
         },
     },
     "gpu_startup": {
-        "title": "GPU mode is not ready yet",
-        "intro": "This build of the app is meant to run on the graphics card, but something is missing on this computer. Until it is fixed, the AI analysis will be slow or will not start.",
+        "title": "Detailed mode is not ready yet",
+        "intro": "The detailed mode (AI analysis) runs on the graphics card, but something it needs is missing on this computer. Until it is fixed, the detailed analysis will be slow or will not start. The fast mode works as usual.",
         "guide": "Full instructions: <a href=\"{url}\">setup_guide.md</a>",
         "dont_remind": "Do not remind me about this again",
         "later": "Close",
