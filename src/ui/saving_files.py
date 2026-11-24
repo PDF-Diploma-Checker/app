@@ -103,6 +103,21 @@ class SavingFiles:
         ]
         self._save_to_disk(self.data)
 
+    def restore_document(self, entry, index):
+        """Put back an entry removed by delete_document (undo), at its old position."""
+        if any(doc.get("local_path") == entry.get("local_path") for doc in self.data["documents"]):
+            return
+        self.data["documents"].insert(min(index, len(self.data["documents"])), entry)
+        self._save_to_disk(self.data)
+
+    def take_document(self, path):
+        """Remove an entry and return (entry, position) so the caller can offer an undo."""
+        for position, doc in enumerate(self.data["documents"]):
+            if doc.get("local_path") == path:
+                self.delete_document(path)
+                return doc, position
+        return None, 0
+
     def _find(self, path):
         for doc in self.data["documents"]:
             if doc.get("local_path") == path:
