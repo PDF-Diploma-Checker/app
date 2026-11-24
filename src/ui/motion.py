@@ -68,7 +68,9 @@ class KeyboardFocusFilter(QObject):
     click leaves no outline behind, while Tab and arrows still show where the focus is."""
 
     def eventFilter(self, obj, event):
-        if (event.type() == QEvent.FocusIn and isinstance(obj, QAbstractButton)
+        # An application-wide filter sees every object, and PySide can hand over a stale wrapper for one of them
+        # (a QWidgetItem for a QObject): only trust a real button.
+        if (isinstance(obj, QAbstractButton) and event.type() == QEvent.FocusIn
                 and event.reason() == Qt.MouseFocusReason):
             QTimer.singleShot(0, obj.clearFocus)
         return False
@@ -91,8 +93,8 @@ def tabular(widget):
         for name in ("Roboto-Regular.ttf", "Roboto-Bold.ttf"):
             QFontDatabase.addApplicationFont(resource_path(os.path.join("ui", "assets", name)))
     widget.setProperty("tabular", True)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
+    if widget.isVisible():              # not yet shown: the property is read when it is polished anyway
+        widget.setStyleSheet(widget.styleSheet())
     return widget
 
 
@@ -365,6 +367,106 @@ def skeleton_report():
         lay.addWidget(card)
     lay.addStretch(1)
     return box
+
+
+class DocumentSkeleton(QWidget):
+    """What the reader shows while a document is being opened: whole sheets of paper, as large as the real pages will
+    be at the current zoom, with a title and paragraphs of grey lines. It is painted in one go (no widget per line)
+    and a soft highlight moves over it, like on the other skeletons."""
+
+    A4_WIDTH_PT, A4_RATIO = 595.0, 1.414
+    PAGE_GAP = 16
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, False)
+        self._phase = -0.3
+        self._anim = QPropertyAnimation(self, b"phase", self)
+        self._anim.setDuration(1500)
+        self._anim.setStartValue(-0.3)
+        self._anim.setEndValue(1.3)
+        self._anim.setLoopCount(-1)
+        parent.installEventFilter(self)
+
+    def _get_phase(self):
+        return self._phase
+
+    def _set_phase(self, value):
+        self._phase = value
+        self.update()
+
+    phase = Property(float, _get_phase, _set_phase)
+
+    def eventFilter(self, obj, event):
+        if obj is self.parentWidget() and event.type() == QEvent.Resize:
+            self.setGeometry(obj.rect())
+        return False
+
+    def cover(self, widget):
+        """Sit on top of `widget` and follow its size."""
+        self.setGeometry(widget.rect())
+        self.raise_()
+        self.show()
+        if animations_enabled():
+            self._anim.start()
+
+    def hideEvent(self, event):
+        self._anim.stop()
+        super().hideEvent(event)
+
+    def _page_size(self):
+        parent = self.parentWidget()
+        zoom = parent.zoomFactor() if hasattr(parent, "zoomFactor") else 1.0
+        dpi = parent.logicalDpiX() if parent is not None else 96
+        width = self.A4_WIDTH_PT * dpi / 72.0 * zoom
+        width = min(width, self.width() - 2 * self.PAGE_GAP)
+        return width, width * self.A4_RATIO
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.fillRect(self.rect(), QColor(styles.VIEWER_BG))
+        page_w, page_h = self._page_size()
+        if page_w <= 0:
+            return
+        bars = []                                       # every grey bar, to paint the highlight over them once
+        scale = page_w / 793.0
+        x0 = (self.width() - page_w) / 2.0
+        y = float(self.PAGE_GAP)
+        while y < self.height():
+            page = QRectF(x0, y, page_w, page_h)
+            p.fillRect(page, QColor(styles.SURFACE))
+            p.setPen(QPen(QColor(styles.BORDER), 1))
+            p.drawRect(page)
+            inner_l, inner_r = page.left() + page_w * 0.14, page.right() - page_w * 0.14
+            text_w = inner_r - inner_l
+            top = page.top() + page_h * 0.11
+            bottom = page.bottom() - page_h * 0.10
+            bars.append(QRectF(page.center().x() - text_w * 0.3, top, text_w * 0.6, 20 * scale))   # title
+            line_h, pitch = 9 * scale, 21 * scale
+            cursor, n = top + 70 * scale, 0
+            tails = (0.55, 0.8, 0.35, 0.65, 0.9)
+            while cursor + line_h < bottom:
+                paragraph = 5 + (n * 3) % 4
+                for i in range(paragraph):
+                    if cursor + line_h >= bottom:
+                        break
+                    last = i == paragraph - 1
+                    bars.append(QRectF(inner_l, cursor, text_w * (tails[n % len(tails)] if last else 1.0), line_h))
+                    cursor += pitch
+                cursor += pitch * 0.8
+                n += 1
+            y += page_h + self.PAGE_GAP
+        path = QPainterPath()
+        for rect in bars:
+            path.addRoundedRect(rect, rect.height() / 2, rect.height() / 2)
+        p.fillPath(path, QColor("#E9EDF2"))
+        grad = QLinearGradient(self.width() * (self._phase - 0.25), 0, self.width() * (self._phase + 0.25), 0)
+        grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+        grad.setColorAt(0.5, QColor(255, 255, 255, 200))
+        grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setClipPath(path)
+        p.fillRect(self.rect(), grad)
 
 
 # --------------------------------------------------------------------------- toast
