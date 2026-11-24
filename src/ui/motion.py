@@ -68,7 +68,9 @@ class KeyboardFocusFilter(QObject):
     click leaves no outline behind, while Tab and arrows still show where the focus is."""
 
     def eventFilter(self, obj, event):
-        if (event.type() == QEvent.FocusIn and isinstance(obj, QAbstractButton)
+        # An application-wide filter sees every object, and PySide can hand over a stale wrapper for one of them
+        # (a QWidgetItem for a QObject): only trust a real button.
+        if (isinstance(obj, QAbstractButton) and event.type() == QEvent.FocusIn
                 and event.reason() == Qt.MouseFocusReason):
             QTimer.singleShot(0, obj.clearFocus)
         return False
@@ -91,8 +93,8 @@ def tabular(widget):
         for name in ("Roboto-Regular.ttf", "Roboto-Bold.ttf"):
             QFontDatabase.addApplicationFont(resource_path(os.path.join("ui", "assets", name)))
     widget.setProperty("tabular", True)
-    widget.style().unpolish(widget)
-    widget.style().polish(widget)
+    if widget.isVisible():              # not yet shown: the property is read when it is polished anyway
+        widget.setStyleSheet(widget.styleSheet())
     return widget
 
 
@@ -365,6 +367,37 @@ def skeleton_report():
         lay.addWidget(card)
     lay.addStretch(1)
     return box
+
+
+class DocumentSkeleton(QWidget):
+    """What the reader shows while a document is being opened: the outline of a page with lines of text, in place of
+    an empty grey area that looks frozen."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(f"background-color: {styles.VIEWER_BG};")
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 24, 0, 0)
+        outer.setAlignment(Qt.AlignTop | Qt.AlignHCenter)
+        page = QFrame()
+        page.setFixedSize(460, 620)
+        page.setStyleSheet(f"background-color: {styles.SURFACE}; border: 1px solid {styles.BORDER}; border-radius: 2px;")
+        lay = QVBoxLayout(page)
+        lay.setContentsMargins(48, 56, 48, 48)
+        lay.setSpacing(12)
+        lay.addWidget(Skeleton(200, 18), 0, Qt.AlignHCenter)
+        lay.addSpacing(18)
+        for width in (None, None, None, 300, None, None, None, None, 240, None, None, 320):
+            lay.addWidget(Skeleton(width, 10))
+        lay.addStretch(1)
+        outer.addWidget(page)
+
+    def cover(self, widget):
+        """Sit on top of `widget` and follow its size."""
+        self.setGeometry(widget.rect())
+        self.raise_()
+        self.show()
 
 
 # --------------------------------------------------------------------------- toast

@@ -3,7 +3,7 @@ import os
 import threading
 
 import fitz
-from PySide6.QtCore import QEvent, QMargins, QPointF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QMargins, QObject, QPointF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
@@ -78,7 +78,6 @@ class PDFReader(QMainWindow):
         QApplication.instance().installEventFilter(self)
         self._focus_filter = motion.KeyboardFocusFilter(self)
         QApplication.instance().installEventFilter(self._focus_filter)
-        self._report_ready = True
 
         language_signals.changed.connect(self.retranslate_ui)
         self.retranslate_ui()
@@ -109,6 +108,8 @@ class PDFReader(QMainWindow):
 
     def eventFilter(self, obj, event):
         """The side 'back' button of a mouse goes back from the reader, as in a browser."""
+        if not isinstance(obj, QObject):        # a stale wrapper from PySide for an object that is none of ours
+            return False
         if (event.type() == QEvent.KeyPress and obj in getattr(self, "thumb_buttons", ())
                 and self._thumb_key(event)):
             return True
@@ -116,7 +117,7 @@ class PDFReader(QMainWindow):
                 and self.isActiveWindow() and self.stack.currentIndex() == 1):
             self.go_back()
             return True
-        return super().eventFilter(obj, event)
+        return False
 
     def _escape_back(self):
         """Esc goes back, unless it is meant for a text field (clearing or leaving it)."""
@@ -220,41 +221,62 @@ class PDFReader(QMainWindow):
             self.toasts.reposition()
 
     def open_existing_file(self, path):
-        """Loads an already listed file from the disk storage and transitions the interface view
-        into the reading/annotation viewport."""
+        """Opens a listed document. The reader appears at once with a skeleton of the page, the thumbnails and the
+        report; the document itself is parsed a moment later (a long thesis takes seconds, and an unchanged start
+        page for that long looks like a hang)."""
+        if not path or not os.path.exists(path):
+            MessageBox.critical(self, t("common.error"), t("main.file_not_found", path=path))
+            return
+        self._opening = path
+        self._begin_loading(path)
+        QTimer.singleShot(40, lambda p=path: self._finish_open(p))     # let the skeleton paint first
+
+    def _begin_loading(self, path):
+        self.current_pdf_path = path
+        self.title_label.setText(os.path.basename(path))
+        self.total_pages_label.setText(" / …")
+        self.page_input.setText("1")
+        self.pdf_view.clear_markers()
+        self.pdf_view.clear_comments()
+        for button in self.thumb_buttons:
+            self.thumb_group.removeButton(button)
+        self.thumb_buttons = []
+        for i in reversed(range(self.thumb_layout.count())):
+            widget = self.thumb_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        for _ in range(7):
+            self.thumb_layout.addWidget(motion.Skeleton(118, 160, 3), alignment=Qt.AlignHCenter)
+        self.doc_skeleton.cover(self.pdf_view)
+        # the verification panel shows a skeleton at once (a timer would not fire while the document is parsed)
+        self.report_scroll.setWidget(motion.skeleton_report())
+        motion.fade_to(self.stack, 1)
+
+    def _finish_open(self, path):
+        if getattr(self, "_opening", None) != path:         # another document was chosen meanwhile
+            return
         self.load_pdf(path)
-        if self.document.status() == QPdfDocument.Status.Ready:
-            report_data = None
-            for p in self.manager.data.get("documents", []):
-                if p.get("local_path") == path:
-                    report_data = p.get("sota_result")
-                    break
-
-            lang = report_data.get("language", "pl") if report_data else "pl"
-
-            errors = self.manager.get_errors(path)
-            if errors:
-                self.pdf_view.add_errors(errors, lang=lang)
-                if hasattr(self.pdf_view, "update_markers_pos"):
-                    self.pdf_view.update_markers_pos()
-                else:
-                    self.pdf_view.update()
-
-            # Show the reader at once. The saved report is built right after; only when that takes longer than
-            # 150 ms does a skeleton appear (a loader flashing for 40 ms looks like a glitch).
-            self._report_ready = False
-            QTimer.singleShot(150, self._show_report_skeleton)
-            motion.fade_to(self.stack, 1)
-            QTimer.singleShot(0, self._build_report_now)
-            self._restore_view(path)
-
-    def _show_report_skeleton(self):
-        if not self._report_ready:
-            self.report_scroll.setWidget(motion.skeleton_report())
+        if self.document.status() != QPdfDocument.Status.Ready:
+            self.doc_skeleton.hide()
+            motion.fade_to(self.stack, 0)
+            return
+        report_data = None
+        for p in self.manager.data.get("documents", []):
+            if p.get("local_path") == path:
+                report_data = p.get("sota_result")
+                break
+        lang = report_data.get("language", "pl") if report_data else "pl"
+        errors = self.manager.get_errors(path)
+        if errors:
+            self.pdf_view.add_errors(errors, lang=lang)
+        self._build_report_now()
+        self._restore_view(path)
+        self.doc_skeleton.hide()
+        # the markers are placed once the view has its size and its page layout (before that they sat at the edge)
+        QTimer.singleShot(150, self.pdf_view.update_markers_pos)
 
     def _build_report_now(self):
         self.load_ai_analysis()
-        self._report_ready = True
 
     def _restore_view(self, path):
         """Continue where the reader was left: the page and the zoom saved with the document."""
@@ -304,6 +326,8 @@ class PDFReader(QMainWindow):
         self.thumb_area.setWidget(self.thumb_widget)
 
         self.pdf_view = SelectablePdfView()
+        self.doc_skeleton = motion.DocumentSkeleton(self.pdf_view)
+        self.doc_skeleton.hide()
         self.pdf_view.setDocument(self.document)
         self.pdf_view.setPageMode(QPdfView.PageMode.MultiPage)
         self.pdf_view.setStyleSheet(styles.PDF_VIEW_STYLE)
