@@ -135,7 +135,7 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertTrue(details.isHidden())
         self.assertEqual(toggle.arrowType(), Qt.RightArrow)
         texts = [button.text() for button in panel.findChildren(QPushButton)]
-        self.assertTrue(any("1 (1)" in text for text in texts))
+        self.assertTrue(any(text == "#1  p. 1" for text in texts))
         self.assertFalse(any("4 (1)" in text for text in texts))
         self.assertEqual(self.errors, original)
 

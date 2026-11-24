@@ -7,7 +7,7 @@ from PySide6.QtPdfWidgets import QPdfView
 import os
 import sys
 
-from common.findings import finding_kind
+from common.findings import assign_finding_ids, finding_kind, finding_label
 
 from . import styles
 from .i18n import t
@@ -34,13 +34,19 @@ class ErrorMarker(QPushButton):
         super().__init__(parent)
         self.data = error_data
         self.lang = lang
-        self.setFixedSize(16, 16)
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(styles.ERROR_MARKER_STYLE)
-        self.setText("!")
+        number = error_data.get("finding_id") if isinstance(error_data, dict) else None
+        # the number of the finding sits right next to the "!", on the marker that is clicked
+        text = f"! {number}" if number else "!"
+        self.setText(text)
+        self.setFixedSize(max(16, self.fontMetrics().horizontalAdvance(text) + 12), 16)
+        label = finding_label(error_data)
+        self.setToolTip(f"{label} · {error_data.get('category', '')}".strip(" ·") if label else "")
         if self.data.get("category") == "TYPOS":
             self.setStyleSheet(styles.SPELLING_MARKER_STYLE)
-            self.setToolTip("Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo")
+            hint = "Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo"
+            self.setToolTip(f"{label} · {hint}" if label else hint)
         self.clicked.connect(self.show_details)
         if self.data.get("category") == "TYPOS":
             self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -67,8 +73,9 @@ class ErrorMarker(QPushButton):
         kat = self.data.get('category', t["def_cat"])
         tekst = self.data.get('found_text', '')
 
-        info = (f"<b>{t['cat']}</b> {kat}<br>"
-                f"<b>{t['desc']}</b> {opis}<br>")
+        label = finding_label(self.data)
+        info = (f"<b>{label}</b><br>" if label else "") + (f"<b>{t['cat']}</b> {kat}<br>"
+                                                         f"<b>{t['desc']}</b> {opis}<br>")
         
         if tekst and str(tekst).strip() not in ["[Brak tekstu]", "[No text]", ""]:
             info += f"<b>{t['refers']}</b> <i>{tekst}</i>"
@@ -114,7 +121,8 @@ class SpellingHighlightBox(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAutoDefault(False)
-        self.setToolTip(t('main.spelling_click_hint'))
+        label = finding_label(getattr(marker, 'data', None))
+        self.setToolTip(f"{label} · {t('main.spelling_click_hint')}" if label else t('main.spelling_click_hint'))
         self.setAccessibleName(t('main.spelling_proposal_action'))
         self.setAccessibleDescription(t('main.spelling_click_hint'))
         self.clicked.connect(marker.open_proposal)
@@ -178,7 +186,8 @@ class SelectablePdfView(QPdfView):
     def add_errors(self, errors_list, lang="pl"):
         """Clears existing errors and overlays a new list of error markers and highlight boxes"""
         self.clear_markers()
-        
+        errors_list = assign_finding_ids(errors_list)
+
         new_boxes = []
         for box in self.highlight_boxes:
             if getattr(box, 'is_error', False):
@@ -274,9 +283,10 @@ class SelectablePdfView(QPdfView):
                 px_x = base[0] + int((coords.get("x", 0) * kx) + 0.5)
                 px_y = base[1] + int((coords.get("y", 0) * ky) + 0.5)
                 px_w = int((coords.get("w", 0) * kx) + 0.5)
-                marker_x = px_x + (px_w // 2) - 8 if px_w > 0 else px_x - 8
+                half = marker.width() // 2
+                marker_x = px_x + (px_w // 2) - half if px_w > 0 else px_x - half
                 marker_y = px_y - 12
-                if view.intersects(QRect(int(marker_x), int(marker_y), 16, 16)):
+                if view.intersects(QRect(int(marker_x), int(marker_y), marker.width(), 16)):
                     marker.move(int(marker_x), int(marker_y))
                     marker.show()
                 elif marker.isVisible():
