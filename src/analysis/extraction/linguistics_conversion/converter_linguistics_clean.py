@@ -1202,7 +1202,11 @@ class PDFMapper:
             if is_combining and words_info:
                 last_word = words_info[-1]
                 already_glued = unicodedata.normalize("NFD", last_word.text).endswith(word_text)
-                if last_word.font == span.font:
+                # In a math font the accent is drawn before the symbol it decorates, and the symbols around it are in
+                # the same font, so "same font as the word before" says nothing there: "𝜖) ̂𝐴" is an accent of 𝐴.
+                # Only a mark the word before already carries stays with it.
+                belongs_to_previous = last_word.font == span.font and (already_glued or "math" not in (span.font or "").lower())
+                if belongs_to_previous:
                     # accent typeset in the same font as the letter before it (e.g. LaTeX ogonek)
                     if not already_glued:
                         full_text = self._glue_combining(full_text, last_word, word_text, span)
