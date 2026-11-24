@@ -6,7 +6,7 @@ pdf'a pod względem błędów z redakcji i "zaawansowanej" redakcji.
 """
 
 from analysis.extraction.raw_extraction.bare_struct import DocumentData
-from analysis.extraction.linguistics_conversion.schema import FinalDocument
+from analysis.extraction.linguistics_conversion.schema import FinalDocument, word_pieces
 from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper, get_acronym_pages
 from common.errors.error_struct import Error, FileError, Module
 from collections import Counter
@@ -900,17 +900,19 @@ class RedactionValidator:
         if not block.words:
             return
 
-        widow_words = block.words[-widow_which:]
+        # by printed pieces: the rest of a word hyphenated at a line end is on its own line
+        n = widow_which
+        pieces = word_pieces(block.words)[-n:]
+        widow_words = list({id(piece[3]): piece[3] for piece in pieces}.values())
         if self._in_other_font(widow_words):
             return
-        first_word = widow_words[0]
-        last_word = widow_words[-1]
         found_text = " ".join([w.text for w in widow_words])
 
-        left_x = first_word.bbox[0]
-        right_x = last_word.bbox[2]
-        top_y = min([w.bbox[1] for w in widow_words])
-        bottom_y = max([w.bbox[3] for w in widow_words])
+        page_number = pieces[-1][0]
+        left_x = pieces[0][2][0]
+        right_x = pieces[-1][2][2]
+        top_y = min([piece[2][1] for piece in pieces])
+        bottom_y = max([piece[2][3] for piece in pieces])
         widow_bbox = (
             round(left_x, 2),
             round(top_y, 2),
@@ -922,7 +924,7 @@ class RedactionValidator:
             id=self._get_next_id(),
             module=self.module,
             category="widow",
-            page_number=last_word.page_number,
+            page_number=page_number,
             bounding_box=widow_bbox,
             text=found_text,
             comments=comment,
@@ -967,17 +969,19 @@ class RedactionValidator:
         if not block.words:
             return
 
-        bekart_words = block.words[-bekart_which:]
+        # by printed pieces: the rest of a word hyphenated at a line end is on its own line
+        n = bekart_which
+        pieces = word_pieces(block.words)[-n:]
+        bekart_words = list({id(piece[3]): piece[3] for piece in pieces}.values())
         if self._in_other_font(bekart_words):
             return
-        first_word = bekart_words[0]
-        last_word = bekart_words[-1]
         found_text = " ".join([w.text for w in bekart_words])
 
-        left_x = first_word.bbox[0]
-        right_x = last_word.bbox[2]
-        top_y = min([w.bbox[1] for w in bekart_words])
-        bottom_y = max([w.bbox[3] for w in bekart_words])
+        page_number = pieces[-1][0]
+        left_x = pieces[0][2][0]
+        right_x = pieces[-1][2][2]
+        top_y = min([piece[2][1] for piece in pieces])
+        bottom_y = max([piece[2][3] for piece in pieces])
         bekart_bbox = (
             round(left_x, 2),
             round(top_y, 2),
@@ -989,7 +993,7 @@ class RedactionValidator:
             id=self._get_next_id(),
             module=self.module,
             category="bastard",
-            page_number=last_word.page_number,
+            page_number=page_number,
             bounding_box=bekart_bbox,
             text=found_text,
             comments=comment,
@@ -1032,17 +1036,19 @@ class RedactionValidator:
         if not block.words:
             return
 
-        szewc_words = block.words[:szewc_which]
+        # by printed pieces: the rest of a word hyphenated at a line end is on its own line
+        n = szewc_which
+        pieces = word_pieces(block.words)[:n]
+        szewc_words = list({id(piece[3]): piece[3] for piece in pieces}.values())
         if self._in_other_font(szewc_words):
             return
-        first_word = szewc_words[0]
-        last_word = szewc_words[-1]
         found_text = " ".join([w.text for w in szewc_words])
 
-        left_x = first_word.bbox[0]
-        right_x = last_word.bbox[2]
-        top_y = min([w.bbox[1] for w in szewc_words])
-        bottom_y = max([w.bbox[3] for w in szewc_words])
+        page_number = pieces[-1][0]
+        left_x = pieces[0][2][0]
+        right_x = pieces[-1][2][2]
+        top_y = min([piece[2][1] for piece in pieces])
+        bottom_y = max([piece[2][3] for piece in pieces])
         szewc_bbox = (
             round(left_x, 2),
             round(top_y, 2),
@@ -1054,7 +1060,7 @@ class RedactionValidator:
             id=self._get_next_id(),
             module=self.module,
             category="shoemaker",
-            page_number=first_word.page_number,
+            page_number=page_number,
             bounding_box=szewc_bbox,
             text=found_text,
             comments=comment,

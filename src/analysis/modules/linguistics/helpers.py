@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import os
 import dataclasses
 import json
@@ -216,6 +217,11 @@ def get_match_info(block, offset, length):
                     start_page = word.page_number
                 end_page = word.page_number
 
+    # the rest of a word hyphenated at the end of a line is highlighted on its own line (one finding, two boxes)
+    for words_on_line in list(lines.values()):
+        for word in list(words_on_line):
+            for page, line, bbox in getattr(word, "extra_boxes", None) or []:
+                lines[(page, line)].append(SimpleNamespace(bbox=bbox))
     error_coordinate = []
     for (page, line), words in sorted(lines.items()):
         error_coordinate.append({

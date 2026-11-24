@@ -114,9 +114,12 @@ class WordAndLinkJoiningTest(unittest.TestCase):
         mapper._fix_offsets()
 
         self.assertEqual(item.text, "WIPO. [data dostępu 2026-05-21].")
-        self.assertEqual(item.text[item.words[3].start_char:item.words[3].end_char], "do")
-        self.assertEqual(item.text[item.words[4].start_char:item.words[4].end_char], "stępu")
-        self.assertEqual(item.text[item.words[5].start_char:item.words[5].end_char], "2026-05-21].")
+        # "do-" + "stępu" is one word, drawn on two lines
+        self.assertEqual(item.words[3].text, "dostępu")
+        self.assertEqual(item.text[item.words[3].start_char:item.words[3].end_char], "dostępu")
+        self.assertEqual(item.words[3].extra_boxes, [(1, 2, [94.0, 230.0, 119.0, 240.0])])
+        self.assertEqual(item.text[item.words[4].start_char:item.words[4].end_char], "2026-05-21].")
+        self.assertEqual(len(block.words), 5)
 
 
 if __name__ == "__main__":
