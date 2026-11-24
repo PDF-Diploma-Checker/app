@@ -4,6 +4,7 @@ import logging
 from typing import Dict, Any, List
 
 from .config import MODEL_PATH, N_GPU_LAYERS
+from .json_answer import chat_json
 from analysis.modules.llm.llama_factory import make_llama
 
 logger = logging.getLogger(__name__)
@@ -39,17 +40,17 @@ def ask_llm(prompt: str, content: str) -> bool:
     full_prompt = f"{prompt}\n\nTekst fragmentu rozdziału:\n{content}\n\nZwróć odpowiedź WYŁĄCZNIE w formacie JSON według wzoru:\n{{\"uzasadnienie\": \"krótkie wyjaśnienie\", \"wynik\": true lub false}}"
     
     try:
-        response = get_llm().create_chat_completion(
-            messages=[
+        data, result_text = chat_json(
+            get_llm(),
+            [
                 {"role": "system", "content": "Jesteś surowym recenzentem. Zwracaj tylko obiekt JSON. Żadnych wstępów. Żadnych znaczników ```json."},
                 {"role": "user", "content": full_prompt}
             ],
-            response_format={"type": "json_object"},
             temperature=0.0,
             top_p=0.1,
             max_tokens=150
         )
-        result_text = response["choices"][0]["message"]["content"].strip()
+        result_text = (result_text or "").strip()
         
         if result_text.startswith("```json"):
             result_text = result_text[7:]
@@ -61,7 +62,8 @@ def ask_llm(prompt: str, content: str) -> bool:
         result_text = result_text.strip()
         
         try:
-            data = json.loads(result_text)
+            if data is None:
+                raise json.JSONDecodeError("no JSON object", result_text, 0)
             wynik = data.get("wynik", False)
             if isinstance(wynik, str):
                 return wynik.lower() == "true"
