@@ -313,6 +313,9 @@ class AiSetupDialog(QDialog):
             # nothing chosen yet: start from what this computer can do
             self._select_device(report.recommended_device == "cuda")
             self.layers_input.setText(str(report.recommended_layers))
+            self.btn_light.setChecked(report.recommended_profile == "light")     # the model the computer can run well
+            self.btn_full.setChecked(report.recommended_profile != "light")
+            self._update_profile()
         elif self.btn_gpu.isChecked() and not report.gpu_usable:
             self._select_device(False)
         self._update_device_widgets()

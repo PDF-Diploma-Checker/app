@@ -47,6 +47,10 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue(config.language_review_enabled("full"))
         self.assertFalse(config.language_review_enabled("light"))
 
+    def test_the_purpose_is_rated_only_by_the_full_model(self):
+        self.assertTrue(config.goal_check_enabled("full"))
+        self.assertFalse(config.goal_check_enabled("light"))
+
 
 class AdviceTest(unittest.TestCase):
     def test_the_small_model_fits_whole_on_a_small_card(self):
@@ -60,12 +64,15 @@ class AdviceTest(unittest.TestCase):
         self.assertFalse(gpu_check.is_weak_gpu(6, "light"))
         self.assertTrue(gpu_check.is_weak_gpu(6, "full"))
 
-    def test_the_report_follows_the_profile(self):
-        facts = {"ai_runtime": True, "gpu_build": True, "ram_gb": 8, "profile": "light", "driver_cuda": "12.8",
-                 "nvidia": {"name": "GPU", "driver": "1", "vram_gb": 6.0, "used_mb": 0.0}, "free_gb": 20}
-        report = gpu_check.diagnose(facts)
-        self.assertEqual(report.recommended_layers, -1)
-        self.assertEqual(gpu_check.diagnose(dict(facts, profile="full")).recommended_layers, 16)
+    def test_the_computer_gets_the_model_it_can_run(self):
+        small = {"ai_runtime": True, "gpu_build": True, "ram_gb": 16, "driver_cuda": "12.8", "free_gb": 20,
+                 "nvidia": {"name": "GPU", "driver": "1", "vram_gb": 6.0, "used_mb": 0.0}}
+        big = dict(small, nvidia={"name": "GPU", "driver": "1", "vram_gb": 16.0, "used_mb": 0.0})
+        self.assertEqual((gpu_check.diagnose(small).recommended_profile, gpu_check.diagnose(small).recommended_layers), ("light", -1))
+        self.assertEqual((gpu_check.diagnose(big).recommended_profile, gpu_check.diagnose(big).recommended_layers), ("full", -1))
+        no_card = {"ai_runtime": True, "gpu_build": False, "ram_gb": 8, "free_gb": 20}
+        self.assertEqual(gpu_check.diagnose(no_card).recommended_profile, "light")           # little RAM, no card
+        self.assertEqual(gpu_check.diagnose(dict(no_card, ram_gb=32)).recommended_profile, "full")
 
 
 class EstimateTest(unittest.TestCase):
@@ -74,12 +81,14 @@ class EstimateTest(unittest.TestCase):
 
     def test_the_light_model_is_faster_and_loads_quicker(self):
         full, light = self.stages(FULL), self.stages(LIGHT)
-        for stage in ("purpose", "goal", "summaries", "sota"):
+        for stage in ("purpose", "summaries", "sota"):
             self.assertLess(light[stage], full[stage], stage)
 
-    def test_no_review_stage_with_the_light_model(self):
+    def test_no_review_and_no_goal_stage_with_the_light_model(self):
         self.assertIn("language_review", self.stages(FULL))
+        self.assertIn("goal", self.stages(FULL))
         self.assertNotIn("language_review", self.stages(LIGHT))
+        self.assertNotIn("goal", self.stages(LIGHT))
 
     def test_runs_of_the_two_models_are_not_mixed_in_the_history(self):
         self.assertNotEqual(eta._kind(True, True, FULL), eta._kind(True, True, LIGHT))
@@ -105,6 +114,27 @@ class ProcessTest(unittest.TestCase):
                 mock.patch.object(llm_process, "_run_once", side_effect=AssertionError("no process expected")):
             self.assertIs(llm_process.run_language_review_isolated(matches, "pl"), matches)
             self.assertIs(llm_task.run_language_review(matches, "pl"), matches)
+
+
+class PanelTest(unittest.TestCase):
+    def test_the_report_says_the_purpose_was_not_rated_with_the_light_model(self):
+        try:
+            from PySide6.QtWidgets import QApplication, QLabel
+        except Exception as error:
+            self.skipTest(f"Qt is not available: {error}")
+        app = QApplication.instance() or QApplication([])      # noqa: F841
+        from ui.report_panel import build_report_panel
+
+        def texts(grade_info):
+            content, _ = build_report_panel({"content_grade": grade_info, "language": "pl"}, lambda: None, [])
+            return " | ".join(label.text() for label in content.findChildren(QLabel))
+
+        light = dict(grade=80.0, max_grade=100.0, off_topic_sections=0, p_off=0, off_topic_headings=[],
+                     purpose_score=None, purpose_reason="", model_profile="light")
+        self.assertIn("nie jest oceniana", texts(light))
+        full = dict(light, purpose_score=50, purpose_reason="Cel częściowo zrealizowany.", model_profile="full")
+        self.assertNotIn("nie jest oceniana", texts(full))
+        self.assertIn("Cel częściowo zrealizowany.", texts(full))
 
 
 if __name__ == "__main__":

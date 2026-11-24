@@ -198,10 +198,9 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
         return gemma_load + prefill_tokens / prompt + generated / gen
 
     base, per_char = GOAL_TOKENS
-    stages += [
-        ("purpose", work(0.3 * text_tokens, PURPOSE_TOKENS)),
-        ("goal", work(min(doc.chars, GOAL_FRAGMENT_CHARS) * TOKENS_PER_CHAR, base + per_char * doc.chars)),
-    ]
+    stages.append(("purpose", work(0.3 * text_tokens, PURPOSE_TOKENS)))
+    if machine.profile != "light":          # the light model does not rate the realization of the purpose
+        stages.append(("goal", work(min(doc.chars, GOAL_FRAGMENT_CHARS) * TOKENS_PER_CHAR, base + per_char * doc.chars)))
     if doc.sections:
         # the stage lasts until the next one starts, so it also holds the review of the doubtful sections
         summaries = work(doc.sections * SECTION_PROMPT_TOKENS, doc.sections * SECTION_TOKENS)
