@@ -11,11 +11,11 @@ import re
 from collections import Counter
 
 from common.figure_findings import figure_details
-from common.findings import assign_finding_ids, finding_kind, finding_label, finding_text
+from common.findings import finding_kind, finding_text
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLayout, QListWidget, QListWidgetItem, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QToolButton,
+    QFrame, QHBoxLayout, QLabel, QLayout, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy, QToolButton,
     QVBoxLayout, QWidget,
 )
 
@@ -333,29 +333,6 @@ def _figure_list(name, title, items, on_page):
     return toggle, details
 
 
-def _findings_list(errors, on_page):
-    """Every finding of the text with its number: '#7  p. 5  comment'. A click shows its page; the tooltip has the whole
-    note. The numbers are the ones of the markers (their tooltips), so a finding can be named in a conversation."""
-    page_errors = sorted((error for error in errors if isinstance(error, dict) and finding_kind(error) == "page"),
-                         key=lambda error: error.get("finding_id") or 0)
-    items = QListWidget()
-    items.setObjectName("FindingsList")
-    items.setStyleSheet(f"QListWidget {{ background: transparent; border: 1px solid {styles.BORDER}; border-radius: 6px; "
-                        f"font-size: 12px; color: {styles.TEXT}; }} QListWidget::item {{ padding: 3px 6px; }}")
-    items.setFrameShape(QFrame.NoFrame)
-    for error in page_errors:
-        comment = " ".join(str(error.get("comment", error.get("komentarz", "")) or "").split())
-        page = int(error.get("page", 0)) + 1
-        item = QListWidgetItem(f"{finding_label(error)}   {t('main.findings_page_short', page=page)}   {comment}")
-        item.setToolTip(f"{finding_label(error)}\n{finding_text(error)}")
-        item.setData(Qt.UserRole, int(error.get("page", 0)))
-        items.addItem(item)
-    items.itemClicked.connect(lambda item: on_page(item.data(Qt.UserRole)))
-    row = max(items.sizeHintForRow(0), 22)
-    items.setFixedHeight(min(row * len(page_errors) + 14, LIST_MAX_HEIGHT))
-    return items
-
-
 def _findings_section(root, errors, on_page):
     """How many findings the text has and where: the markers on the pages alone do not tell it."""
     root.addWidget(_section(t("main.findings_header")))
@@ -366,11 +343,6 @@ def _findings_section(root, errors, on_page):
         lay.addWidget(_note(t("main.findings_count", count=sum(pages.values()), pages=len(pages)), "bad"))
         lay.addWidget(_label(t("main.findings_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
         lay.addWidget(_page_buttons(pages, on_page))
-        details = _findings_list(errors, on_page)
-        toggle = _toggle(t("main.findings_list", count=sum(pages.values())), details)
-        toggle.setObjectName("FindingsListToggle")
-        lay.addWidget(toggle)
-        lay.addWidget(details)
         if any(isinstance(error, dict) and error.get("category") == "TYPOS" for error in errors):
             lay.addWidget(_note(t("main.word_proposal_hint"), "off"))
     else:
@@ -382,7 +354,6 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
     """Returns (scrollable content widget, the "download report" button). `errors`: the findings in the text of the
     thesis, None when the document was not analysed; on_page(index) shows a page."""
     data = report_data or {}
-    errors = assign_finding_ids(errors) if errors is not None else None
     content = QWidget()
     content.setStyleSheet("background: transparent; border: none;")
     root = QVBoxLayout(content)
