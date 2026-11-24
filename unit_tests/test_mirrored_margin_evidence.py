@@ -27,6 +27,8 @@ class MirrorMarginsTest(unittest.TestCase):
     def test_real_shift_in_full_width_paragraphs_is_reported(self):
         d=DocumentData(metadata={},pages=[self.page(n) for n in range(8)]+[self.page(9,left=135,right=35)])
         v=self.validator();self.assertFalse(v.check_margins(d));self.assertEqual(len(v.errors),1)
+        self.assertEqual(v.errors[0].category,'inconsistent_margins')
+        self.assertEqual(__import__('json').loads(v.errors[0].text),{'pages':[9],'evaluated':9})
 
     def test_standard_margins_do_not_pass_as_mirrored(self):
         d=DocumentData(metadata={},pages=[self.page(n,left=100,right=70) for n in range(8)])

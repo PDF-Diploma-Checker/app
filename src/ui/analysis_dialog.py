@@ -23,7 +23,7 @@ from common.cancellation import AnalysisCancelled, CancelToken
 
 from common.findings import finding_kind
 
-from . import icons, styles
+from . import motion, icons, styles
 from .ai_setup_dialog import AiSetupDialog
 from .i18n import t
 from .message_box import MessageBox
@@ -622,6 +622,8 @@ class AnalysisDialog(QDialog):
         mode_section.addWidget(self.setup_link, alignment=Qt.AlignLeft)
 
         self.eta_label = QLabel(t("analysis.eta_calc"))
+
+        motion.tabular(self.eta_label)
         self.eta_label.setWordWrap(True)
         self.eta_label.setStyleSheet(
             f"font-size: 13px; color: {styles.TEXT_3}; background-color: {styles.NEUTRAL_BG}; "
@@ -673,10 +675,12 @@ class AnalysisDialog(QDialog):
 
         # time: what is left (big) and what has passed / the whole (small)
         self.eta_left_label = QLabel(t("analysis.eta_calc"))
+        motion.tabular(self.eta_left_label)
         self.eta_left_label.setStyleSheet(
             f"font-size: 24px; font-weight: 600; color: {styles.TEXT}; background: transparent; border: none;"
         )
         self.eta_detail_label = QLabel()
+        motion.tabular(self.eta_detail_label)
         self.eta_detail_label.setWordWrap(True)
         self.eta_detail_label.setStyleSheet(styles.HINT_STYLE)
 
@@ -690,6 +694,7 @@ class AnalysisDialog(QDialog):
             f"font-size: 14px; color: {styles.TEXT_3}; background: transparent; border: none;"
         )
         self.percent_label = QLabel("0%")
+        motion.tabular(self.percent_label)
         self.percent_label.setStyleSheet(
             f"font-size: 14px; font-weight: 600; color: {styles.PRIMARY}; background: transparent; border: none;"
         )
@@ -858,8 +863,9 @@ class AnalysisDialog(QDialog):
                 stages = self.estimate.stages
             else:
                 stages = [("prep", None), ("purpose", None), ("goal", None), ("summaries", None)]
+                stages += [("sota", None)]
                 stages += [("images", None)] if self.cb_images.isChecked() else []
-                stages += [("sota", None), ("language_review", None)]
+                stages += [("language_review", None)]
             self.stage_list.set_stages(stages)
         self.cancel_btn.setEnabled(True)
         self.worker = PipelineWorker(

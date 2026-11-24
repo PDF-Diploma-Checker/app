@@ -3,6 +3,7 @@ an analysis error with a useful hint, not take the app down."""
 
 import os
 import sys
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -81,9 +82,10 @@ class FiguresApartTest(unittest.TestCase):
 
     def test_a_crash_is_checked_again_on_the_processor(self):
         result, layers = self.run_figures([llm_process._Outcome("crash", -6, "Analiza obrazów"),
+                                           llm_process._Outcome("result", {"reading": 1}),
                                            llm_process._Outcome("result", {"image_analysis": "ok"})])
         self.assertEqual(result, {"image_analysis": "ok"})
-        self.assertEqual(layers, [8, 0])
+        self.assertEqual(layers, [8, 0, 8])        # the reading again on the processor, the comparison on the card
         self._report.assert_not_called()
 
     def test_figures_that_crash_twice_are_marked_unchecked(self):
@@ -94,6 +96,13 @@ class FiguresApartTest(unittest.TestCase):
         self.assertEqual(layers, [8, 0])
         self._report.assert_called_once()
 
+    def test_a_failed_comparison_marks_the_figures_unchecked(self):
+        crash = llm_process._Outcome("crash", -6, "Spójność rysunków")
+        result, layers = self.run_figures([llm_process._Outcome("result", {"reading": 1}), crash, crash])
+        self.assertTrue(result["image_analysis"]["analysis_failed"])
+        self.assertEqual(layers, [8, 8, 0])
+        self._report.assert_called_once()
+
     def test_on_the_processor_there_is_no_second_attempt(self):
         _, layers = self.run_figures([llm_process._Outcome("crash", -6, "")], layers=0)
         self.assertEqual(layers, [0])
@@ -102,14 +111,91 @@ class FiguresApartTest(unittest.TestCase):
         from types import SimpleNamespace
 
         text = llm_process._Outcome("result", ({"content_grade": {"grade": 70}}, 70, "ok"))
+        reading = llm_process._Outcome("result", {"reading": "read"})
         figures = llm_process._Outcome("result", {"image_analysis": "checked"})
-        with mock.patch.object(llm_process, "_run_once", side_effect=[text, figures]) as run:
+        with mock.patch.object(llm_process, "_run_once", side_effect=[text, reading, figures]) as run:
             data, score, _ = llm_process.run_task_llm_isolated(SimpleNamespace(pages=[]), "x.pdf", "pl", True, True)
         self.assertEqual(data, {"content_grade": {"grade": 70}, "image_analysis": "checked"})
         self.assertEqual(score, 70)
-        first, second = run.call_args_list
+        first, second, third = run.call_args_list
         self.assertFalse(first.args[3])                 # the text runs without the figures
-        self.assertEqual(second.kwargs["job"], "figures")
+        self.assertEqual((second.kwargs["job"], third.kwargs["job"]), ("figures_read", "figures_check"))
+        self.assertEqual(third.kwargs["extra"], {"reading": "read"})
+
+
+class OverlapTest(unittest.TestCase):
+    """The figures are read at the same time as the text stages when the video memory holds both models."""
+
+    def setUp(self):
+        for name, value in (("_report", None), ("read_tail", ""), ("_gpu_facts", None)):
+            patcher = mock.patch.object(llm_process, name, return_value=value)
+            self.addCleanup(patcher.stop)
+            patcher.start()
+
+    def overlap_on(self):
+        patcher = mock.patch.object(llm_process, "can_overlap_figures", return_value=True)
+        self.addCleanup(patcher.stop)
+        patcher.start()
+
+    def test_needs_depend_on_the_layers_and_the_free_memory(self):
+        self.assertGreater(llm_process.overlap_needs_mb(-1), llm_process.overlap_needs_mb(25))
+        self.assertLess(llm_process.overlap_needs_mb(-1), 15000)           # fits a 16 GB card
+        self.assertEqual(llm_process.overlap_needs_mb(-1), llm_process.overlap_needs_mb(49))
+
+    def test_decision(self):
+        self.assertFalse(llm_process.can_overlap_figures(-1))                          # no card (nvidia-smi), no overlap
+        self.assertTrue(llm_process.can_overlap_figures(-1, free_mb=15500))
+        self.assertFalse(llm_process.can_overlap_figures(-1, free_mb=12000))           # another program holds memory
+        self.assertFalse(llm_process.can_overlap_figures(0, free_mb=24000))            # everything on the processor
+        self.assertTrue(llm_process.can_overlap_figures(25, free_mb=12500))
+
+    def test_figures_are_read_while_the_text_runs(self):
+        from types import SimpleNamespace
+
+        self.overlap_on()
+        started = threading.Event()
+        order = []
+
+        def fake(payload, pdf_path, language, check_images, layers, token, job="analysis", extra=None, quiet=False,
+                 stderr_name=llm_process.STDERR_LOG_NAME):
+            order.append(job or "analysis")
+            if job == "figures_read":
+                started.set()
+                return llm_process._Outcome("result", {"reading": "read"})
+            if job == "figures_check":
+                return llm_process._Outcome("result", {"image_analysis": "checked", "got": extra})
+            self.assertTrue(started.wait(5), "the text finished before the figures were started")
+            return llm_process._Outcome("result", ({"content_grade": {"grade": 70}}, 70, "ok"))
+
+        with mock.patch.object(llm_process, "_run_once", side_effect=fake) as run:
+            data, score, _ = llm_process.run_task_llm_isolated(SimpleNamespace(pages=[]), "x.pdf", "pl", True, True)
+        self.assertEqual(data["image_analysis"], "checked")
+        self.assertEqual(data["got"], {"reading": "read"})
+        self.assertEqual(data["content_grade"], {"grade": 70})
+        self.assertEqual(order[-1], "figures_check")
+        reading_call = next(c for c in run.call_args_list if c.kwargs.get("job") == "figures_read")
+        self.assertTrue(reading_call.kwargs["quiet"])                                  # no status lines of its own
+        self.assertEqual(reading_call.kwargs["stderr_name"], llm_process.FIGURES_LOG_NAME)
+
+    def test_a_failed_text_stops_the_reading(self):
+        from types import SimpleNamespace
+
+        self.overlap_on()
+        stopped = threading.Event()
+
+        def fake(payload, pdf_path, language, check_images, layers, token, job="analysis", extra=None, quiet=False,
+                 stderr_name=llm_process.STDERR_LOG_NAME):
+            if job == "figures_read":
+                while not token.is_cancelled():
+                    threading.Event().wait(0.01)
+                stopped.set()
+                raise AnalysisCancelled()
+            return llm_process._Outcome("error", "boom", "trace")
+
+        with mock.patch.object(llm_process, "_run_once", side_effect=fake):
+            data, score, _ = llm_process.run_task_llm_isolated(SimpleNamespace(pages=[]), "x.pdf", "pl", True, True)
+        self.assertIn("analysis_error", data)
+        self.assertTrue(stopped.wait(5), "the reading of the figures was left running")
 
 
 @unittest.skipUnless(PDF.is_file(), "test PDF missing")

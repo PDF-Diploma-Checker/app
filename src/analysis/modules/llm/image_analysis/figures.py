@@ -19,8 +19,10 @@ _FAMILIES = {
 }
 FIGURE_FAMILIES = tuple(_FAMILIES)
 _NUMBER = r"\d+(?:\.\d+)*"
+# A figure's label may start with a capital letter of an appendix instead of a number: "Rys. A.1", "Figure B.2".
+_LABEL_NUMBER = r"(?:\d+|(?-i:[A-Z])(?![^\W\d_])\d*)(?:\.\d+)*"
 _ANY_STEM = "|".join(stem for stems in _FAMILIES.values() for stem in stems)
-_CAPTION = re.compile(rf"^\s*((?:{_ANY_STEM})[^\W\d]*\.?)\s*({_NUMBER})", re.IGNORECASE)
+_CAPTION = re.compile(rf"^\s*((?:{_ANY_STEM})[^\W\d]*\.?)\s*({_LABEL_NUMBER})", re.IGNORECASE)
 _NUMBER_WORD = r"(?:(?:nr|numer|no)\.?\s*)?"
 _RANGE = re.compile(rf"(\d+(?:\.\d+)*)\s*(?:-|–|—|\bdo\b|\bto\b)\s*(\d+(?:\.\d+)*)(?!\d|\.\d)", re.IGNORECASE)
 # "Rysunek 2 przedstawia ..." opens a sentence about the figure, a caption goes on with the figure's title
@@ -46,7 +48,7 @@ def reference_pattern(number, family="rys"):
     """Regex matching a mention of this figure in text, in any grammatical case, also as a later number of an
     enumeration or a range: "rysunki 1 i 2", "rys. 1, 2 oraz 3", "Figures 1 and 2", "rysunki od 1 do 3"."""
     stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
-    earlier = rf"(?:{_NUMBER}\s*(?:,|i|oraz|lub|and|or|&|-|–|—|do|to)\s*)*"
+    earlier = rf"(?:{_LABEL_NUMBER}\s*(?:,|i|oraz|lub|and|or|&|-|–|—|do|to)\s*)*"
     return re.compile(
         rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*(?:od\s+|from\s+)?{_NUMBER_WORD}{earlier}{_number_pattern(number)}(?!\d|\.\d)",
         re.IGNORECASE)
@@ -55,8 +57,11 @@ def reference_pattern(number, family="rys"):
 def _in_mentioned_range(text, number, family):
     """True for figure 2 in "rysunki 1-3": the number itself is not in the text. Only within one chapter: 2.9-3.1 says
     nothing about how many figures chapter 2 has."""
+    parts = str(number).split(".")
+    if not all(part.isdigit() for part in parts):     # appendix labels ("A.1") are not given as ranges
+        return False
     stems = "|".join(_FAMILIES.get(family, _FAMILIES["rys"]))
-    wanted = [int(part) for part in str(number).split(".")]
+    wanted = [int(part) for part in parts]
     for match in re.finditer(rf"(?<!\w)(?:{stems})[^\W\d]*\.?\s*(?:od\s+|from\s+)?{_NUMBER_WORD}", text, re.IGNORECASE):
         found = _RANGE.match(text, match.end())
         if found:
@@ -97,8 +102,10 @@ def is_caption(paragraph, number, family="rys"):
 
 
 def figure_sort_key(label):
-    """Natural order of labels such as 'Rys. 2.10': by the numbers in them, then by the text."""
-    return [int(n) for n in re.findall(r"\d+", label)], label
+    """Natural order of labels such as 'Rys. 2.10': by the numbers in them, then by the text. Appendix figures
+    ('Rys. A.1') come after the numbered ones, ordered by their letter."""
+    appendix = re.search(r"\s([A-Z])(?=\d|\.|$)", label)
+    return (appendix.group(1) if appendix else ""), [int(n) for n in re.findall(r"\d+", label)], label
 
 
 # Fixed messages of the figure analysis; the report is written in the language of the thesis.

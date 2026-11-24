@@ -1,7 +1,8 @@
 import os
 import re
+import threading
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (
 from common.path import resource_path
 from common.version import APP_VERSION
 
-from . import icons, styles
+from . import icons, motion, styles
 from .i18n import language_signals, t
 from .language_switch import LanguageSwitch
 from .settings import SettingsDialog
@@ -94,21 +95,37 @@ def _pdf_icon_label(width, height):
     return lbl
 
 
-class PDFDropFrame(QFrame):
+# Last known file sizes. The list is drawn from this cache at once and refreshed in the background
+# (stale-while-revalidate), so a slow or disconnected drive never freezes the start page.
+_SIZE_CACHE = {}
+
+
+class _SizeRefresher(QObject):
+    sized = Signal(str, str)
+
+    def refresh(self, paths):
+        threading.Thread(target=self._run, args=(list(paths),), daemon=True).start()
+
+    def _run(self, paths):
+        for path in paths:
+            self.sized.emit(path, _file_size_text(path) or "")
+
+
+class PDFDropFrame(motion.SquircleFrame):
     """provides drag-and-drop capabilities specialized for filtering and accepting PDF files."""
     fileDropped = Signal(str)
     clicked = Signal()
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(styles.PRIMARY_50, styles.PRIMARY, 14, 2, dashed=True,
+                         hover_fill="#E8F3FF", hover_border=styles.PRIMARY_HOVER, parent=parent)
         self.setAcceptDrops(True)
         self.setObjectName("DropZone")
         self.setCursor(Qt.PointingHandCursor)
 
     def _set_drag(self, active):
         self.setProperty("drag", active)
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.set_hot(active)
 
     def dragEnterEvent(self, event):
         """Filter incoming drag events to ensure only local files with a .pdf extension are accepted"""
@@ -145,10 +162,14 @@ class StartPage(QWidget):
     fileDropped = Signal(str)
     openRequested = Signal(str)
     deleteRequested = Signal(str)
+    commandsRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("StartPage")
+        self._size_labels = {}
+        self._sizes = _SizeRefresher(self)
+        self._sizes.sized.connect(self._apply_size)
         self.setAcceptDrops(True)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(styles.START_PAGE_BG)
@@ -253,6 +274,16 @@ class StartPage(QWidget):
         bar.addWidget(version, 0, Qt.AlignVCenter)
         bar.addStretch(1)
 
+        self.commands_btn = QPushButton()
+        self.commands_btn.setIcon(icons.icon("search", styles.TEXT_3, 16, 2.25))
+        self.commands_btn.setIconSize(QSize(16, 16))
+        self.commands_btn.setFixedHeight(42)
+        self.commands_btn.setCursor(Qt.PointingHandCursor)
+        self.commands_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.commands_btn.clicked.connect(self.commandsRequested.emit)
+        bar.addWidget(self.commands_btn)
+        bar.addSpacing(6)
+
         self.lang_switch = LanguageSwitch()
         bar.addWidget(self.lang_switch)
         bar.addSpacing(6)
@@ -286,7 +317,6 @@ class StartPage(QWidget):
     def _build_dropzone(self):
         self.upload_frame = PDFDropFrame()
         self.upload_frame.fileDropped.connect(self.fileDropped.emit)
-        self.upload_frame.setStyleSheet(styles.UPLOAD_ZONE_STYLE)
         self.upload_frame.setFixedHeight(270)
 
         up_layout = QVBoxLayout(self.upload_frame)
@@ -328,9 +358,8 @@ class StartPage(QWidget):
         return self.upload_frame
 
     def _build_docs_card(self):
-        self.docs_card = QFrame()
+        self.docs_card = motion.SquircleFrame(styles.SURFACE, styles.BORDER, 14)
         self.docs_card.setObjectName("DocsCard")
-        self.docs_card.setStyleSheet(styles.DOCS_CARD_STYLE)
 
         card_layout = QVBoxLayout(self.docs_card)
         card_layout.setContentsMargins(0, 0, 0, 0)
@@ -346,6 +375,7 @@ class StartPage(QWidget):
         self.section_title.setStyleSheet(styles.SECTION_TITLE_STYLE)
         self.count_label = QLabel("")
         self.count_label.setStyleSheet(styles.MUTED_LABEL_STYLE)
+        motion.tabular(self.count_label)
 
         self.search_input = QLineEdit()
         self.search_input.setClearButtonEnabled(True)
@@ -401,7 +431,10 @@ class StartPage(QWidget):
         """Re-apply all texts after the UI language changes."""
         self.title_label.setText(t("start.title"))
         self.subtitle_label.setText(t("start.subtitle"))
-        self.settings_btn.setToolTip(t("start.settings_tooltip"))
+        self.settings_btn.setToolTip(motion.with_hint(t("start.settings_tooltip"), "Ctrl+,"))
+        self.commands_btn.setText("  " + t("palette.button") + "   " + motion.shortcut_text("Ctrl+K"))
+        self.commands_btn.setToolTip(motion.with_hint(t("palette.button"), "Ctrl+K"))
+        self.add_btn.setToolTip(motion.with_hint(_plain(t("start.add_file")), "Ctrl+O"))
         self.settings_btn.setAccessibleName(t("start.settings_tooltip"))
         self.txt_drag.setText(t("start.drag_here"))
         self.or_label.setText(t("common.or"))
@@ -415,9 +448,25 @@ class StartPage(QWidget):
     def render_doc_list(self, pliki):
         self.all_files = pliki
         self._apply_sort_and_render()
+        self._sizes.refresh([p.get("local_path", "") for p in pliki])
+
+    @staticmethod
+    def _show_size(label, size_text):
+        label.setText(f"PDF · {size_text}" if size_text else t("start.pdf_file"))
+
+    def _apply_size(self, path, size_text):
+        """Background result: remember it and update the row if it is still on screen."""
+        _SIZE_CACHE[path] = size_text
+        label = self._size_labels.get(path)
+        if label is not None:
+            try:
+                self._show_size(label, size_text)
+            except RuntimeError:     # the row was removed while the size was being read
+                self._size_labels.pop(path, None)
 
     # ------------------------------------------------------------ rendering
     def _clear_table(self):
+        self._size_labels = {}
         while self.table_layout.count():
             child = self.table_layout.takeAt(0)
             if child.widget():
@@ -500,11 +549,10 @@ class StartPage(QWidget):
             body_text = t("start.empty_body")
         title = QLabel(title_text)
         title.setStyleSheet(styles.EMPTY_TITLE_STYLE)
-        body = QLabel(body_text)
+        body = motion.BalancedLabel(body_text)
         body.setStyleSheet(styles.EMPTY_TEXT_STYLE)
-        body.setWordWrap(True)
         body.setAlignment(Qt.AlignCenter)
-        body.setFixedWidth(440)   # keeps the sentence on one or two even lines
+        body.setFixedWidth(440)   # balanced: the sentence breaks into two even lines, not one long and one short
 
         lay.addWidget(circle, alignment=Qt.AlignCenter)
         lay.addSpacing(18)
@@ -571,9 +619,11 @@ class StartPage(QWidget):
         name_btn.setCursor(Qt.PointingHandCursor)
         name_btn.clicked.connect(lambda _, p=path: self.openRequested.emit(p))
 
-        size_text = _file_size_text(path)
-        subtitle = QLabel(f"PDF · {size_text}" if size_text else t("start.pdf_file"))
+        subtitle = QLabel()
         subtitle.setStyleSheet(styles.TABLE_ROW_SUBTITLE)
+        motion.tabular(subtitle)
+        self._show_size(subtitle, _SIZE_CACHE.get(path, "…"))
+        self._size_labels[path] = subtitle
 
         text_vbox.addWidget(name_btn, alignment=Qt.AlignLeft)
         text_vbox.addWidget(subtitle)
@@ -592,6 +642,7 @@ class StartPage(QWidget):
         date_lbl = QLabel(str(date))
         date_lbl.setStyleSheet(styles.TABLE_ROW_DATE)
         date_lbl.setFixedWidth(DATE_W)
+        motion.tabular(date_lbl)
 
         del_btn = TrashButton()
         del_btn.setFixedSize(ACTION_W, ACTION_W)
