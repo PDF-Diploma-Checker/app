@@ -14,5 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin UV_NO_MODIFY_PATH=1 sh
 
+# A build machine has no NVIDIA driver, so libcuda.so.1 does not exist, but llama.cpp's tools and libggml-cuda.so are
+# linked against it. CUDA's stub library stands in for it while building and in the smoke test; it is not packed into
+# the application (PyInstaller never bundles libcuda), the driver of the user's computer is used there.
+RUN if [ -d /usr/local/cuda/lib64/stubs ]; then ln -sf libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1; fi
+ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs \
+    LDFLAGS=-Wl,-rpath-link=/usr/local/cuda/lib64/stubs
+
 WORKDIR /src
 ENTRYPOINT ["/src/docker/build_in_container.sh"]
