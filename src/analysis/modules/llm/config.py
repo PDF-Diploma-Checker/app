@@ -31,6 +31,15 @@ EMBEDDING_REPO_PREFIX = "sentence-transformers/"
 
 GEMMA_REPO = "nocturne23/gemma-3-12b-it-Q4_K_M-GGUF"
 GEMMA_FILE = "gemma-3-12b-it-q4_k_m.gguf"  # exact name from the repo (case matters on Linux)
+GEMMA_SUBDIR = "gemma3_12b"
+# The light profile: the whole analysis on the small Gemma 3 4B (a third of the download, about twice as fast, less
+# accurate). The model that reviews the language findings is not used with it until it is shown to be reliable there.
+LIGHT_REPO = "ggml-org/gemma-3-4b-it-GGUF"
+LIGHT_FILE = "gemma-3-4b-it-Q4_K_M.gguf"
+LIGHT_SUBDIR = "gemma3_4b"
+PROFILES = ("full", "light")
+DEFAULT_PROFILE = "full"
+LANGUAGE_REVIEW_PROFILES = ("full",)        # the profiles in which the text model reviews the language findings
 VISION_REPO = "unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
 VISION_FILE = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
 VISION_MMPROJ_FILE = "mmproj-F16.gguf"
@@ -54,9 +63,22 @@ def _default_device():
         return "cpu"
 
 
+def text_model_path(model_dir, profile):
+    """Where the text model of `profile` lies in `model_dir`."""
+    if profile == "light":
+        return Path(model_dir) / LIGHT_SUBDIR / LIGHT_FILE
+    return Path(model_dir) / GEMMA_SUBDIR / GEMMA_FILE
+
+
+def language_review_enabled(profile=None):
+    """Whether the text model reviews the language findings (with the light model all of them stay)."""
+    return (profile or MODEL_PROFILE) in LANGUAGE_REVIEW_PROFILES
+
+
 def default_config():
     device = _default_device()
     return {
+        "model_profile": DEFAULT_PROFILE,
         "device": device,
         "n_gpu_layers": 25 if device == "cuda" else 0,
         "model_dir": "",                    # empty = the default folder (see default_model_dir())
@@ -66,10 +88,12 @@ def default_config():
     }
 
 
-def _models_present(model_dir):
-    """True when `model_dir` holds the Gemma model. Only that counts: a folder of an earlier version must stay in use
-    when the vision model changes, otherwise 8 GB would be downloaded again next to the missing file."""
-    return (Path(model_dir) / "gemma3_12b" / GEMMA_FILE).is_file()
+def _models_present(model_dir, profile=None):
+    """True when `model_dir` holds the Gemma model of `profile` (of any profile when none is given). Only that
+    counts: a folder of an earlier version must stay in use when the vision model changes, otherwise 8 GB would be
+    downloaded again next to the missing file."""
+    profiles = (profile,) if profile else PROFILES
+    return any(text_model_path(model_dir, p).is_file() for p in profiles)
 
 
 def default_model_dir():
@@ -138,13 +162,13 @@ def load_config():
 
 # module-level names of this file that other modules copy with "from ...config import NAME"
 _EXPORTED = (
-    "DEVICE", "N_GPU_LAYERS", "MODEL_DIR", "LANGUAGE", "EMBEDDING_MODEL", "MODEL_PATH",
+    "MODEL_PROFILE", "DEVICE", "N_GPU_LAYERS", "MODEL_DIR", "LANGUAGE", "EMBEDDING_MODEL", "MODEL_PATH",
     "VISION_MODEL_PATH", "VISION_MMPROJ_PATH", "EMBEDDING_DIR", "OUTPUT_DIR", "THESIS_PATH",
 )
 
 
 def _apply(cfg):
-    global DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL, EMBEDDING_DIR
+    global MODEL_PROFILE, DEVICE, N_GPU_LAYERS, MODEL_DIR, LANGUAGE, EMBEDDING_MODEL, EMBEDDING_DIR
     global MODEL_PATH, VISION_MODEL_PATH, VISION_MMPROJ_PATH, OUTPUT_DIR, THESIS_PATH
 
     DEVICE = str(cfg.get("device", "cpu")).lower().strip()
@@ -158,7 +182,8 @@ def _apply(cfg):
     LANGUAGE = str(cfg.get("language", "pl")).lower().strip()
     EMBEDDING_MODEL = str(cfg.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
 
-    MODEL_PATH = MODEL_DIR / "gemma3_12b" / GEMMA_FILE
+    MODEL_PROFILE = cfg.get("model_profile") if cfg.get("model_profile") in PROFILES else DEFAULT_PROFILE
+    MODEL_PATH = text_model_path(MODEL_DIR, MODEL_PROFILE)
     VISION_MODEL_PATH = MODEL_DIR / VISION_SUBDIR / VISION_FILE
     VISION_MMPROJ_PATH = MODEL_DIR / VISION_SUBDIR / VISION_MMPROJ_FILE
     EMBEDDING_DIR = MODEL_DIR / "embeddings" / EMBEDDING_MODEL.split("/")[-1]
@@ -330,9 +355,11 @@ def download_ai_models_with_progress(progress_callback=None):
     try:
         if not MODEL_PATH.is_file():
             run_control.check_cancelled()
-            report(15, t("progress.download_gemma"))
+            light = MODEL_PROFILE == "light"
+            report(15, t("progress.download_gemma_light" if light else "progress.download_gemma"))
             MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            hf_hub_download(repo_id=GEMMA_REPO, filename=GEMMA_FILE, local_dir=str(MODEL_PATH.parent))
+            hf_hub_download(repo_id=LIGHT_REPO if light else GEMMA_REPO, filename=LIGHT_FILE if light else GEMMA_FILE,
+                            local_dir=str(MODEL_PATH.parent))
 
         VISION_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
         if not VISION_MODEL_PATH.is_file():

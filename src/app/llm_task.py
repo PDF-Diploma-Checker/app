@@ -156,6 +156,11 @@ def build_image_summary(raw_image_report, language="pl"):
 
 def run_language_review(matches, language="pl", cancel_token=None):
     """The findings of the language checks after the text model has read them. Without the model all of them stay."""
+    from analysis.modules.llm import config
+
+    if not config.language_review_enabled():
+        logger.info("Review of the language findings: not done with the light model, all the findings stay")
+        return matches
     _stage(language, "language_review", cancel_token)
     try:
         from analysis.modules.llm.linguistic_review import review_findings

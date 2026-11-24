@@ -195,13 +195,41 @@ class AiSetupDialog(QDialog):
         self.body_layout.addWidget(self.layers_hint)
         self.body_layout.addSpacing(10)
 
+        # --- the model: accurate (12B) or fast (4B) ----------------------------------
+        self.body_layout.addWidget(_section_label(t("ai_setup.section_profile")))
+        self.body_layout.addWidget(_separator())
+        self.btn_full = QPushButton(t("ai_setup.profile_full"))
+        self.btn_light = QPushButton(t("ai_setup.profile_light"))
+        profile_segment = QFrame()
+        profile_segment.setObjectName("Segment")
+        profile_segment.setStyleSheet(styles.SEGMENT_STYLE)
+        profile_lay = QHBoxLayout(profile_segment)
+        profile_lay.setContentsMargins(3, 3, 3, 3)
+        profile_lay.setSpacing(2)
+        profile_group = QButtonGroup(profile_segment)
+        profile_group.setExclusive(True)
+        for btn in (self.btn_full, self.btn_light):
+            btn.setCheckable(True)
+            btn.setFixedHeight(42)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setStyleSheet(styles.MODE_BTN_STYLE)
+            profile_group.addButton(btn)
+            profile_lay.addWidget(btn, 1)
+            btn.clicked.connect(self._update_profile)
+        self.body_layout.addWidget(profile_segment)
+        self.profile_hint = QLabel()
+        self.profile_hint.setWordWrap(True)
+        self.profile_hint.setStyleSheet(styles.HINT_STYLE)
+        self.body_layout.addWidget(self.profile_hint)
+        self.body_layout.addSpacing(10)
+
         # --- models folder ---------------------------------------------------------
         self.body_layout.addWidget(_section_label(t("ai_setup.section_models")))
         self.body_layout.addWidget(_separator())
-        desc = QLabel(t("ai_setup.models_desc", size=f"{gpu_check.AI_MODELS_SIZE_GB:.0f}"))
-        desc.setWordWrap(True)
-        desc.setStyleSheet(styles.HINT_STYLE)
-        self.body_layout.addWidget(desc)
+        self.models_desc = QLabel()
+        self.models_desc.setWordWrap(True)
+        self.models_desc.setStyleSheet(styles.HINT_STYLE)
+        self.body_layout.addWidget(self.models_desc)
 
         dir_row = QHBoxLayout()
         dir_row.setSpacing(10)
@@ -255,8 +283,10 @@ class AiSetupDialog(QDialog):
 
         self._select_device(self._cfg.get("device") == "cuda")
         self.layers_input.setText(str(self._cfg.get("n_gpu_layers", 0)))
+        self.btn_light.setChecked(self._cfg.get("model_profile") == "light")
+        self.btn_full.setChecked(not self.btn_light.isChecked())
         self._update_device_widgets()
-        self._update_dir_status()
+        self._update_profile()
 
     # ------------------------------------------------------------ system check
     def start_check(self):
@@ -346,6 +376,17 @@ class AiSetupDialog(QDialog):
         self.btn_gpu.setChecked(bool(gpu))
         self.btn_cpu.setChecked(not gpu)
 
+    def _profile(self):
+        return "light" if self.btn_light.isChecked() else "full"
+
+    def _update_profile(self):
+        """The hint of the chosen model and what it changes for the folder (size to download, models already there)."""
+        profile = self._profile()
+        size = f"{gpu_check.models_size_gb(profile):.0f}"
+        self.profile_hint.setText(t("ai_setup.profile_hint_" + profile, size=size))
+        self.models_desc.setText(t("ai_setup.models_desc", size=size))
+        self._update_dir_status()
+
     def _gpu_available(self):
         """None while the check is still running."""
         return None if self.report is None else self.report.gpu_usable
@@ -389,17 +430,18 @@ class AiSetupDialog(QDialog):
         text = self._model_dir_text() or str(self._default_dir)
         directory = Path(text).expanduser()
         free = gpu_check.free_space_gb(directory)
-        if app_config._models_present(directory):
+        profile = self._profile()
+        if app_config._models_present(directory, profile):
             return "present", free
         if not _can_write(directory):
             return "readonly", free
-        if free < gpu_check.NEEDED_FREE_GB:
+        if free < gpu_check.needed_free_gb(profile):
             return "low", free
         return "ok", free
 
     def _update_dir_status(self):
         state, free = self._folder_state()
-        needed = f"{gpu_check.AI_MODELS_SIZE_GB:.0f}"
+        needed = f"{gpu_check.models_size_gb(self._profile()):.0f}"
         if state == "present":
             text, color = t("ai_setup.models_present"), styles.SUCCESS
         elif state == "readonly":
@@ -431,6 +473,7 @@ class AiSetupDialog(QDialog):
             "device": "cuda" if gpu else "cpu",
             "n_gpu_layers": layers if gpu else 0,
             "model_dir": chosen,
+            "model_profile": self._profile(),
             "hardware_configured": True,
         })
         try:

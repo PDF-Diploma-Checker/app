@@ -329,7 +329,7 @@ class SettingsDialog(QDialog):
         elif present:
             text, color = t("settings.models_present"), styles.SUCCESS
         else:
-            text, color = t("settings.models_missing", size=f"{gpu_check.AI_MODELS_SIZE_GB:.0f}"), styles.WARNING
+            text, color = t("settings.models_missing", size=f"{gpu_check.models_size_gb(app_config.MODEL_PROFILE):.0f}"), styles.WARNING
         self.models_status.setText(text)
         self.models_status.setStyleSheet(f"font-size: 13px; color: {color}; background: transparent; border: none;")
         self.btn_download.setVisible(available and not present)

@@ -349,10 +349,13 @@ class AnalysisDialog(QDialog):
         """Warn about a card too small for the models. The hardware facts arrive later than the choice of the mode."""
         hw = self._eta_hw or {}
         vram = hw.get("vram_gb", 0.0)
-        weak = self.btn_dokladny.isChecked() and gpu_check.is_weak_gpu(vram)
+        from analysis.modules.llm import config as llm_config
+        profile = llm_config.MODEL_PROFILE
+        weak = self.btn_dokladny.isChecked() and gpu_check.is_weak_gpu(vram, profile)
         if weak:
+            needed = gpu_check.LIGHT_GOOD_VRAM_GB if profile == "light" else gpu_check.GOOD_VRAM_GB
             self.gpu_warning_label.setText(t("analysis.weak_gpu", name=hw.get("gpu_name", "GPU"), vram=f"{vram:.1f}",
-                                             needed=f"{gpu_check.GOOD_VRAM_GB:.0f}"))
+                                             needed=f"{needed:.0f}"))
         self.gpu_warning_label.setVisible(weak)
 
     def _update_device_line(self):
@@ -847,7 +850,8 @@ class AnalysisDialog(QDialog):
         hw = self._eta_hw or {}
         machine = eta.machine_from_config(load_config(), hw)
         self.resource_panel.configure(is_detailed, machine.gpu, machine.gpu_layers,
-                                      gpu_name=hw.get("gpu_name", ""), threads=hw.get("threads"))
+                                      gpu_name=hw.get("gpu_name", ""), threads=hw.get("threads"),
+                                      total_layers=eta.LIGHT_LAYERS if machine.profile == "light" else eta.GEMMA_LAYERS)
         self.stages_title.setVisible(is_detailed)
         self.stage_list.setVisible(is_detailed)
 
