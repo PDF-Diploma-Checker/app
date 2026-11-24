@@ -10,6 +10,8 @@ import uuid
 from urllib.parse import urlsplit
 
 import requests
+
+from common.retry import retry_call
 from common.path import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -95,8 +97,11 @@ def contains(word):
 
 def propose(word, idempotency_key=None):
     # Never include a finding, PDF path, sentence, logs, or thesis attachment.
-    response = requests.post(service_url() + '/proposals', json={'word': normalize_word(word)}, timeout=(3, 10), allow_redirects=False,
-                             headers={'Idempotency-Key': idempotency_key or str(uuid.uuid4())})
+    key = idempotency_key or str(uuid.uuid4())      # the same key on every try: a repeated proposal is one proposal
+    response = retry_call(
+        lambda: requests.post(service_url() + '/proposals', json={'word': normalize_word(word)}, timeout=(3, 10),
+                              allow_redirects=False, headers={'Idempotency-Key': key}),
+        requests.ConnectionError, attempts=3)
     if response.status_code != 201:
         raise ValueError(f'Proposal could not be submitted ({response.status_code}). Please try again later.')
     data = response.json()

@@ -118,6 +118,18 @@ class SavingFiles:
                 return doc, position
         return None, 0
 
+    def set_view_state(self, path, page, zoom):
+        """Remember where the reader was (page, zoom), so a reopened document continues from there."""
+        doc = self._find(path)
+        if doc is not None and doc.get("view_state") != {"page": int(page), "zoom": round(float(zoom), 3)}:
+            doc["view_state"] = {"page": int(page), "zoom": round(float(zoom), 3)}
+            self._save_to_disk(self.data)
+
+    def get_view_state(self, path):
+        doc = self._find(path)
+        state = doc.get("view_state") if doc else None
+        return state if isinstance(state, dict) else None
+
     def _find(self, path):
         for doc in self.data["documents"]:
             if doc.get("local_path") == path:

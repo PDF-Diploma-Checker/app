@@ -25,6 +25,7 @@ from . import styles
 from .i18n import t
 from .message_box import MessageBox, fit_minimum_height
 from common.logging_setup import APP_NAME, get_log_dir, get_log_file_path
+from common.retry import retry_call
 from common.system_info import build_system_report
 
 logger = logging.getLogger(__name__)
@@ -148,9 +149,13 @@ def _post_report(url, thesis_path, user_message, idempotency_key=None):
     }
 
     try:
-        response = requests.post(
-            url, data=data, files=files, timeout=REQUEST_TIMEOUT_S,
-            headers={"User-Agent": f"{APP_NAME}-report", "Idempotency-Key": idempotency_key},
+        # a short outage is waited out (1 s, 2 s, with jitter); the Idempotency-Key makes the repeat safe
+        response = retry_call(
+            lambda: requests.post(
+                url, data=data, files=files, timeout=REQUEST_TIMEOUT_S,
+                headers={"User-Agent": f"{APP_NAME}-report", "Idempotency-Key": idempotency_key},
+            ),
+            requests.ConnectionError, attempts=3,
         )
     except requests.Timeout as e:
         raise ReportError(t("report.err_timeout")) from e

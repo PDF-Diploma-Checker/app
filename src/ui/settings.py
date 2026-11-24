@@ -110,6 +110,9 @@ class SettingsDialog(QDialog):
 
         self.setup_ui()
         self.load_config()
+        self._baseline = self._values()
+        for field in (self.input_model_dir, self.input_gpu_layers):
+            field.editingFinished.connect(lambda f=field: f.setText(f.text().strip()))   # no stray spaces
         # height follows the content (wrapped descriptions differ per language)
         needed = self.body.layout().totalHeightForWidth(self.width()) + self.footer.sizeHint().height() + 1
         self.setFixedHeight(min(needed, self.screen().availableGeometry().height() - SCREEN_MARGIN))
@@ -333,6 +336,20 @@ class SettingsDialog(QDialog):
         self.models_status.setText(text)
         self.models_status.setStyleSheet(f"font-size: 13px; color: {color}; background: transparent; border: none;")
         self.btn_download.setVisible(available and not present)
+
+    def _values(self):
+        """What the form holds now, to tell whether anything was changed."""
+        return (self.combo_device.currentData(), self.input_gpu_layers.text().strip(),
+                self.input_model_dir.text().strip(), self.combo_language.currentData())
+
+    def reject(self):
+        """Closing with Esc, Cancel or the window button asks first, but only when something was really changed."""
+        if self._values() != self._baseline:
+            answer = MessageBox.question(self, t("settings.discard_title"), t("settings.discard_text"),
+                                         MessageBox.Yes | MessageBox.No, MessageBox.No)
+            if answer != MessageBox.Yes:
+                return
+        super().reject()
 
     def load_config(self):
         data = app_config.load_config()

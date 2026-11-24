@@ -55,8 +55,13 @@ def _dpr():
     return max(1.0, screen.devicePixelRatio()) if screen else 1.0
 
 
-def pixmap(name, color="#6B7280", size=16, stroke=2.0):
+STROKE = 2.0      # one line weight for every icon, so neighbouring icons look like one set
+
+
+def pixmap(name, color="#6B7280", size=16, stroke=STROKE):
     """Render the named icon to a crisp pixmap of `size` logical pixels."""
+    if 1.5 <= stroke <= 2.6:        # 1.8, 2.25, 2.5 ... were chosen one by one; one weight keeps the set consistent
+        stroke = STROKE
     ratio = _dpr()
     px = int(round(size * ratio))
     pm = QPixmap(px, px)
@@ -70,7 +75,7 @@ def pixmap(name, color="#6B7280", size=16, stroke=2.0):
     return pm
 
 
-def icon(name, color="#6B7280", size=16, stroke=2.0, disabled="#C4C9D2"):
+def icon(name, color="#6B7280", size=16, stroke=STROKE, disabled="#C4C9D2"):
     """QIcon with a normal and a greyed-out disabled state."""
     ic = QIcon()
     ic.addPixmap(pixmap(name, color, size, stroke), QIcon.Normal)

@@ -2,7 +2,7 @@ import os
 import re
 import threading
 
-from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -111,6 +111,21 @@ class _SizeRefresher(QObject):
             self.sized.emit(path, _file_size_text(path) or "")
 
 
+class _HoverIntent(QObject):
+    """Starts `timer` when the pointer enters the widget and stops it when it leaves."""
+
+    def __init__(self, widget, timer):
+        super().__init__(widget)
+        self._timer = timer
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Enter:
+            self._timer.start()
+        elif event.type() == QEvent.Leave:
+            self._timer.stop()
+        return False
+
+
 class PDFDropFrame(motion.SquircleFrame):
     """provides drag-and-drop capabilities specialized for filtering and accepting PDF files."""
     fileDropped = Signal(str)
@@ -163,6 +178,7 @@ class StartPage(QWidget):
     openRequested = Signal(str)
     deleteRequested = Signal(str)
     commandsRequested = Signal()
+    prefetchRequested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -306,6 +322,7 @@ class StartPage(QWidget):
         titles.setSpacing(2)
         self.title_label = QLabel()
         self.title_label.setStyleSheet(styles.HEADER_TITLE_STYLE)
+        motion.tracking(self.title_label, -0.6)       # large heading: slightly tighter
         self.subtitle_label = QLabel()
         self.subtitle_label.setStyleSheet(styles.SUBTITLE_STYLE)
         titles.addWidget(self.title_label)
@@ -373,6 +390,7 @@ class StartPage(QWidget):
 
         self.section_title = QLabel()
         self.section_title.setStyleSheet(styles.SECTION_TITLE_STYLE)
+        motion.tracking(self.section_title, -0.3)
         self.count_label = QLabel("")
         self.count_label.setStyleSheet(styles.MUTED_LABEL_STYLE)
         motion.tabular(self.count_label)
@@ -383,7 +401,11 @@ class StartPage(QWidget):
         self.search_input.setStyleSheet(styles.SEARCH_STYLE)
         self.search_input.setFixedWidth(330)
         self.search_input.setFixedHeight(42)
-        self.search_input.textChanged.connect(self.on_search)
+        self.search_input.textChanged.connect(self._queue_search)
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(120)          # requests made while typing are merged into one
+        self._search_timer.timeout.connect(lambda: self.on_search(self.search_input.text()))
 
         self.sort_btn = QPushButton()
         self.sort_btn.setIcon(icons.icon("sort", styles.TEXT_3, 15))
@@ -415,8 +437,11 @@ class StartPage(QWidget):
         dialog = SettingsDialog(self)
         dialog.exec()
 
+    def _queue_search(self, _text=None):
+        self._search_timer.start()
+
     def on_search(self, text):
-        self.search_text = text.lower()
+        self.search_text = text.strip().lower()
         self._apply_sort_and_render()
 
     def toggle_sort(self):
@@ -559,6 +584,18 @@ class StartPage(QWidget):
         lay.addWidget(title, alignment=Qt.AlignCenter)
         lay.addSpacing(6)
         lay.addWidget(body, alignment=Qt.AlignCenter)
+        # what to do next, not only what is missing
+        lay.addSpacing(18)
+        action = QPushButton(t("start.clear_filter") if has_documents else t("start.empty_add"))
+        action.setFixedHeight(42)
+        action.setCursor(Qt.PointingHandCursor)
+        if has_documents:
+            action.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+            action.clicked.connect(self.search_input.clear)
+        else:
+            action.setStyleSheet(styles.BLUE_BUTTON_STYLE)
+            action.clicked.connect(self.add_btn.click)
+        lay.addWidget(action, alignment=Qt.AlignCenter)
         self.table_layout.addWidget(box)
 
     def _build_status_badge(self, has_config):
@@ -618,6 +655,11 @@ class StartPage(QWidget):
         name_btn.setStyleSheet(styles.TABLE_ROW_NAME_BUTTON)
         name_btn.setCursor(Qt.PointingHandCursor)
         name_btn.clicked.connect(lambda _, p=path: self.openRequested.emit(p))
+        hover = QTimer(name_btn)
+        hover.setSingleShot(True)
+        hover.setInterval(80)                        # intent: the pointer rested for 80 ms
+        hover.timeout.connect(lambda p=path: self.prefetchRequested.emit(p))
+        name_btn.installEventFilter(_HoverIntent(name_btn, hover))
 
         subtitle = QLabel()
         subtitle.setStyleSheet(styles.TABLE_ROW_SUBTITLE)
