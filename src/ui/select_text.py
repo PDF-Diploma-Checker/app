@@ -34,10 +34,13 @@ class ErrorMarker(QPushButton):
         super().__init__(parent)
         self.data = error_data
         self.lang = lang
-        self.setFixedSize(16, 16)
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(styles.ERROR_MARKER_STYLE)
-        self.setText("!")
+        number = error_data.get("finding_id") if isinstance(error_data, dict) else None
+        # the number of the finding sits right next to the "!", on the marker that is clicked
+        text = f"! {number}" if number else "!"
+        self.setText(text)
+        self.setFixedSize(max(16, self.fontMetrics().horizontalAdvance(text) + 12), 16)
         label = finding_label(error_data)
         self.setToolTip(f"{label} · {error_data.get('category', '')}".strip(" ·") if label else "")
         if self.data.get("category") == "TYPOS":
@@ -280,9 +283,10 @@ class SelectablePdfView(QPdfView):
                 px_x = base[0] + int((coords.get("x", 0) * kx) + 0.5)
                 px_y = base[1] + int((coords.get("y", 0) * ky) + 0.5)
                 px_w = int((coords.get("w", 0) * kx) + 0.5)
-                marker_x = px_x + (px_w // 2) - 8 if px_w > 0 else px_x - 8
+                half = marker.width() // 2
+                marker_x = px_x + (px_w // 2) - half if px_w > 0 else px_x - half
                 marker_y = px_y - 12
-                if view.intersects(QRect(int(marker_x), int(marker_y), 16, 16)):
+                if view.intersects(QRect(int(marker_x), int(marker_y), marker.width(), 16)):
                     marker.move(int(marker_x), int(marker_y))
                     marker.show()
                 elif marker.isVisible():
