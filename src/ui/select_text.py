@@ -247,8 +247,8 @@ class SelectablePdfView(QPdfView):
         Runs on every scroll step, so it stays cheap: page offsets come from a cache and only the widgets that are
         (nearly) in view are moved; the hundreds of the others stay hidden until they scroll in."""
         doc = self.document()
-        if not doc or doc.pageCount() == 0:
-            return
+        if not doc or doc.pageCount() == 0 or self.viewport().width() < 50:
+            return          # not laid out yet: the markers would land at the edge of the view
 
         dpi_x, dpi_y = self.logicalDpiX(), self.logicalDpiY()
         zoom = self.zoomFactor()
