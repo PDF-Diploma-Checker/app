@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 
 from common import eta
 
-from . import styles
+from . import motion, styles
 from .i18n import t
 
 GEMMA_LAYERS = eta.GEMMA_LAYERS
