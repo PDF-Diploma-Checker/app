@@ -11,6 +11,10 @@ _PATHS = {
     "search": '<circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     "help": '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.5M12 17v.1"/>',
     "plus": '<path d="M12 5v14M5 12h14"/>',
+    "sparkles": '<path d="M10 3l1.8 5.2L17 10l-5.2 1.8L10 17l-1.8-5.2L3 10l5.2-1.8z"/>'
+                '<path d="M18 14l.9 2.1L21 17l-2.1.9L18 20l-.9-2.1L15 17l2.1-.9z"/><path d="M18 3v4M16 5h4"/>',
+    "send": '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    "stop": '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
     "minus": '<path d="M5 12h14"/>',
     "upload": '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
     "download": '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',

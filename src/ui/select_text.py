@@ -185,12 +185,19 @@ class SelectionHighlight(QWidget):
         self.show()
         self.update()
 
+    COLOR = (37, 99, 235, 70)
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(37, 99, 235, 70))
+        p.setBrush(QColor(*self.COLOR))
         for rect in self.rects:
             p.drawRect(rect)
+
+
+class SourceHighlight(SelectionHighlight):
+    """The fragment of the thesis an answer of the assistant comes from (amber, so it is not taken for a selection)."""
+    COLOR = (245, 158, 11, 75)
 
 
 class SelectablePdfView(QPdfView):
@@ -205,6 +212,8 @@ class SelectablePdfView(QPdfView):
         self.comment_markers = []
         self.highlight_boxes = []
         self.selection_box = SelectionHighlight(self.viewport())
+        self.source_box = SourceHighlight(self.viewport())
+        self._source_rects = []         # [[page, x0, y0, x1, y1]] of the fragment shown by the assistant
         self.selection_pdf_rect = None
         self.selection_page_idx = -1
         self.selected_text = ""
@@ -217,6 +226,8 @@ class SelectablePdfView(QPdfView):
         self.viewport().setCursor(Qt.IBeamCursor)
 
         self.verticalScrollBar().valueChanged.connect(self.update_selection_box_pos)
+        self.verticalScrollBar().valueChanged.connect(lambda _v: self.update_source_box_pos())
+        self.horizontalScrollBar().valueChanged.connect(lambda _v: self.update_source_box_pos())
         self.horizontalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.verticalScrollBar().valueChanged.connect(self.update_markers_pos)
         self.horizontalScrollBar().valueChanged.connect(self.update_markers_pos)
@@ -381,6 +392,7 @@ class SelectablePdfView(QPdfView):
         finally:
             viewport.setUpdatesEnabled(True)
             viewport.update()
+        self.update_source_box_pos()        # the zoom moves it too
 
     def clear_comments(self):
         """Removes all comments"""
@@ -401,6 +413,7 @@ class SelectablePdfView(QPdfView):
         super().resizeEvent(event)
         self.update_selection_box_pos()
         self.update_markers_pos()
+        self.update_source_box_pos()
 
     # ------------------------------------------------------------------ text selection
     # Like in a PDF reader: press on the text and drag; the words from the one under the press to the one under the
@@ -438,6 +451,27 @@ class SelectablePdfView(QPdfView):
     def _to_view(self, index, rect):
         x0, y0, kx, ky = self._page_origin(index)
         return QRectF(x0 + rect[0] * kx, y0 + rect[1] * ky, (rect[2] - rect[0]) * kx, (rect[3] - rect[1]) * ky)
+
+    def show_source(self, page, rects):
+        """Scrolls to a fragment of the thesis (page counted from 0) and highlights its lines."""
+        doc = self.document()
+        if not doc or not (0 <= page < doc.pageCount()):
+            return
+        self._source_rects = [list(r) for r in rects if len(r) >= 5 and 0 <= int(r[0]) < doc.pageCount()]
+        tops, _ = self._page_layout()
+        ky = self.zoomFactor() * self.logicalDpiY() / 72.0
+        first_y = min((r[2] for r in self._source_rects if int(r[0]) == page), default=0)
+        self.verticalScrollBar().setValue(int(tops[page] + first_y * ky - 80))
+        self.update_source_box_pos()
+
+    def clear_source(self):
+        self._source_rects = []
+        self.source_box.set_rects([])
+
+    def update_source_box_pos(self):
+        if not self._source_rects:
+            return
+        self.source_box.set_rects([self._to_view(int(r[0]), r[1:5]) for r in self._source_rects])
 
     def clear_selection(self):
         self.selected_text = ""
@@ -504,6 +538,8 @@ class SelectablePdfView(QPdfView):
 
     def mousePressEvent(self, event):
         """Handles mouse press events."""
+        if event.button() == Qt.LeftButton:
+            self.clear_source()
         if event.button() == Qt.BackButton:
             self.backRequested.emit()
             return
