@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 STDERR_LOG_NAME = "assistant_process.log"
 IDLE_MINUTES = 10
+FRAGMENTS_PER_ATTEMPT = 8       # more fragments at once make the model miss the one that answers
 N_THREADS = max((os.cpu_count() or 4) - 1, 1)
 
 
@@ -124,29 +125,25 @@ class _Assistant:
         logger.info("Assistant: %s fragments of %s", len(index.chunks), os.path.basename(pdf_path))
         self.send(("ready", {"chunks": len(index.chunks), "summaries": len(self.summaries)}))
 
-    def ask(self, qid, question, history, language):
+    def _phrases(self, question, language):
+        """Search phrases the model writes for the question (the words the thesis would use); [] on any problem."""
         from analysis.modules.llm.assistant import answer as A
+        try:
+            reply = self.llm.create_chat_completion(messages=A.expansion_messages(question, language),
+                                                    temperature=0.0, max_tokens=A.EXPANSION_TOKENS)
+            phrases = A.parse_expansion(reply["choices"][0]["message"]["content"])
+        except AnalysisCancelled:
+            raise
+        except Exception:
+            logger.warning("Assistant: no search phrases for the question", exc_info=True)
+            return []
+        logger.info("Assistant search phrases: %s", phrases)
+        return phrases
 
-        question = A.clean_question(question)
-        if self.index is None:
-            raise RuntimeError("no document")
-        whole = A.is_whole_thesis_question(question)
-        found = self.index.search(question, self._encode, k=10, boost=A.overview_boost if whole else None)
-        if A.nothing_relevant(found) and not whole:
-            # nothing in the thesis is near the question: no model, no chance to invent an answer
-            self.send(("answer", qid, {"text": A.NOT_FOUND.get(language, A.NOT_FOUND["pl"]), "kind": "not_found",
-                                       "sources": []}))
-            return
-        llm = self._model()
-        budget = self.n_ctx - A.ANSWER_TOKENS - 96
-        messages, sources = A.build_messages(question, found, self.summaries if whole else [], history, language,
-                                             self._count, budget)
-        from ui.i18n import t
-        self.send(("status", t("assistant.thinking")))
-        text = ""
-        last_sent = 0.0
-        for part in llm.create_chat_completion(messages=messages, temperature=0.1, top_p=0.9, repeat_penalty=1.1,
-                                               max_tokens=A.ANSWER_TOKENS, stream=True):
+    def _generate(self, qid, messages, max_tokens):
+        text, last_sent = "", 0.0
+        for part in self.llm.create_chat_completion(messages=messages, temperature=0.1, top_p=0.9,
+                                                    repeat_penalty=1.1, max_tokens=max_tokens, stream=True):
             delta = (part.get("choices") or [{}])[0].get("delta", {}).get("content") or ""
             if delta:
                 text += delta
@@ -154,7 +151,46 @@ class _Assistant:
                 if now - last_sent > 0.15:
                     self.send(("partial", qid, text))
                     last_sent = now
-        result = A.check_answer(text, sources, language)
+        return text
+
+    def ask(self, qid, question, history, language):
+        from analysis.modules.llm.assistant import answer as A
+        from ui.i18n import t
+
+        question = A.clean_question(question)
+        if self.index is None:
+            raise RuntimeError("no document")
+        whole = A.is_whole_thesis_question(question)
+        boost = A.combine_boosts(A.overview_boost if whole else None, A.count_boost(question))
+        first_look = self.index.search(question, self._encode, k=10, boost=boost)
+        if A.nothing_relevant(first_look) and not whole:
+            # nothing in the thesis is near the question: no model, no chance to invent an answer
+            self.send(("answer", qid, {"text": A.NOT_FOUND.get(language, A.NOT_FOUND["pl"]), "kind": "not_found",
+                                       "sources": []}))
+            return
+        self._model()
+        self.send(("status", t("assistant.thinking")))
+        # the question and the thesis often say one thing in different words: the model adds the words the answer
+        # would be written with, and the fragments are searched with all of them
+        queries = [question] + self._phrases(question, language)
+        found = self.index.search_many(queries, self._encode, k=2 * FRAGMENTS_PER_ATTEMPT, boost=boost)
+        budget = self.n_ctx - A.ANSWER_TOKENS - 96
+        result, sources, shown = None, {}, set()
+        for attempt in range(2):
+            remaining = [item for item in found if item[0]["id"] not in shown]
+            if not remaining:
+                break
+            if attempt:
+                # the best fragments did not hold the answer: once more with the next ones
+                self.send(("status", t("assistant.searching_more")))
+                self.send(("partial", qid, ""))
+            messages, sources = A.build_messages(question, remaining[:FRAGMENTS_PER_ATTEMPT],
+                                                 self.summaries if whole else [], history, language, self._count,
+                                                 budget)
+            shown |= {source["chunk"]["id"] for source in sources.values() if "chunk" in source}
+            result = A.check_answer(self._generate(qid, messages, A.ANSWER_TOKENS), sources, language)
+            if result["kind"] != "not_found":
+                break
         result["sources"] = [A.source_view(key, sources[key], self.index.sections) for key in result["citations"]]
         self.send(("answer", qid, result))
 

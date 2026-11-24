@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-INDEX_VERSION = 1
+INDEX_VERSION = 3          # 3: vectors of sentences too; captions with a broken word are one text
 RRF_K = 60
 STEM = 6                    # letters kept of a longer word ("sterowania" -> "sterow")
 
@@ -76,52 +76,113 @@ def chunk_text_for_embedding(chunk):
     return f"{section}\n{chunk['text']}" if section else chunk["text"]
 
 
-class ThesisIndex:
-    """The fragments of one thesis with their vectors. `encode(texts) -> array (n, d)` gives normalized vectors."""
+_SENTENCE = re.compile(r"(?<=[.!?;:])\s+")
+WINDOW_WORDS = 45
 
-    def __init__(self, data, vectors):
+
+def sentence_windows(chunk):
+    """Pieces of one or two sentences of a fragment (at most about WINDOW_WORDS words), each with the section title.
+    A fragment of 170 words is about several things; its one vector is their average, and a single sentence that
+    answers the question ("uczona na 32 środowiskach") is lost in it. Each piece gets a vector of its own."""
+    section = chunk.get("section") or ""
+    sentences = [x for x in _SENTENCE.split(chunk["text"].replace("\n", " ")) if x.strip()]
+    windows, current = [], []
+    for sentence in sentences:
+        words = sentence.split()
+        while len(words) > WINDOW_WORDS:                   # a very long sentence: cut it
+            windows.append(" ".join(words[:WINDOW_WORDS]))
+            words = words[WINDOW_WORDS:]
+        if current and len(current) + len(words) > WINDOW_WORDS:
+            windows.append(" ".join(current))
+            current = []
+        current += words
+    if current:
+        windows.append(" ".join(current))
+    return [f"{section}: {w}" if section else w for w in windows] or [chunk_text_for_embedding(chunk)]
+
+
+class ThesisIndex:
+    """The fragments of one thesis with their vectors: one per fragment and one per piece of 1-2 sentences.
+    `encode(texts) -> array (n, d)` gives normalized vectors."""
+
+    def __init__(self, data, vectors, window_vectors=None, window_owner=None):
         self.chunks = data["chunks"]
         self.sections = data.get("sections", [])
         self.vectors = np.asarray(vectors, dtype=np.float32) if vectors is not None else None
+        self.window_vectors = np.asarray(window_vectors, dtype=np.float32) if window_vectors is not None else None
+        self.window_owner = np.asarray(window_owner, dtype=np.int64) if window_owner is not None else None
         self.bm25 = Bm25([chunk_text_for_embedding(c) for c in self.chunks])
 
     @classmethod
     def build(cls, data, encode):
-        texts = [chunk_text_for_embedding(c) for c in data["chunks"]]
+        chunks = data["chunks"]
+        texts = [chunk_text_for_embedding(c) for c in chunks]
         vectors = encode(texts) if texts else np.zeros((0, 1), dtype=np.float32)
-        return cls(data, vectors)
+        windows, owner = [], []
+        for i, chunk in enumerate(chunks):
+            for window in sentence_windows(chunk):
+                windows.append(window)
+                owner.append(i)
+        window_vectors = encode(windows) if windows else np.zeros((0, 1), dtype=np.float32)
+        return cls(data, vectors, window_vectors, owner)
 
-    def search(self, question, encode=None, k=6, boost=None):
-        """[(chunk, info)] of the best `k` fragments; info: {"bm25", "cosine", "score"}. `boost(chunk) -> float`
-        adds to the fused score (e.g. the introduction and the conclusions for a question about the whole thesis)."""
+    def _cosines(self, query_vector):
+        """Closeness of every fragment to a query: the best of the whole fragment and of its sentences."""
         n = len(self.chunks)
-        if not n:
+        if self.vectors is None or len(self.vectors) != n:
+            return np.zeros(n, dtype=np.float32)
+        cosine = self.vectors @ query_vector
+        if self.window_vectors is not None and len(self.window_vectors) and self.window_owner is not None:
+            per_window = self.window_vectors @ query_vector
+            best = np.full(n, -1.0, dtype=np.float32)
+            np.maximum.at(best, self.window_owner, per_window)
+            cosine = np.maximum(cosine, best)
+        return cosine.astype(np.float32)
+
+    def search_many(self, queries, encode=None, k=6, boost=None, weights=None):
+        """[(chunk, info)] of the best `k` fragments for the question and the phrases the model wrote for it: the
+        ranks of every query are added (the question itself counts most). info: {"bm25", "cosine", "score"}, the
+        best bm25 / cosine of any query. `boost(chunk) -> float` adds to the fused score (e.g. the introduction and
+        the conclusions for a question about the whole thesis)."""
+        n = len(self.chunks)
+        queries = [q for q in queries if q and str(q).strip()]
+        if not n or not queries:
             return []
-        lexical = self.bm25.scores(question)
-        if encode is not None and self.vectors is not None and len(self.vectors) == n:
-            cosine = self.vectors @ np.asarray(encode([question])[0], dtype=np.float32)
-        else:
-            cosine = np.zeros(n, dtype=np.float32)
+        weights = weights or [1.0] + [0.6] * (len(queries) - 1)
+        query_vectors = np.asarray(encode(queries), dtype=np.float32) if encode is not None else None
         fused = np.zeros(n, dtype=np.float32)
-        for scores in (lexical, cosine):
-            order = np.argsort(-scores, kind="stable")
-            for rank, i in enumerate(order):
-                if scores[i] > 0:
-                    fused[i] += 1.0 / (RRF_K + rank + 1)
+        best_lexical = np.zeros(n, dtype=np.float32)
+        best_cosine = np.zeros(n, dtype=np.float32)
+        for qi, query in enumerate(queries):
+            lexical = self.bm25.scores(query)
+            cosine = self._cosines(query_vectors[qi]) if query_vectors is not None else np.zeros(n, dtype=np.float32)
+            best_lexical = np.maximum(best_lexical, lexical)
+            best_cosine = np.maximum(best_cosine, cosine)
+            for scores in (lexical, cosine):
+                order = np.argsort(-scores, kind="stable")
+                for rank, i in enumerate(order):
+                    if scores[i] > 0:
+                        fused[i] += weights[qi] / (RRF_K + rank + 1)
         if boost is not None:
             fused += np.array([boost(c) for c in self.chunks], dtype=np.float32)
         best = [int(i) for i in np.argsort(-fused, kind="stable")[:k] if fused[i] > 0]
-        return [(self.chunks[i], {"bm25": float(lexical[i]), "cosine": float(cosine[i]), "score": float(fused[i])})
-                for i in best]
+        return [(self.chunks[i], {"bm25": float(best_lexical[i]), "cosine": float(best_cosine[i]),
+                                  "score": float(fused[i])}) for i in best]
+
+    def search(self, question, encode=None, k=6, boost=None):
+        return self.search_many([question], encode, k=k, boost=boost)
 
     # ------------------------------------------------------------------ saving
     def save(self, folder):
         folder = Path(folder)
         folder.mkdir(parents=True, exist_ok=True)
+        np.savez(folder / "vectors.npz",
+                 chunks=self.vectors if self.vectors is not None else np.zeros((0, 1)),
+                 windows=self.window_vectors if self.window_vectors is not None else np.zeros((0, 1)),
+                 owner=self.window_owner if self.window_owner is not None else np.zeros(0, dtype=np.int64))
         tmp = folder / "chunks.json.tmp"
         tmp.write_text(json.dumps({"version": INDEX_VERSION, "chunks": self.chunks, "sections": self.sections},
                                   ensure_ascii=False), encoding="utf-8")
-        np.save(folder / "vectors.npy", self.vectors if self.vectors is not None else np.zeros((0, 1)))
         tmp.replace(folder / "chunks.json")        # written last: a folder without it is not a finished index
 
     @classmethod
@@ -131,10 +192,11 @@ class ThesisIndex:
             data = json.loads((folder / "chunks.json").read_text(encoding="utf-8"))
             if data.get("version") != INDEX_VERSION:
                 return None
-            vectors = np.load(folder / "vectors.npy")
-            if len(vectors) != len(data["chunks"]):
+            with np.load(folder / "vectors.npz") as arrays:
+                vectors, windows, owner = arrays["chunks"], arrays["windows"], arrays["owner"]
+            if len(vectors) != len(data["chunks"]) or len(windows) != len(owner):
                 return None
-            return cls(data, vectors)
+            return cls(data, vectors, windows, owner)
         except (OSError, ValueError, KeyError):
             return None
 

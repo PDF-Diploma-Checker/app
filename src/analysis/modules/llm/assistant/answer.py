@@ -34,6 +34,38 @@ _CITATION = re.compile(r"\[\s*(S?\d+(?:\s*[,;]\s*S?\d+)*)\s*\]")
 MIN_COSINE = 0.22
 
 
+EXPANSION_TOKENS = 80
+MAX_PHRASES = 6
+
+
+def expansion_messages(question, language):
+    """Ask the model for the words the answer would be written with: the question and the thesis often say the same
+    thing in other words ("ile środowisk równoległych" / "uczona na 32 środowiskach")."""
+    if language == "en":
+        text = ("Write up to 6 short search phrases (2-5 words each) that would appear in a passage of a diploma thesis "
+                "answering the question below: other words for the same thing, technical terms, abbreviations. "
+                "One phrase per line, no numbering, no explanation, in the language of the question.\n\n"
+                f"Question: {question}")
+    else:
+        text = ("Napisz do 6 krótkich fraz wyszukiwania (po 2-5 słów), które wystąpiłyby we fragmencie pracy "
+                "dyplomowej odpowiadającym na pytanie poniżej: inne słowa na to samo, terminy techniczne, skróty, "
+                "różne formy wyrazów. Jedna fraza w wierszu, bez numeracji i bez wyjaśnień.\n\n"
+                f"Pytanie: {question}")
+    return [{"role": "user", "content": text}]
+
+
+def parse_expansion(text):
+    """The phrases of the model's reply: at most MAX_PHRASES short lines, without bullets and quotes."""
+    phrases = []
+    for line in str(text or "").splitlines():
+        line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip().strip('"„”\'').strip()
+        if 2 <= len(line) <= 60 and line.lower() not in (p.lower() for p in phrases):
+            phrases.append(line)
+        if len(phrases) >= MAX_PHRASES:
+            break
+    return phrases
+
+
 def is_whole_thesis_question(question):
     return bool(_WHOLE_THESIS.search(question or ""))
 
@@ -41,6 +73,33 @@ def is_whole_thesis_question(question):
 def overview_boost(chunk):
     """A small bonus for the introduction, the purpose and the conclusions (for a question about the whole thesis)."""
     return 0.04 if _OVERVIEW_SECTIONS.search(chunk.get("section") or "") else 0.0     # above two first places
+
+
+_COUNT_QUESTION = re.compile(r"^\s*(ile|ilu|jak wiele|jak dużo|how many|how much)\b", re.IGNORECASE)
+
+
+def count_boost(question):
+    """For "ile ...?" / "how many ...?": a bonus for fragments where a number stands right before a word of the
+    question ("na 32 środowiskach" for "Ile środowisk równoległych użyto?"); None for other questions.
+    Such a sentence is one of many about the same thing, and the number is what the question asks for."""
+    if not _COUNT_QUESTION.search(question or ""):
+        return None
+    from .retrieval import tokens
+    stems = [t for t in tokens(question) if not t.isdigit() and t not in ("ile", "ilu", "many", "much", "how")]
+    stems = [t for t in stems if len(t) >= 4]
+    if not stems:
+        return None
+    # a count ("32 środowiskach", "1,5 tys."), not a number of a figure or a section ("Rysunek 7.2. Środowisko")
+    pattern = re.compile(r"(?<![\d.,])\d+(?:[.,]\d+)?\s+(?:" + "|".join(re.escape(t) for t in stems) + r")",
+                         re.IGNORECASE)
+    return lambda chunk: 0.03 if pattern.search(chunk.get("text", "")) else 0.0
+
+
+def combine_boosts(*boosts):
+    boosts = [b for b in boosts if b is not None]
+    if not boosts:
+        return None
+    return lambda chunk: sum(b(chunk) for b in boosts)
 
 
 def nothing_relevant(found):
@@ -62,7 +121,9 @@ def _system(language):
             "or [1, 3]. Summaries of sections are cited as [S1].\n"
             f"2. If the fragments do not contain the answer, reply exactly: \"{NOT_FOUND['en']}\" and nothing else.\n"
             "3. Do not guess, do not add facts, numbers or names that are not in the fragments.\n"
-            "4. Do not grade the thesis unless asked. Be brief: at most 6 sentences, in English."
+            "4. Tell the author's own work apart from the works of others the thesis describes (\"Smith et al. [12] "
+            "used...\"): when asked what the author did, use only what the author did.\n"
+            "5. Do not grade the thesis unless asked. Be brief: at most 6 sentences, in English."
         )
     return (
         "Pomagasz promotorowi czytać pracę dyplomową. Odpowiadasz WYŁĄCZNIE na podstawie ponumerowanych fragmentów "
@@ -72,7 +133,9 @@ def _system(language):
         "Streszczenia rozdziałów cytuj jako [S1].\n"
         f"2. Jeśli fragmenty nie zawierają odpowiedzi, odpowiedz dokładnie: \"{NOT_FOUND['pl']}\" i nic więcej.\n"
         "3. Nie zgaduj, nie dodawaj faktów, liczb ani nazw, których nie ma we fragmentach.\n"
-        "4. Nie oceniaj pracy, jeśli o to nie pytano. Odpowiadaj krótko: najwyżej 6 zdań, po polsku."
+        "4. Odróżniaj własną pracę autora od opisywanych w niej cudzych prac (\"Kowalski i in. [12] użyli...\"): "
+        "gdy pytanie dotyczy tego, co zrobił autor, korzystaj tylko z opisu jego pracy.\n"
+        "5. Nie oceniaj pracy, jeśli o to nie pytano. Odpowiadaj krótko: najwyżej 6 zdań, po polsku."
     )
 
 
@@ -167,6 +230,10 @@ def check_answer(text, sources, language):
         return f"[{', '.join(known)}]" if known else ""
 
     cleaned = _CITATION.sub(keep_known, text)
+    if citations:
+        # an answer with sources sometimes ends with the "not found" sentence as well: it is not the answer
+        for sentence in set(NOT_FOUND.values()):
+            cleaned = cleaned.replace(sentence, "")
     cleaned = re.sub(r"[ \t]+([.,;:])", r"\1", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).strip()
     if not_found in cleaned and len(cleaned) < len(not_found) + 40:

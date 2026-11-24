@@ -13,7 +13,8 @@ import numpy as np  # noqa: E402
 
 from analysis.modules.llm.assistant import answer as A  # noqa: E402
 from analysis.modules.llm.assistant.chunks import build_chunks  # noqa: E402
-from analysis.modules.llm.assistant.retrieval import ThesisIndex, tokens  # noqa: E402
+from analysis.modules.llm.assistant.retrieval import (  # noqa: E402
+    WINDOW_WORDS, ThesisIndex, chunk_text_for_embedding, sentence_windows, tokens)
 
 
 def words(text, page, line=0, start=0):
@@ -53,6 +54,17 @@ def fake_encode(texts):
 
 
 DOC_CHUNKS = build_chunks(DOC)["chunks"]
+
+
+def fake_encode_for(data, texts):
+    """fake_encode over the words of another set of fragments."""
+    vocab = sorted({t for c in data["chunks"] for t in tokens(c["text"])})
+    rows = []
+    for text in texts:
+        v = np.array([1.0 if t in set(tokens(text)) else 0.0 for t in vocab], dtype=np.float32)
+        n = np.linalg.norm(v)
+        rows.append(v / n if n else v)
+    return np.array(rows)
 
 
 class ChunksTest(unittest.TestCase):
@@ -112,6 +124,31 @@ class RetrievalTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertIsNone(ThesisIndex.load(tmp))
 
+    def test_a_long_fragment_gets_vectors_of_its_sentences(self):
+        chunk = {"section": "7. BADANIA", "text": " ".join(["Pierwsze zdanie o czymś innym."] * 12)
+                 + " Polityka była uczona na 32 środowiskach."}
+        windows = sentence_windows(chunk)
+        self.assertGreater(len(windows), 1)
+        self.assertTrue(all(w.startswith("7. BADANIA: ") for w in windows))
+        self.assertTrue(all(len(w.split()) <= WINDOW_WORDS + 3 for w in windows))
+        self.assertIn("32 środowiskach", windows[-1])
+
+    def test_a_sentence_close_to_the_question_lifts_its_whole_fragment(self):
+        filler = " ".join(f"Zdanie numer {i} opisuje nagrodę za chód robota." for i in range(30))
+        data = {"chunks": [
+            {"id": 0, "kind": "paragraph", "section": "", "page": 1, "text": filler + " Liczba środowisk wynosiła 32.",
+             "rects": []},
+            {"id": 1, "kind": "paragraph", "section": "", "page": 2, "text": "Opis chwytaka.", "rects": []}]}
+        whole_only = ThesisIndex(data, fake_encode_for(data, [chunk_text_for_embedding(c) for c in data["chunks"]]))
+        with_windows = ThesisIndex.build(data, lambda t: fake_encode_for(data, t))
+        query = fake_encode_for(data, ["środowisk"])[0]
+        self.assertGreater(with_windows._cosines(query)[0], whole_only._cosines(query)[0])
+
+    def test_phrases_written_by_the_model_help_but_the_question_counts_most(self):
+        found = self.index.search_many(["Czym jest sieć?", "algorytm PPO"], fake_encode, k=3)
+        self.assertTrue(any("PPO" in c["text"] for c, _ in found))
+        self.assertEqual(self.index.search_many(["", "  "], fake_encode), [])
+
 
 class AnswerTest(unittest.TestCase):
     def setUp(self):
@@ -153,6 +190,31 @@ class AnswerTest(unittest.TestCase):
     def test_the_not_found_sentence(self):
         self.assertEqual(A.check_answer("W pracy nie znalazłem informacji na ten temat", {}, "pl")["kind"],
                          "not_found")
+
+    def test_a_count_question_favours_a_number_before_its_word(self):
+        boost = A.count_boost("Ile środowisk równoległych użyto?")
+        self.assertGreater(boost({"text": "Polityka była uczona na 32 środowiskach."}), 0)
+        self.assertEqual(boost({"text": "Rysunek 7.2. Środowisko z przeszkodami."}), 0)
+        self.assertEqual(boost({"text": "Środowisko symulacyjne Isaac."}), 0)
+        self.assertIsNone(A.count_boost("Jakie środowisko wybrano?"))
+        both = A.combine_boosts(A.overview_boost, boost)
+        self.assertGreater(both({"section": "1. WSTĘP", "text": "na 32 środowiskach"}),
+                           both({"section": "1. WSTĘP", "text": "bez liczby"}))
+        self.assertIsNone(A.combine_boosts(None, None))
+
+    def test_the_phrases_of_the_model_are_cleaned(self):
+        phrases = A.parse_expansion('1. "liczba środowisk"\n- środowiska równoległe\n• liczba środowisk\nx\n' + "a" * 80)
+        self.assertEqual(phrases, ["liczba środowisk", "środowiska równoległe"])
+        self.assertLessEqual(len(A.parse_expansion("\n".join(f"fraza {i}" for i in range(20)))), A.MAX_PHRASES)
+
+    def test_a_stray_not_found_sentence_is_dropped_from_a_sourced_answer(self):
+        result = A.check_answer("Użyto PPO [2]. " + A.NOT_FOUND["pl"], {"2": {"chunk": self.chunks[2]}}, "pl")
+        self.assertEqual(result["kind"], "answer")
+        self.assertNotIn(A.NOT_FOUND["pl"].rstrip("."), result["text"])
+
+    def test_the_rules_tell_the_authors_work_from_cited_works(self):
+        messages, _ = A.build_messages("Na jakim robocie?", self.found, [], [], "pl", lambda s: len(s) // 3, 3000)
+        self.assertIn("własną pracę autora od opisywanych w niej cudzych prac", messages[0]["content"])
 
     def test_a_summary_points_at_its_chapter(self):
         sections = build_chunks(DOC)["sections"]
