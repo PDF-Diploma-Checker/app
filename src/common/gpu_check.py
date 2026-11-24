@@ -53,6 +53,7 @@ class HardwareReport:
     gpu_name: str = ""
     vram_gb: float = 0.0
     facts: dict = field(default_factory=dict)
+    recommended_profile: str = "full"   # "light" for a computer that cannot run the 12B model well
 
     def as_text(self):
         """Plain-text form for the log and for bug reports."""
@@ -237,6 +238,15 @@ def recommend_gpu_layers(vram_gb, profile="full"):
     return 0
 
 
+def recommend_profile(facts, vram_gb=0.0):
+    """"light" (Gemma 4B) when this computer cannot run the 12B model well: a card with less memory than the model
+    needs, or no usable card and little RAM. Otherwise "full"."""
+    if facts.get("nvidia"):
+        return "light" if vram_gb < GOOD_VRAM_GB else "full"
+    ram = float(facts.get("ram_gb") or 0.0)
+    return "light" if 0 < ram < MIN_RAM_FOR_CPU_GB else "full"
+
+
 def diagnose(facts):
     """Turn collect_facts() output into a HardwareReport."""
     profile = facts.get("profile", "full")
@@ -296,15 +306,18 @@ def diagnose(facts):
             {"free": f"{free:.0f}", "needed": f"{models_size_gb(profile):.0f}", "dir": facts.get("model_dir", "")},
         ))
 
-    gpu_usable = bool(ai_runtime and gpu_build and nvidia and driver_ok and recommend_gpu_layers(vram, profile) != 0)
+    recommended_profile = recommend_profile(facts, vram)
+    gpu_usable = bool(ai_runtime and gpu_build and nvidia and driver_ok
+                      and (recommend_gpu_layers(vram, profile) != 0 or recommend_gpu_layers(vram, recommended_profile) != 0))
     return HardwareReport(
         checks=checks,
         gpu_usable=gpu_usable,
         recommended_device="cuda" if gpu_usable else "cpu",
-        recommended_layers=recommend_gpu_layers(vram, profile) if gpu_usable else 0,
+        recommended_layers=recommend_gpu_layers(vram, recommended_profile) if gpu_usable else 0,
         gpu_name=gpu_name,
         vram_gb=vram,
         facts=facts,
+        recommended_profile=recommended_profile,
     )
 
 

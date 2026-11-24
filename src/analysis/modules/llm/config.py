@@ -40,6 +40,8 @@ LIGHT_SUBDIR = "gemma3_4b"
 PROFILES = ("full", "light")
 DEFAULT_PROFILE = "full"
 LANGUAGE_REVIEW_PROFILES = ("full",)        # the profiles in which the text model reviews the language findings
+GOAL_CHECK_PROFILES = ("full",)             # ... and rates how well the thesis achieves its purpose (the small model
+                                            # described a robot that the end of the thesis does not mention)
 VISION_REPO = "unsloth/Qwen2.5-VL-7B-Instruct-GGUF"
 VISION_FILE = "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf"
 VISION_MMPROJ_FILE = "mmproj-F16.gguf"
@@ -73,6 +75,11 @@ def text_model_path(model_dir, profile):
 def language_review_enabled(profile=None):
     """Whether the text model reviews the language findings (with the light model all of them stay)."""
     return (profile or MODEL_PROFILE) in LANGUAGE_REVIEW_PROFILES
+
+
+def goal_check_enabled(profile=None):
+    """Whether the text model rates the realization of the purpose of the thesis."""
+    return (profile or MODEL_PROFILE) in GOAL_CHECK_PROFILES
 
 
 def default_config():
