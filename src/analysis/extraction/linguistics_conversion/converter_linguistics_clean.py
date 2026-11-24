@@ -1072,14 +1072,14 @@ class PDFMapper:
                 self._ends_sentence(stripped)
                 or bool(self.IMG_PATTERN.match(stripped))
                 or bool(self.TAB_PATTERN.match(stripped))
-            )
+            ) and not self._ends_with_line_hyphen(stripped)
         elif self.paragraph_buffer:
             p_content = self.paragraph_buffer[-1]["content"].strip()
             finished = (
                 self._ends_sentence(p_content)
                 or bool(self.IMG_PATTERN.match(p_content))
                 or bool(self.TAB_PATTERN.match(p_content))
-            )
+            ) and not self._ends_with_line_hyphen(p_content)
         elif self.list_buffer:
             item_text = self.list_buffer[-1]["item"].text.strip()
             finished = bool(item_text and self._ends_sentence(item_text))
@@ -1485,6 +1485,7 @@ class PDFMapper:
                 or (sub_caption_pattern.match(raw_block_text_for_check) and bool(page.images or page.tables))
             )
             if is_visual_caption:
+                self._caption_continues = False
                 if self.paragraph_buffer:
                     self._empty_paragraph_buffer("odcięcie - wykryto blok podpisu")
                 if self.list_buffer:
@@ -2087,8 +2088,14 @@ class PDFMapper:
                     }
                 )
 
-                if is_visual_caption:
-                    self._empty_paragraph_buffer("odcięcie - koniec bloku podpisu")
+                if is_visual_caption or getattr(self, "_caption_continues", False):
+                    if self._ends_with_line_hyphen(full_text.strip()):
+                        # a centred caption broken in a word: its next line is a block of its own ("Tabela 9.1. ...
+                        # środo-" / "wiskach, ..."), it is joined to the caption before the caption is closed
+                        self._caption_continues = True
+                    else:
+                        self._caption_continues = False
+                        self._empty_paragraph_buffer("odcięcie - koniec bloku podpisu")
 
         for table in page.tables:
             ve = VisualElement(
@@ -3013,6 +3020,12 @@ class PDFMapper:
             if "/" in t2 or "_" in t2 or re.search(r"\.(?:pdf|html?|jpg|jpeg|png|svg|xml|zip)\.?", t2, re.I):
                 return True
         return False
+
+    @staticmethod
+    def _ends_with_line_hyphen(text):
+        """True when the text ends in the middle of a word broken at the line end ("... na 32 środo-"). Such a line
+        never ends a paragraph, also not a caption: "Tabela 9.1. ... środo-" / "wiskach, z krokiem ..." is one text."""
+        return bool(re.search(r"[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż]{2,}-$", text))
 
     @classmethod
     def _is_cross_line_soft_hyphen(cls, w1, w2, in_url: bool = False) -> bool:
