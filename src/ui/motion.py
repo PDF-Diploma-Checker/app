@@ -2,15 +2,18 @@
 placeholders, undo toasts, the command menu, tabular numbers, balanced text and squircle corners."""
 
 import math
+import os
+import subprocess
+import sys
 
 from PySide6.QtCore import (
-    QEasingCurve, QEvent, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Property, Signal,
+    QEasingCurve, QEvent, QObject, QPointF, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Property, Signal,
 )
 from PySide6.QtGui import (
     QColor, QFont, QFontMetrics, QKeySequence, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
 )
 from PySide6.QtWidgets import (
-    QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QAbstractButton, QApplication, QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QPushButton, QStackedWidget, QVBoxLayout, QWidget,
 )
 
@@ -18,6 +21,57 @@ from . import styles
 from .i18n import t
 
 HIT_SLOP = 12          # extra pixels around small targets that still count as a click
+
+
+# --------------------------------------------------------------------------- reduced motion
+_reduced = None
+
+
+def animations_enabled():
+    """False when the system asks for less motion (GNOME "enable-animations", Windows "show animations", or the
+    DIPLOMACHECKER_REDUCE_MOTION variable). Read once."""
+    global _reduced
+    if _reduced is None:
+        _reduced = bool(os.environ.get("DIPLOMACHECKER_REDUCE_MOTION"))
+        if not _reduced:
+            try:
+                if sys.platform.startswith("linux"):
+                    out = subprocess.run(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+                                         capture_output=True, text=True, timeout=1).stdout.strip()
+                    _reduced = out == "false"
+                elif sys.platform == "win32":
+                    import ctypes
+                    flag = ctypes.c_int(1)
+                    SPI_GETCLIENTAREAANIMATION = 0x1042
+                    if ctypes.windll.user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(flag), 0):
+                        _reduced = flag.value == 0
+            except Exception:
+                _reduced = False
+    return not _reduced
+
+
+def duration(ms):
+    """Length of an animation: `ms`, or 0 when the system wants reduced motion (the change is then instant)."""
+    return ms if animations_enabled() else 0
+
+
+def tracking(widget, px):
+    """Letter spacing in pixels: tighter for large headings (-0.02 em), looser for small capitals (+0.06 em)."""
+    font = widget.font()
+    font.setLetterSpacing(QFont.AbsoluteSpacing, px)
+    widget.setFont(font)
+    return widget
+
+
+class KeyboardFocusFilter(QObject):
+    """Shows the focus ring only to keyboard users: a button that got focus from a mouse click gives it up again, so a
+    click leaves no outline behind, while Tab and arrows still show where the focus is."""
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.FocusIn and isinstance(obj, QAbstractButton)
+                and event.reason() == Qt.MouseFocusReason):
+            QTimer.singleShot(0, obj.clearFocus)
+        return False
 
 
 # --------------------------------------------------------------------------- text helpers
@@ -197,10 +251,13 @@ class HitSlop(QWidget):
 
 
 # --------------------------------------------------------------------------- view transition
-def fade_to(stack, index, duration=180):
+def fade_to(stack, index, duration_ms=180):
     """Switch a QStackedWidget page with a short cross-fade. A new switch while one is running continues
     from the current frame instead of jumping."""
     if stack.currentIndex() == index:
+        return
+    if not animations_enabled():
+        stack.setCurrentIndex(index)
         return
     old = getattr(stack, "_fade_label", None)
     if old is not None:
@@ -217,7 +274,7 @@ def fade_to(stack, index, duration=180):
     stack.setCurrentIndex(index)
     stack._fade_label = shot
     anim = QPropertyAnimation(effect, b"opacity", shot)
-    anim.setDuration(duration)
+    anim.setDuration(duration(duration_ms))
     anim.setStartValue(1.0)
     anim.setEndValue(0.0)
     anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -250,7 +307,8 @@ class Skeleton(QWidget):
         self._anim.setStartValue(-0.4)
         self._anim.setEndValue(1.4)
         self._anim.setLoopCount(-1)
-        self._anim.start()
+        if animations_enabled():
+            self._anim.start()
 
     def _get_phase(self):
         return self._phase
@@ -348,7 +406,7 @@ class Toast(QFrame):
         self._effect.setOpacity(0.0)
         self.setGraphicsEffect(self._effect)
         self._fade = QPropertyAnimation(self._effect, b"opacity", self)
-        self._fade.setDuration(160)
+        self._fade.setDuration(duration(160))
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(timeout)
@@ -397,7 +455,7 @@ class Toast(QFrame):
             return
         self._closing = True
         self._timer.stop()
-        self._fade.setDuration(80 if quick else 200)
+        self._fade.setDuration(duration(80 if quick else 200))
         self._animate(0.0)
         self._fade.finished.connect(self._finish)
 
@@ -507,13 +565,8 @@ class CommandPalette(QDialog):
         lay.addWidget(foot)
 
         self.setFixedWidth(560)
-        self._filter("")
-        self._effect = QGraphicsOpacityEffect(card)
-        card.setGraphicsEffect(self._effect)
-        self._fade = QPropertyAnimation(self._effect, b"opacity", self)
-        self._fade.setDuration(130)
-        self._fade.setStartValue(0.0)
-        self._fade.setEndValue(1.0)
+        self._filter("")          # no fade: opened hundreds of times a day, it has to answer in 0 ms
+        self._previous_focus = QApplication.focusWidget()
 
     def _row_widget(self, command):
         row = QWidget()
@@ -571,6 +624,12 @@ class CommandPalette(QDialog):
                 return True
         return super().eventFilter(obj, event)
 
+    def done(self, result):
+        super().done(result)
+        previous = getattr(self, "_previous_focus", None)
+        if previous is not None:
+            QTimer.singleShot(0, previous.setFocus)     # focus goes back to where it was
+
     def _run(self, item):
         command = item.data(Qt.UserRole)
         self.accept()
@@ -583,4 +642,3 @@ class CommandPalette(QDialog):
             top_left = parent.mapToGlobal(QPointF(0, 0).toPoint())
             self.move(top_left.x() + (parent.width() - self.width()) // 2, top_left.y() + 110)
         self.input.setFocus()
-        self._fade.start()
