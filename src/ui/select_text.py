@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QMenu, QApplication, QPushButton, QToolTip, QInputDialog, QFrame, QWidget
 from PySide6.QtCore import Qt, QPoint, QRect, QRectF, Signal, QPointF, QSize
-from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter, QPen
 from PySide6.QtPdfWidgets import QPdfView
 import os
 import sys
@@ -211,6 +211,43 @@ class SourceHighlight(SelectionHighlight):
     COLOR = (245, 158, 11, 75)
 
 
+class SearchHighlight(QWidget):
+    """Ctrl+F matches over the PDF page: soft yellow for all matches, vivid orange with outline for the active one."""
+
+    MATCH_COLOR = (250, 204, 21, 100)
+    ACTIVE_COLOR = (249, 115, 22, 155)
+    ACTIVE_BORDER = (234, 88, 12, 220)
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.rects = []
+        self.active_rect = None
+        self.hide()
+
+    def set_matches(self, rects, active_rect=None):
+        self.rects = list(rects)
+        self.active_rect = active_rect
+        if not self.rects and self.active_rect is None:
+            self.hide()
+            return
+        self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.show()
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(*self.MATCH_COLOR))
+        for rect in self.rects:
+            p.drawRect(rect)
+        if self.active_rect is not None:
+            p.setBrush(QColor(*self.ACTIVE_COLOR))
+            p.setPen(QPen(QColor(*self.ACTIVE_BORDER), 1.5))
+            p.drawRect(self.active_rect)
+
+
 class SelectablePdfView(QPdfView):
     """An extended PDF view that enables area-based text selection, adding custom user comments, and overlaying error markers."""
     textCopied = Signal(str)
@@ -225,7 +262,10 @@ class SelectablePdfView(QPdfView):
         self.highlight_boxes = []
         self.selection_box = SelectionHighlight(self.viewport())
         self.source_box = SourceHighlight(self.viewport())
+        self.search_box = SearchHighlight(self.viewport())
         self._source_rects = []         # [[page, x0, y0, x1, y1]] of the fragment shown by the assistant
+        self._search_matches = []       # [(page, (x0, y0, x1, y1))] from Ctrl+F
+        self._search_current = -1
         self.selection_pdf_rect = None
         self.selection_page_idx = -1
         self.selected_text = ""
@@ -240,6 +280,8 @@ class SelectablePdfView(QPdfView):
         self.verticalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.verticalScrollBar().valueChanged.connect(lambda _v: self.update_source_box_pos())
         self.horizontalScrollBar().valueChanged.connect(lambda _v: self.update_source_box_pos())
+        self.verticalScrollBar().valueChanged.connect(lambda _v: self.update_search_box_pos())
+        self.horizontalScrollBar().valueChanged.connect(lambda _v: self.update_search_box_pos())
         self.horizontalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.verticalScrollBar().valueChanged.connect(self.update_markers_pos)
         self.horizontalScrollBar().valueChanged.connect(self.update_markers_pos)
@@ -250,6 +292,7 @@ class SelectablePdfView(QPdfView):
         self._words_cache = {}
         self._ordered_cache = {}
         self.clear_selection()
+        self.clear_search_matches()
 
     def _page_words(self, index):
         """Words of a page as PyMuPDF tuples (x0, y0, x1, y1, text, block, line, word); None when unreadable."""
@@ -405,6 +448,7 @@ class SelectablePdfView(QPdfView):
             viewport.setUpdatesEnabled(True)
             viewport.update()
         self.update_source_box_pos()        # the zoom moves it too
+        self.update_search_box_pos()
 
     def clear_comments(self):
         """Removes all comments"""
@@ -426,6 +470,7 @@ class SelectablePdfView(QPdfView):
         self.update_selection_box_pos()
         self.update_markers_pos()
         self.update_source_box_pos()
+        self.update_search_box_pos()
 
     # ------------------------------------------------------------------ text selection
     # Like in a PDF reader: press on the text and drag; the words from the one under the press to the one under the
@@ -484,6 +529,61 @@ class SelectablePdfView(QPdfView):
         if not self._source_rects:
             return
         self.source_box.set_rects([self._to_view(int(r[0]), r[1:5]) for r in self._source_rects])
+
+    def set_search_matches(self, matches, current_index=-1, scroll=True):
+        """Highlight Ctrl+F matches and scroll the active one into view."""
+        doc = self.document()
+        page_count = doc.pageCount() if doc else 0
+        self._search_matches = [
+            (int(page), tuple(rect))
+            for page, rect in (matches or [])
+            if 0 <= int(page) < page_count and len(rect) >= 4
+        ]
+        self._search_current = current_index if 0 <= current_index < len(self._search_matches) else -1
+        if scroll and self._search_current >= 0:
+            page, rect = self._search_matches[self._search_current]
+            tops, _ = self._page_layout()
+            zoom = self.zoomFactor()
+            kx, ky = zoom * self.logicalDpiX() / 72.0, zoom * self.logicalDpiY() / 72.0
+            vbar = self.verticalScrollBar()
+            mid_y = tops[page] + ((rect[1] + rect[3]) / 2.0) * ky
+            target_y = int(mid_y - self.viewport().height() / 2.0)
+            vbar.setValue(max(vbar.minimum(), min(vbar.maximum(), target_y)))
+            hbar = self.horizontalScrollBar()
+            if hbar.maximum() > 0:
+                mid_x = self.documentMargins().left() + ((rect[0] + rect[2]) / 2.0) * kx
+                target_x = int(mid_x - self.viewport().width() / 2.0)
+                hbar.setValue(max(hbar.minimum(), min(hbar.maximum(), target_x)))
+        self.update_search_box_pos()
+
+    def clear_search_matches(self):
+        self._search_matches = []
+        self._search_current = -1
+        self.search_box.set_matches([], None)
+
+    def update_search_box_pos(self):
+        if not self._search_matches:
+            self.search_box.set_matches([], None)
+            return
+        doc = self.document()
+        if not doc or doc.pageCount() == 0:
+            self.search_box.set_matches([], None)
+            return
+        view = QRectF(self.viewport().rect()).adjusted(-_VISIBLE_MARGIN, -_VISIBLE_MARGIN,
+                                                       _VISIBLE_MARGIN, _VISIBLE_MARGIN)
+        other_rects = []
+        active_rect = None
+        for idx, (page, rect) in enumerate(self._search_matches):
+            if not (0 <= page < doc.pageCount()):
+                continue
+            vr = self._to_view(page, rect)
+            if not view.intersects(vr):
+                continue
+            if idx == self._search_current:
+                active_rect = vr
+            else:
+                other_rects.append(vr)
+        self.search_box.set_matches(other_rects, active_rect)
 
     def clear_selection(self):
         self.selected_text = ""

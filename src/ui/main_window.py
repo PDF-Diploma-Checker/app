@@ -24,6 +24,7 @@ from .analysis_dialog import AnalysisDialog
 from .assistant_panel import AssistantController, AssistantPanel
 from .log_window import LogWindow
 from .message_box import MessageBox
+from .pdf_find import PdfFindBar
 from .report_bug import send_report
 from .saving_files import SavingFiles
 from .select_text import SelectablePdfView, page_index
@@ -106,6 +107,9 @@ class PDFReader(QMainWindow):
 
         in_reader = lambda fn: (lambda: fn() if self.stack.currentIndex() == 1 else None)
         bind("Ctrl+K", self.open_command_menu)
+        bind(QKeySequence.StandardKey.Find, self._handle_find)
+        bind("F3", in_reader(self._find_next))
+        bind("Shift+F3", in_reader(self._find_prev))
         bind("Ctrl+O", self.open_file_dialog)
         bind("Ctrl+,", self.start_page.open_settings)
         bind("Ctrl+Shift+L", self.toggle_language)
@@ -128,14 +132,42 @@ class PDFReader(QMainWindow):
         super().mousePressEvent(event)
 
     def _escape_back(self):
-        """Esc goes back, unless it is meant for a text field (clearing or leaving it)."""
+        """Esc goes back, unless it closes the PDF find bar or leaves a text field."""
+        if self.pdf_find_bar.isVisible():
+            self.pdf_find_bar.close_bar()
+            return
         focus = QApplication.focusWidget()
         if isinstance(focus, QLineEdit) or focus.__class__.__name__ in ("QPlainTextEdit", "QTextEdit"):
             focus.clearFocus()
             return
         self.go_back()
 
+    def _handle_find(self):
+        """Ctrl+F: focus the history search on the start page, or open the in-document find bar in the reader."""
+        if self.stack.currentIndex() == 0:
+            self.start_page.focus_search()
+        else:
+            self.open_pdf_find()
+
+    def open_pdf_find(self):
+        selected = (self.pdf_view.selected_text or "").strip()
+        initial = selected if selected and "\n" not in selected and len(selected) <= 80 else ""
+        self.pdf_find_bar.open_bar(initial)
+
+    def _find_next(self):
+        if self.pdf_find_bar.isVisible():
+            self.pdf_find_bar.next_match()
+        else:
+            self.open_pdf_find()
+
+    def _find_prev(self):
+        if self.pdf_find_bar.isVisible():
+            self.pdf_find_bar.prev_match()
+        else:
+            self.open_pdf_find()
+
     def go_back(self):
+        self.pdf_find_bar.close_bar()
         self._remember_view()
         motion.fade_to(self.stack, 0)
 
@@ -173,6 +205,7 @@ class PDFReader(QMainWindow):
         if self._palette is not None and self._palette.isVisible():
             return
         commands = [
+            motion.Command(t("palette.find"), self._handle_find, "Ctrl+F", "szukaj find wyszukaj"),
             motion.Command(t("palette.open_file"), self.open_file_dialog, "Ctrl+O", "pdf plik file add dodaj"),
             motion.Command(t("palette.settings"), self.start_page.open_settings, "Ctrl+,", "config ustawienia"),
             motion.Command(t("palette.language"), self.toggle_language, "Ctrl+Shift+L", "język language pl en"),
@@ -217,6 +250,7 @@ class PDFReader(QMainWindow):
         self.export_btn.setText("  " + t("main.export_pdf"))
         self.report_btn.setText("  " + t("main.report_problem"))
         self.logs_btn.setText(t("main.logs"))
+        self.pdf_find_bar.retranslate_ui()
         if self.current_pdf_path:
             self.load_ai_analysis()
         else:
@@ -249,6 +283,7 @@ class PDFReader(QMainWindow):
         self.page_input.setText("1")
         self.pdf_view.clear_markers()
         self.pdf_view.clear_comments()
+        self.pdf_find_bar.set_document_path(None)
         for button in self.thumb_buttons:
             self.thumb_group.removeButton(button)
         self.thumb_buttons = []
@@ -361,6 +396,11 @@ class PDFReader(QMainWindow):
         self.assistant_panel = AssistantPanel(self.pdf_view)
         self.assistant_panel.follow(self.pdf_view)
         self.assistant = AssistantController(self.assistant_panel, self.pdf_view)
+
+        # Ctrl+F in-document search bar in the top-right corner of the preview
+        self.pdf_find_bar = PdfFindBar(self.pdf_view)
+        self.pdf_find_bar.follow(self.pdf_view)
+        self.pdf_find_bar.matchesChanged.connect(self.pdf_view.set_search_matches)
 
         self.right_panel = QWidget()
         self.right_panel.setObjectName("RightPanel")
@@ -1039,6 +1079,7 @@ class PDFReader(QMainWindow):
 
         self.current_pdf_path = path
         self.pdf_view.set_source_path(path)
+        self.pdf_find_bar.set_document_path(path)
         self.document.load(path)
 
         if self.document.status() == QPdfDocument.Status.Ready:
