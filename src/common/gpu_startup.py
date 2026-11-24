@@ -69,17 +69,20 @@ def find_issues(facts, cfg):
     if ai_runtime and not facts.get("gpu_build"):
         issues.append(Issue("gpu_build", {"cmd": setup_command()}))
 
-    if nvidia and gpu_check.is_weak_gpu(free_vram):
-        layers = gpu_check.recommend_gpu_layers(free_vram)
+    profile = facts.get("profile", "full")
+    if nvidia and gpu_check.is_weak_gpu(free_vram, profile):
+        layers = gpu_check.recommend_gpu_layers(free_vram, profile)
+        needed = gpu_check.LIGHT_GOOD_VRAM_GB if profile == "light" else gpu_check.GOOD_VRAM_GB
         issues.append(Issue("vram" if layers else "vram_tiny", {
-            "vram": f"{free_vram:.1f}", "needed": f"{gpu_check.GOOD_VRAM_GB:.0f}", "layers": layers,
+            "vram": f"{free_vram:.1f}", "needed": f"{needed:.0f}", "layers": layers,
         }))
 
     models = facts.get("models") or {}
-    missing = [MODEL_LABELS.get(name, name) for name, present in models.items() if not present]
+    labels = dict(MODEL_LABELS, gemma="Gemma 3 4B") if profile == "light" else MODEL_LABELS
+    missing = [labels.get(name, name) for name, present in models.items() if not present]
     if missing:
         issues.append(Issue("models", {
-            "missing": ", ".join(missing), "dir": facts.get("model_dir", ""), "size": f"{gpu_check.AI_MODELS_SIZE_GB:.0f}",
+            "missing": ", ".join(missing), "dir": facts.get("model_dir", ""), "size": f"{gpu_check.models_size_gb(profile):.0f}",
         }))
         free = float(facts.get("free_gb") or 0.0)
         if free < gpu_check.NEEDED_FREE_GB:
@@ -113,6 +116,7 @@ def check():
         return []                                   # nothing to look up: the processor was chosen
     facts = gpu_check.collect_facts()
     facts["models"] = config.ai_models_status()
+    facts["profile"] = config.MODEL_PROFILE
     issues = find_issues(facts, cfg)
     logger.info("GPU startup check: %s", signature(issues) or "nothing missing")
     return [] if is_dismissed(issues, cfg) else issues
