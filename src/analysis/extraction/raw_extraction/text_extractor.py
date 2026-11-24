@@ -181,6 +181,52 @@ def split_straddling_words(block_words: list, raw_block: dict) -> list:
     return result
 
 
+def _is_math_font(font):
+    return any(m in (font or "").lower() for m in MATH_FONT_NAMES)
+
+
+def move_math_accents_to_symbols(block_words: list, raw_block: dict) -> list:
+    """
+    A math accent drawn right after a word of text ends up in that word: "gdzie \\hat{\\mathbb{E}}_t" gives the
+    tokens "gdzie\u0302" (shown as "gdziê", a typo) and "𝔼". When the accent is the first character of a span in the
+    math font that starts where the word ends, it is moved to the first word of that span: "gdzie" and "𝔼\u0302"
+    (symbol first, as split_straddling_words writes it). The accent of a formula elsewhere (a display formula below)
+    can land on a word as well ("wykładniczo:\u0302", "PPO\u0302"); with no symbol to move it to, it is dropped.
+
+    Only a mark that is not in the text spans is touched: a word that has it in the text itself (a Polish letter, an
+    accent typeset after its letter in the same font) stays as it is.
+    """
+    spans = [sp for raw_line in raw_block.get("lines", []) for sp in raw_line.get("spans", [])]
+    text_spans = [sp["text"] for sp in spans if not _is_math_font(sp.get("font"))]
+    math_spans = [sp for sp in spans
+                  if _is_math_font(sp.get("font")) and sp["text"].lstrip()[:1] in COMBINING_MARKS and sp["text"].strip()]
+
+    words = [list(w) for w in block_words]
+    for i, w in enumerate(words):
+        text = w[4]
+        base = text.rstrip(COMBINING_MARKS)
+        marks = text[len(base):]
+        if not marks or not base:
+            continue
+        if any(text in t for t in text_spans) or not any(base in t for t in text_spans):
+            continue                    # the mark is in the text itself, or the word is not text: leave it
+        w[4] = base
+        for sp in math_spans:
+            sx0, sy0, sx1, sy1 = sp["bbox"]
+            same_row = min(w[3], sy1) - max(w[1], sy0) > 0.3 * min(w[3] - w[1], sy1 - sy0)
+            if not same_row or abs(sx0 - w[2]) > 2.0 or not sp["text"].lstrip().startswith(marks):
+                continue
+            # the symbol: the next word of the same line that starts inside this span
+            target = next((j for j in range(i + 1, len(words))
+                           if words[j][5:7] == w[5:7] and sx0 - 1.0 <= words[j][0] <= sx1 + 1.0
+                           and words[j][4].strip(COMBINING_MARKS)), None)
+            if target is not None:
+                symbol = words[target][4]
+                words[target][4] = symbol[0] + marks + symbol[1:]
+            break
+    return [tuple(w) for w in words]
+
+
 def parse_text_block(
     raw_block: dict,
     word_list: list,
@@ -202,6 +248,7 @@ def parse_text_block(
             if x[5] == raw_block["number"]:
                 block_words.append(x)
         block_words = split_straddling_words(block_words, raw_block)
+        block_words = move_math_accents_to_symbols(block_words, raw_block)
 
         used_words = set()
 
