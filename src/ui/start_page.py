@@ -3,7 +3,7 @@ import re
 import threading
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QFontMetrics
+from PySide6.QtGui import QFontMetrics, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QScrollArea, QSizePolicy, QVBoxLayout, QWidget,
@@ -248,11 +248,14 @@ class StartPage(QWidget):
         outer.addWidget(column, 1000)
         outer.addStretch(1)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setWidget(self.content_widget)
-        scroll_area.setStyleSheet(styles.START_PAGE_SCROLL_STYLE)
-        main_layout.addWidget(scroll_area, 1)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(self.content_widget)
+        self.scroll_area.setStyleSheet(styles.START_PAGE_SCROLL_STYLE)
+        main_layout.addWidget(self.scroll_area, 1)
+        self.find_shortcut = QShortcut(QKeySequence.StandardKey.Find, self)
+        self.find_shortcut.setContext(Qt.WindowShortcut)
+        self.find_shortcut.activated.connect(self.focus_search)
 
     def _build_app_bar(self):
         self.header_frame = QFrame()
@@ -380,8 +383,6 @@ class StartPage(QWidget):
         self.docs_card.setObjectName("DocsCard")
 
         card_layout = QVBoxLayout(self.docs_card)
-        # 1 px inset: the card paints its own border, and the grey column header (full width) painted over its sides,
-        # so the table looked split in two boxes
         card_layout.setContentsMargins(1, 1, 1, 1)
         card_layout.setSpacing(0)
 
@@ -440,6 +441,12 @@ class StartPage(QWidget):
         dialog = SettingsDialog(self)
         dialog.exec()
 
+    def focus_search(self):
+        """Ctrl+F: scroll the search field into view, give it the focus and select its text (type to replace)."""
+        self.scroll_area.ensureWidgetVisible(self.search_input)
+        self.search_input.setFocus(Qt.ShortcutFocusReason)
+        self.search_input.selectAll()
+
     def _queue_search(self, _text=None):
         self._search_timer.start()
 
@@ -470,6 +477,7 @@ class StartPage(QWidget):
         self.section_title.setText(t("start.my_documents"))
         self.search_input.setPlaceholderText(t("start.search_placeholder"))
         self.search_input.setAccessibleName(t("start.search_placeholder"))
+        self.search_input.setToolTip(motion.with_hint(t("start.search_placeholder"), "Ctrl+F"))
         self._update_sort_text()
         self._apply_sort_and_render()
 
