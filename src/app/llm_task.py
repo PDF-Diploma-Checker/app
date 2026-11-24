@@ -156,6 +156,11 @@ def build_image_summary(raw_image_report, language="pl"):
 
 def run_language_review(matches, language="pl", cancel_token=None):
     """The findings of the language checks after the text model has read them. Without the model all of them stay."""
+    from analysis.modules.llm import config
+
+    if not config.language_review_enabled():
+        logger.info("Review of the language findings: not done with the light model, all the findings stay")
+        return matches
     _stage(language, "language_review", cancel_token)
     try:
         from analysis.modules.llm.linguistic_review import review_findings
@@ -331,6 +336,8 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
     if not use_llm:
         return None, None, "Tryb Szybki."
 
+    from analysis.modules.llm import config
+
     timer = StageTimer(logger, "LLM")
     try:
         timer.next("preparing the text")
@@ -366,20 +373,24 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
         purpose = get_purpose(plain_txt_purpose, language)
         check_cancelled(cancel_token)
 
-        timer.next("checking the goal")
-        _stage(language, "goal", cancel_token)
-
         cleanup_text_llm_instances()        # the purpose model must leave the video memory before the next model loads
 
-        goal_result = check_goal_realization(
-            text=plain_txt_purpose,
-            purpose=purpose,
-            language=language,
-        )
+        if config.goal_check_enabled():
+            timer.next("checking the goal")
+            _stage(language, "goal", cancel_token)
+            goal_result = check_goal_realization(
+                text=plain_txt_purpose,
+                purpose=purpose,
+                language=language,
+            )
 
-        purpose_score = get_score_from_goal_result(goal_result)
-        check_cancelled(cancel_token)
-        purpose_reason = str(goal_result.get("reason", "") or "")
+            purpose_score = get_score_from_goal_result(goal_result)
+            check_cancelled(cancel_token)
+            purpose_reason = str(goal_result.get("reason", "") or "")
+        else:
+            # the light model is not trusted with this judgement; the grade is made of the other parts
+            logger.info("The realization of the purpose is not rated with the light model")
+            purpose_score, purpose_reason = None, ""
         log_results("Thesis purpose and its realization", purpose=purpose, score=purpose_score, reason=purpose_reason)
 
         cleanup_text_llm_instances()
@@ -447,6 +458,7 @@ def run_task_llm(doc_obj, pdf_path, language="pl", use_llm=True, check_images=Tr
             "p_off": round(p_off_val, 2),
             "off_topic_headings": off_topic_headings,
             "purpose_score": purpose_score,
+            "model_profile": config.MODEL_PROFILE,
             "purpose_reason": purpose_reason,
         }
 

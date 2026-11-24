@@ -291,6 +291,14 @@ _CUDA_MARKS = ("cuda error", "cublas", "ggml_cuda", "cudnn", "nvcuda", "driver v
                "no kernel image", "illegal memory access", "launch failure")
 
 
+def _profile():
+    try:
+        from analysis.modules.llm import config
+        return config.MODEL_PROFILE
+    except Exception:
+        return "full"
+
+
 def _gpu_facts():
     try:
         from common import gpu_check
@@ -319,7 +327,7 @@ def diagnose_crash(exit_code, tail, gpu_layers, configured_layers=None):
         if not gpu:
             return t("llm_error.hint_layers_generic", layers=_layers_text(gpu_layers))
         from common import gpu_check
-        recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"])
+        recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"], _profile())
         return t("llm_error.hint_layers", layers=_layers_text(gpu_layers), name=gpu["name"],
                  vram=f"{gpu['vram_gb']:.1f}", recommended=_layers_text(recommended))
 
@@ -359,7 +367,7 @@ def layers_warning(gpu_layers):
     if not gpu:
         return None
     from common import gpu_check
-    recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"])
+    recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"], _profile())
     too_many = recommended >= 0 and (gpu_layers < 0 or gpu_layers > recommended)
     if not too_many:
         return None
@@ -373,7 +381,7 @@ def _fewer_layers(layers):
         gpu = _gpu_facts()
         if gpu:
             from common import gpu_check
-            recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"])
+            recommended = gpu_check.recommend_gpu_layers(gpu["vram_gb"], _profile())
             if recommended > 0:
                 return max(recommended // 2, 1)
         return 24
@@ -501,6 +509,9 @@ def run_language_review_isolated(matches, language="pl", cancel_token=None):
     """app.llm_task.run_language_review in a separate process. When that process fails all the findings stay."""
     from analysis.modules.llm import config
 
+    if not config.language_review_enabled():
+        logger.info("The language findings are not reviewed with the light model: all of them stay in the report")
+        return matches
     outcome = _run_once(pickle.dumps(matches, protocol=pickle.HIGHEST_PROTOCOL), "", language, False, config.N_GPU_LAYERS,
                         cancel_token, job="language_review")
     if outcome.kind == "result":
@@ -519,16 +530,21 @@ def run_language_review_isolated(matches, language="pl", cancel_token=None):
 # context and fell back to 24 layers, which made the whole analysis twice as slow. So the margin is generous.
 _TEXT_BASE_MB, _TEXT_ALL_LAYERS_MB, _VISION_MB, _OVERLAP_MARGIN_MB = 3000, 7300, 6200, 1000
 _MODEL_LAYERS = 49
+# the small text model of the light profile (Gemma 3 4B): the weights 2.5 GB, a smaller context and buffers
+_LIGHT_TEXT_BASE_MB, _LIGHT_TEXT_ALL_LAYERS_MB, _LIGHT_MODEL_LAYERS = 1500, 2500, 35
 
 
-def overlap_needs_mb(layers):
+def overlap_needs_mb(layers, profile="full"):
     """Video memory needed to read the figures next to the text stages: the text model with `layers` layers on the
     card (-1: all) plus the vision model."""
+    if profile == "light":
+        share = 1.0 if layers < 0 else min(layers / _LIGHT_MODEL_LAYERS, 1.0)
+        return _LIGHT_TEXT_BASE_MB + _LIGHT_TEXT_ALL_LAYERS_MB * share + _VISION_MB + _OVERLAP_MARGIN_MB
     share = 1.0 if layers < 0 else min(layers / _MODEL_LAYERS, 1.0)
     return _TEXT_BASE_MB + _TEXT_ALL_LAYERS_MB * share + _VISION_MB + _OVERLAP_MARGIN_MB
 
 
-def can_overlap_figures(layers, free_mb=None):
+def can_overlap_figures(layers, free_mb=None, profile=None):
     """True when the vision model fits next to the text model: then reading the figures runs at the same time as the
     text stages instead of after them (the card is far from busy during the text stages). `free_mb`: free video memory,
     read from nvidia-smi when not given."""
@@ -539,7 +555,10 @@ def can_overlap_figures(layers, free_mb=None):
         if not gpu:
             return False
         free_mb = gpu["vram_gb"] * 1024 - gpu.get("used_mb", 0)
-    return free_mb >= overlap_needs_mb(layers)
+    if profile is None:
+        from analysis.modules.llm import config
+        profile = config.MODEL_PROFILE
+    return free_mb >= overlap_needs_mb(layers, profile)
 
 
 class _LinkedToken:
@@ -649,7 +668,7 @@ def run_task_llm_isolated(doc_obj, pdf_path, language="pl", use_llm=True, check_
             cancel_token, "figures-read")
     elif check_images and layers:
         logger.info("The figures are read after the text stages: the video memory does not hold both models "
-                    "(needs about %.0f GB free)", overlap_needs_mb(layers) / 1024)
+                    "(needs about %.0f GB free)", overlap_needs_mb(layers, config.MODEL_PROFILE) / 1024)
     try:
         return _run_task_llm_isolated(payload, pdf_path, language, check_images, cancel_token, background)
     finally:

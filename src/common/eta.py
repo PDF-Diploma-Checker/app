@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 # Rough speeds of llama.cpp with Gemma 3 12B (Q4_K_M), tokens per second. They only matter until the history has
 # calibrated the model, and they follow what the system reports (VRAM class, CPU threads).
 GEMMA_GB = 7.3
+LIGHT_GEMMA_GB = 2.5                # the small model of the "light" profile (Gemma 3 4B)
+LIGHT_LAYERS = 34
+LIGHT_SPEEDUP = 2.2                 # how much faster it generates and reads the prompt than the 12B model
 VISION_GB = 5.6                     # vision model + projector
 GEMMA_LAYERS = 48
 DEFAULT_LOAD_MB_S = 3000.0          # reading a model from disk, mostly from its cache; measured afterwards
@@ -83,6 +86,7 @@ class MachineFacts:
     gpu_layers: int                 # -1 = all
     gpu_name: str = ""
     vram_gb: float = 0.0
+    profile: str = "full"           # "light": the whole analysis on the small model (no review of the language findings)
 
 
 @dataclass
@@ -138,6 +142,7 @@ def machine_from_config(cfg, hw):
     return MachineFacts(
         threads=hw.get("threads", 4), ram_gb=hw.get("ram_gb", 0.0), gpu=gpu, gpu_layers=layers if gpu else 0,
         gpu_name=hw.get("gpu_name", ""), vram_gb=hw.get("vram_gb", 0.0),
+        profile="light" if cfg.get("model_profile") == "light" else "full",
     )
 
 
@@ -148,19 +153,22 @@ def _speeds(machine):
     cpu_gen = max(1.0, 0.45 * threads)
     cpu_prompt = max(8.0, 4.0 * threads)
     if not machine.gpu:
-        return cpu_gen, cpu_prompt
+        speedup = LIGHT_SPEEDUP if machine.profile == "light" else 1.0
+        return cpu_gen * speedup, cpu_prompt * speedup
     if machine.vram_gb >= 16:
         gpu_gen, gpu_prompt = 60.0, 1500.0
     elif machine.vram_gb >= 10:
         gpu_gen, gpu_prompt = 40.0, 800.0
     else:
         gpu_gen, gpu_prompt = 25.0, 400.0
-    share = 1.0 if machine.gpu_layers < 0 else min(machine.gpu_layers / GEMMA_LAYERS, 1.0)
+    layers = LIGHT_LAYERS if machine.profile == "light" else GEMMA_LAYERS
+    share = 1.0 if machine.gpu_layers < 0 else min(machine.gpu_layers / layers, 1.0)
     # layers run one after another: per-token time is the sum of the GPU part and the CPU part
-    gen = 1.0 / (share / gpu_gen + (1.0 - share) / cpu_gen)
+    speedup = LIGHT_SPEEDUP if machine.profile == "light" else 1.0
+    gen = speedup / (share / gpu_gen + (1.0 - share) / cpu_gen)
     # a CUDA build of llama.cpp also sends the prompt of the layers kept in RAM through the GPU (big batches), so
     # reading the prompt stays fast with a partial offload; only the generation runs those layers on the CPU
-    prompt = 1.0 / (share / gpu_prompt + (1.0 - share) / max(cpu_prompt, gpu_prompt / 4))
+    prompt = speedup / (share / gpu_prompt + (1.0 - share) / max(cpu_prompt, gpu_prompt / 4))
     return gen, prompt
 
 
@@ -183,17 +191,16 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
 
     gen, prompt = _speeds(machine)
     load = _load_speed(history)
-    gemma_load = GEMMA_GB * 1024 ** 3 / load
+    gemma_load = (LIGHT_GEMMA_GB if machine.profile == "light" else GEMMA_GB) * 1024 ** 3 / load
     text_tokens = doc.chars * TOKENS_PER_CHAR
 
     def work(prefill_tokens, generated):
         return gemma_load + prefill_tokens / prompt + generated / gen
 
     base, per_char = GOAL_TOKENS
-    stages += [
-        ("purpose", work(0.3 * text_tokens, PURPOSE_TOKENS)),
-        ("goal", work(min(doc.chars, GOAL_FRAGMENT_CHARS) * TOKENS_PER_CHAR, base + per_char * doc.chars)),
-    ]
+    stages.append(("purpose", work(0.3 * text_tokens, PURPOSE_TOKENS)))
+    if machine.profile != "light":          # the light model does not rate the realization of the purpose
+        stages.append(("goal", work(min(doc.chars, GOAL_FRAGMENT_CHARS) * TOKENS_PER_CHAR, base + per_char * doc.chars)))
     if doc.sections:
         # the stage lasts until the next one starts, so it also holds the review of the doubtful sections
         summaries = work(doc.sections * SECTION_PROMPT_TOKENS, doc.sections * SECTION_TOKENS)
@@ -203,8 +210,9 @@ def raw_estimate(doc, machine, use_llm, check_images, history=()):
     if check_images and doc.figures:
         vision_load = VISION_GB * 1024 ** 3 / load
         stages.append(("images", VISION_LOADS * vision_load + gemma_load + doc.figures * FIGURE_TOKENS / gen))
-    findings = doc.pages * LANGUAGE_FINDINGS_PER_PAGE
-    stages.append(("language_review", work(findings * LANGUAGE_FINDING_PROMPT_TOKENS, findings * LANGUAGE_FINDING_TOKENS)))
+    if machine.profile != "light":          # the light model does not review the language findings
+        findings = doc.pages * LANGUAGE_FINDINGS_PER_PAGE
+        stages.append(("language_review", work(findings * LANGUAGE_FINDING_PROMPT_TOKENS, findings * LANGUAGE_FINDING_TOKENS)))
     return stages
 
 
@@ -222,8 +230,12 @@ def load_history():
         return []
 
 
-def _kind(use_llm, check_images, gpu):
-    return {"llm": bool(use_llm), "images": bool(check_images) if use_llm else False, "gpu": bool(gpu) if use_llm else False}
+def _kind(use_llm, check_images, machine):
+    kind = {"llm": bool(use_llm), "images": bool(check_images) if use_llm else False,
+            "gpu": bool(machine.gpu) if use_llm else False}
+    if use_llm and machine.profile == "light":
+        kind["profile"] = "light"           # records of the full model have no such key: they stay "full"
+    return kind
 
 
 def _record_kind(record):
@@ -232,14 +244,17 @@ def _record_kind(record):
     images = record.get("images")
     if "n_images" not in record:
         images = bool(images) if record.get("llm") else False
-    return {"llm": record.get("llm"), "images": images, "gpu": record.get("gpu")}
+    kind = {"llm": record.get("llm"), "images": images, "gpu": record.get("gpu")}
+    if record.get("profile") == "light":
+        kind["profile"] = "light"
+    return kind
 
 
 def record_run(doc, machine, use_llm, check_images, estimate, actual_s, stage_seconds, loads):
     """Store a finished analysis: its real duration next to the model's prediction."""
     record = {
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-        **_kind(use_llm, check_images, machine.gpu),
+        **_kind(use_llm, check_images, machine),
         "model": MODEL_VERSION,
         "pages": doc.pages, "chars": doc.chars, "n_images": doc.images, "sections": doc.sections, "figures": doc.figures,
         "raw_predicted_s": round(estimate.raw_total_s, 1) if estimate else None,
@@ -290,7 +305,7 @@ def estimate(doc, machine, use_llm, check_images, history=None):
     raw = raw_estimate(doc, machine, use_llm, check_images, history)
     raw_total = sum(s for _, s in raw)
 
-    kind = _kind(use_llm, check_images, machine.gpu)
+    kind = _kind(use_llm, check_images, machine)
     same = [r for r in history if r.get("model") == MODEL_VERSION and _record_kind(r) == kind
             and r.get("raw_predicted_s") and r.get("actual_s")]
     ratios = [r["actual_s"] / r["raw_predicted_s"] for r in same]

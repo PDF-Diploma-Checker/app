@@ -23,6 +23,18 @@ MIN_RAM_FOR_CPU_GB = 12.0       # Gemma 3 12B (Q4) needs about 8 GB for the weig
 GOOD_VRAM_GB = 8.0                  # the largest model fits whole on the card from here on
 AI_MODELS_SIZE_GB = 14.0        # Gemma 3 12B + Qwen2.5-VL + projector + embeddings
 NEEDED_FREE_GB = 15.0           # what the models folder should have free before downloading
+LIGHT_MODELS_SIZE_GB = 9.0      # Gemma 3 4B + Qwen2.5-VL + projector + embeddings
+LIGHT_NEEDED_FREE_GB = 10.0
+LIGHT_GOOD_VRAM_GB = 4.0        # the small model fits whole on the card from here on
+LIGHT_MIN_RAM_FOR_CPU_GB = 6.0
+
+
+def models_size_gb(profile="full"):
+    return LIGHT_MODELS_SIZE_GB if profile == "light" else AI_MODELS_SIZE_GB
+
+
+def needed_free_gb(profile="full"):
+    return LIGHT_NEEDED_FREE_GB if profile == "light" else NEEDED_FREE_GB
 
 
 @dataclass
@@ -41,6 +53,7 @@ class HardwareReport:
     gpu_name: str = ""
     vram_gb: float = 0.0
     facts: dict = field(default_factory=dict)
+    recommended_profile: str = "full"   # "light" for a computer that cannot run the 12B model well
 
     def as_text(self):
         """Plain-text form for the log and for bug reports."""
@@ -180,6 +193,7 @@ def collect_facts(model_dir=None):
         "driver_cuda": driver_cuda_version() if gpus else None,
         "torch": torch_flavour(),
         "java": config.java_available(),
+        "profile": config.MODEL_PROFILE,
         "models_ready": config.are_ai_models_downloaded(),
         "model_dir": str(model_dir or config.MODEL_DIR),
         "free_gb": free_space_gb(model_dir or config.MODEL_DIR),
@@ -189,19 +203,28 @@ def collect_facts(model_dir=None):
 
 # --------------------------------------------------------------------------- advice
 
-def is_weak_gpu(vram_gb):
+def is_weak_gpu(vram_gb, profile="full"):
     """A card that was found, but cannot hold the whole model: part of the work stays on the processor."""
-    return 0 < vram_gb < GOOD_VRAM_GB
+    return 0 < vram_gb < (LIGHT_GOOD_VRAM_GB if profile == "light" else GOOD_VRAM_GB)
 
 
 # A "16 GB" card reports about 15.9 GB (16311 MiB on an RTX 5060 Ti), so the limit sits a little below 16.
 FULL_OFFLOAD_VRAM_GB = 15.5
 
 
-def recommend_gpu_layers(vram_gb):
+def recommend_gpu_layers(vram_gb, profile="full"):
     """How many of Gemma's 48 layers to put on a card with this much memory (the rest stays on the CPU).
 
-    A rule of thumb: the layers, the context buffers and the vision model have to fit together."""
+    A rule of thumb: the layers, the context buffers and the vision model have to fit together. The small model
+    (profile "light", 34 layers) fits whole on a card with 5 GB or more."""
+    if profile == "light":
+        if vram_gb >= 5:
+            return -1
+        if vram_gb >= 3.5:
+            return 20
+        if vram_gb >= 2.5:
+            return 10
+        return 0
     if vram_gb >= FULL_OFFLOAD_VRAM_GB:
         return -1           # everything
     if vram_gb >= 10:
@@ -215,8 +238,19 @@ def recommend_gpu_layers(vram_gb):
     return 0
 
 
+def recommend_profile(facts, vram_gb=0.0):
+    """"light" (Gemma 4B) when this computer cannot run the 12B model well: a card with less memory than the model
+    needs, or no usable card and little RAM. Otherwise "full"."""
+    if facts.get("nvidia"):
+        return "light" if vram_gb < GOOD_VRAM_GB else "full"
+    ram = float(facts.get("ram_gb") or 0.0)
+    return "light" if 0 < ram < MIN_RAM_FOR_CPU_GB else "full"
+
+
 def diagnose(facts):
     """Turn collect_facts() output into a HardwareReport."""
+    profile = facts.get("profile", "full")
+    min_ram = LIGHT_MIN_RAM_FOR_CPU_GB if profile == "light" else MIN_RAM_FOR_CPU_GB
     checks = [
         Check("os", "info", {"os": facts.get("os", "?"), "machine": facts.get("machine", "")}),
         Check("cpu", "info", {"cpu": facts.get("cpu", "?"), "threads": facts.get("threads", 0)}),
@@ -224,8 +258,8 @@ def diagnose(facts):
 
     ram = float(facts.get("ram_gb") or 0.0)
     if ram > 0:
-        level = "ok" if ram >= MIN_RAM_FOR_CPU_GB else "warn"
-        checks.append(Check("ram", level, {"ram": f"{ram:.0f}", "needed": f"{MIN_RAM_FOR_CPU_GB:.0f}"}))
+        level = "ok" if ram >= min_ram else "warn"
+        checks.append(Check("ram", level, {"ram": f"{ram:.0f}", "needed": f"{min_ram:.0f}"}))
 
     ai_runtime = bool(facts.get("ai_runtime"))
     checks.append(Check("ai_runtime", "ok" if ai_runtime else "fail"))
@@ -248,8 +282,8 @@ def diagnose(facts):
             {"driver": nvidia["driver"], "cuda": cuda_text or "?", "needed": "%d.%d" % MIN_DRIVER_CUDA},
         ))
         vram = free_vram                    # what other programs have not taken is what the model can use
-        if vram < GOOD_VRAM_GB:
-            checks.append(Check("vram", "warn", {"vram": f"{vram:.1f}", "layers": recommend_gpu_layers(vram)}))
+        if is_weak_gpu(vram, profile):
+            checks.append(Check("vram", "warn", {"vram": f"{vram:.1f}", "layers": recommend_gpu_layers(vram, profile)}))
     elif facts.get("other_gpus"):
         checks.append(Check("gpu_other", "warn", {"name": "; ".join(facts["other_gpus"])}))
     else:
@@ -268,19 +302,22 @@ def diagnose(facts):
     if not facts.get("models_ready"):
         free = float(facts.get("free_gb") or 0.0)
         checks.append(Check(
-            "disk", "ok" if free >= NEEDED_FREE_GB else "warn",
-            {"free": f"{free:.0f}", "needed": f"{AI_MODELS_SIZE_GB:.0f}", "dir": facts.get("model_dir", "")},
+            "disk", "ok" if free >= needed_free_gb(profile) else "warn",
+            {"free": f"{free:.0f}", "needed": f"{models_size_gb(profile):.0f}", "dir": facts.get("model_dir", "")},
         ))
 
-    gpu_usable = bool(ai_runtime and gpu_build and nvidia and driver_ok and recommend_gpu_layers(vram) != 0)
+    recommended_profile = recommend_profile(facts, vram)
+    gpu_usable = bool(ai_runtime and gpu_build and nvidia and driver_ok
+                      and (recommend_gpu_layers(vram, profile) != 0 or recommend_gpu_layers(vram, recommended_profile) != 0))
     return HardwareReport(
         checks=checks,
         gpu_usable=gpu_usable,
         recommended_device="cuda" if gpu_usable else "cpu",
-        recommended_layers=recommend_gpu_layers(vram) if gpu_usable else 0,
+        recommended_layers=recommend_gpu_layers(vram, recommended_profile) if gpu_usable else 0,
         gpu_name=gpu_name,
         vram_gb=vram,
         facts=facts,
+        recommended_profile=recommended_profile,
     )
 
 

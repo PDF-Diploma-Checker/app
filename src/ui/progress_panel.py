@@ -217,7 +217,7 @@ class ResourcePanel(QWidget):
         outer.addWidget(self.note)
         self._watch_gpu = False
 
-    def configure(self, use_llm, gpu, layers, gpu_name="", threads=None):
+    def configure(self, use_llm, gpu, layers, gpu_name="", threads=None, total_layers=GEMMA_LAYERS):
         """Which cards make sense for this run and the sentence explaining the expected load."""
         self._watch_gpu = use_llm and gpu
         self.gpu_card.setVisible(self._watch_gpu)
@@ -228,10 +228,10 @@ class ResourcePanel(QWidget):
             note = t("analysis.res_note_fast")
         elif not gpu:
             note = t("analysis.res_note_cpu")
-        elif layers < 0 or layers >= GEMMA_LAYERS:
+        elif layers < 0 or layers >= total_layers:
             note = t("analysis.res_note_gpu_full")
         else:
-            note = t("analysis.res_note_gpu_part", layers=layers, total=GEMMA_LAYERS)
+            note = t("analysis.res_note_gpu_part", layers=layers, total=total_layers)
         self._base_note = note
         self._hint_samples = []
         self.note.setText(note)
