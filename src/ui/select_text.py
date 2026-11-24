@@ -1,8 +1,6 @@
-import webbrowser
-from urllib.parse import quote_plus
-from PySide6.QtWidgets import QMenu, QApplication, QRubberBand, QPushButton, QToolTip, QInputDialog, QFrame
+from PySide6.QtWidgets import QMenu, QApplication, QPushButton, QToolTip, QInputDialog, QFrame, QWidget
 from PySide6.QtCore import Qt, QPoint, QRect, QRectF, Signal, QPointF, QSize
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter
 from PySide6.QtPdfWidgets import QPdfView
 import os
 import sys
@@ -11,7 +9,8 @@ from common.findings import assign_finding_ids, finding_kind, finding_label
 
 from . import styles
 from .i18n import t
-from .word_selection import select_words
+from .word_selection import (bounds_of, hit_index, line_rects, ordered_words, search_phrases, selection_between,
+                             selection_text)
 
 TOOLTIP_LANG = {
     "pl": {
@@ -157,6 +156,33 @@ class SpellingHighlightBox(QPushButton):
         super().keyPressEvent(event)
 
 
+class SelectionHighlight(QWidget):
+    """The selected text, highlighted line by line over the page; it lets the mouse through to the view."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.rects = []
+        self.hide()
+
+    def set_rects(self, rects):
+        self.rects = list(rects)
+        if not self.rects:
+            self.hide()
+            return
+        self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.show()
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(37, 99, 235, 70))
+        for rect in self.rects:
+            p.drawRect(rect)
+
+
 class SelectablePdfView(QPdfView):
     """An extended PDF view that enables area-based text selection, adding custom user comments, and overlaying error markers."""
     textCopied = Signal(str)
@@ -168,13 +194,17 @@ class SelectablePdfView(QPdfView):
         self.markers = []
         self.comment_markers = []
         self.highlight_boxes = []
-        self.selection_box = QRubberBand(QRubberBand.Rectangle, self)
-        self.origin = QPoint()
-        self.selection_pdf_rect = None 
+        self.selection_box = SelectionHighlight(self.viewport())
+        self.selection_pdf_rect = None
         self.selection_page_idx = -1
         self.selected_text = ""
+        self._sel_words, self._sel_anchor, self._sel_focus, self._sel_rects = [], None, None, []
+        self._press_pos = None
+        self._press_page, self._press_pdf, self._press_anchor, self._dragging = -1, (0.0, 0.0), None, False
         self._source_path = None
         self._words_cache = {}
+        self._ordered_cache = {}
+        self.viewport().setCursor(Qt.IBeamCursor)
 
         self.verticalScrollBar().valueChanged.connect(self.update_selection_box_pos)
         self.horizontalScrollBar().valueChanged.connect(self.update_selection_box_pos)
@@ -185,6 +215,8 @@ class SelectablePdfView(QPdfView):
         """The PDF file shown: its words (with their exact positions) are read from it for the selection."""
         self._source_path = path
         self._words_cache = {}
+        self._ordered_cache = {}
+        self.clear_selection()
 
     def _page_words(self, index):
         """Words of a page as PyMuPDF tuples (x0, y0, x1, y1, text, block, line, word); None when unreadable."""
@@ -360,157 +392,187 @@ class SelectablePdfView(QPdfView):
         self.update_selection_box_pos()
         self.update_markers_pos()
 
-    def update_selection_box_pos(self):
-        """Updates the screen geometry of box selection"""
-        if not self.origin.isNull() or self.selection_page_idx == -1 or not self.selection_pdf_rect:
-            return
-        
-        doc = self.document()
-        if not doc or doc.pageCount() <= self.selection_page_idx: return
+    # ------------------------------------------------------------------ text selection
+    # Like in a PDF reader: press on the text and drag; the words from the one under the press to the one under the
+    # mouse are selected in reading order, across lines, and highlighted line by line. Shift+click extends the
+    # selection, a double click selects a word, Ctrl+C copies. The selection stays on the page where it started.
 
-        dpi_x, dpi_y = self.logicalDpiX(), self.logicalDpiY()
+    def _page_origin(self, index):
+        """Top-left corner of page `index` in viewport pixels, and the pixels per PDF point (x, y)."""
+        tops, widths = self._page_layout()
         zoom = self.zoomFactor()
-
-        target_page_y_px = self.documentMargins().top()
-        for i in range(self.selection_page_idx):
-            size_pt = doc.pagePointSize(i)
-            target_page_y_px += (size_pt.height() * zoom * (dpi_y / 72.0)) + self.pageSpacing()
-
-        size_pt = doc.pagePointSize(self.selection_page_idx)
-        page_w_px = size_pt.width() * zoom * (dpi_x / 72.0)
-        viewport_w = self.viewport().width()
-        
+        kx, ky = zoom * self.logicalDpiX() / 72.0, zoom * self.logicalDpiY() / 72.0
         if self.horizontalScrollBar().maximum() > 0:
-            x_start_px = self.documentMargins().left()
+            x = self.documentMargins().left()
         else:
-            x_start_px = (viewport_w - page_w_px) / 2
+            x = (self.viewport().width() - widths[index]) / 2
+        return x - self.horizontalScrollBar().value(), tops[index] - self.verticalScrollBar().value(), kx, ky
 
-        rect_pt = self.selection_pdf_rect
-        px_x = x_start_px + (rect_pt.x() * zoom * (dpi_x / 72.0)) - self.horizontalScrollBar().value()
-        px_y = target_page_y_px + (rect_pt.y() * zoom * (dpi_y / 72.0)) - self.verticalScrollBar().value()
-        px_w = rect_pt.width() * zoom * (dpi_x / 72.0)
-        px_h = rect_pt.height() * zoom * (dpi_y / 72.0)
+    def _page_at(self, pos):
+        """Index of the page under (or nearest to) the viewport point `pos`, or -1 without a document."""
+        doc = self.document()
+        if not doc or doc.pageCount() == 0:
+            return -1
+        tops, _ = self._page_layout()
+        y = pos.y() + self.verticalScrollBar().value()
+        index = 0
+        for i, top in enumerate(tops):
+            if top <= y:
+                index = i
+        return index
 
-        self.selection_box.setGeometry(int(px_x), int(px_y), int(px_w), int(px_h))
-        self.selection_box.show()
+    def _to_pdf(self, index, pos):
+        x0, y0, kx, ky = self._page_origin(index)
+        return (pos.x() - x0) / kx, (pos.y() - y0) / ky
+
+    def _to_view(self, index, rect):
+        x0, y0, kx, ky = self._page_origin(index)
+        return QRectF(x0 + rect[0] * kx, y0 + rect[1] * ky, (rect[2] - rect[0]) * kx, (rect[3] - rect[1]) * ky)
+
+    def clear_selection(self):
+        self.selected_text = ""
+        self.selection_pdf_rect = None
+        self.selection_page_idx = -1
+        self._sel_words, self._sel_anchor, self._sel_focus, self._sel_rects = [], None, None, []
+        self.selection_box.set_rects([])
+
+    def _select(self, index, anchor, focus):
+        """Select the words `anchor`..`focus` (indexes into the ordered words of page `index`)."""
+        ordered = self._ordered_words(index)
+        chosen = selection_between(ordered, anchor, focus)
+        self.selection_page_idx = index
+        self._sel_words, self._sel_anchor, self._sel_focus = ordered, anchor, focus
+        self.selected_text = selection_text(chosen)
+        bounds = bounds_of(chosen)
+        pad = 1.0
+        self.selection_pdf_rect = (QRectF(bounds[0] - pad, bounds[1] - pad, bounds[2] - bounds[0] + 2 * pad,
+                                          bounds[3] - bounds[1] + 2 * pad) if bounds else None)
+        self._sel_rects = line_rects(chosen)
+        self.update_selection_box_pos()
+
+    def _ordered_words(self, index):
+        if index not in self._ordered_cache:
+            self._ordered_cache[index] = ordered_words(self._page_words(index))
+        return self._ordered_cache[index]
+
+    def _select_with_qt(self, index, start, end):
+        """When the words cannot be read from the file: Qt's own selection between the two points."""
+        selection = self.document().getSelection(index, QPointF(*start), QPointF(*end))
+        text = selection.text().strip() if selection else ""
+        self.selection_page_idx = index
+        self.selected_text = " ".join(text.split())
+        box = selection.boundingRectangle() if text else QRectF()
+        self.selection_pdf_rect = box if text else None
+        self._sel_rects = [(box.left(), box.top(), box.right(), box.bottom())] if text else []
+        self.update_selection_box_pos()
+
+    def _drag_to(self, pos):
+        index = self._press_page
+        x, y = self._to_pdf(index, pos)
+        ordered = self._ordered_words(index)
+        if not ordered:
+            if self._page_words(index) is None:            # file not readable: fall back to Qt
+                self._select_with_qt(index, self._press_pdf, (x, y))
+            return
+        focus = hit_index(ordered, x, y)
+        anchor = self._press_anchor if self._press_anchor is not None else hit_index(ordered, *self._press_pdf)
+        self._select(index, anchor, focus)
+
+    def has_selection_at(self, pos, margin=4):
+        """True when the viewport point `pos` is on the highlighted text."""
+        return any(r.adjusted(-margin, -margin, margin, margin).contains(QPointF(pos)) for r in self.selection_box.rects)
+
+    def update_selection_box_pos(self):
+        """Places the highlight of the selection for the current zoom and scroll."""
+        if self.selection_page_idx == -1 or not self._sel_rects:
+            self.selection_box.set_rects([])
+            return
+        doc = self.document()
+        if not doc or doc.pageCount() <= self.selection_page_idx:
+            return
+        self.selection_box.set_rects([self._to_view(self.selection_page_idx, r) for r in self._sel_rects])
 
     def mousePressEvent(self, event):
         """Handles mouse press events."""
         if event.button() == Qt.BackButton:
             self.backRequested.emit()
             return
+        pos = event.position()
         if event.button() == Qt.RightButton:
-            if self.selection_box.isVisible() and self.selection_box.geometry().contains(event.position().toPoint()):
+            if self.selected_text and self.has_selection_at(pos):
                 self.show_context_menu(event.globalPosition().toPoint())
             return
-
-        if event.button() == Qt.LeftButton and event.modifiers() == Qt.ShiftModifier:
-            self.origin = event.position().toPoint()
-            self.selection_box.setGeometry(QRect(self.origin, QSize(0,0)))
-            self.selection_box.show()
-            self.selected_text = ""
-            self.selection_pdf_rect = None
-            self.selection_page_idx = -1
+        if event.button() == Qt.LeftButton:
+            index = self._page_at(pos)
+            if index < 0:
+                return
+            extend = bool(event.modifiers() & Qt.ShiftModifier) and index == self.selection_page_idx \
+                and self._sel_anchor is not None
+            self._press_pos, self._press_page, self._dragging = pos, index, extend
+            self._press_pdf = self._to_pdf(index, pos)
+            if extend:                                      # Shift+click: move the end of the current selection
+                self._press_anchor = self._sel_anchor
+                self._drag_to(pos)
+            else:
+                self._press_anchor = None
+                self.clear_selection()
+            self.setFocus(Qt.MouseFocusReason)
             event.accept()
             return
-            
-        if event.button() == Qt.LeftButton:
-            self.selection_box.hide()
-            self.selected_text = ""
-            self.selection_pdf_rect = None
-            self.selection_page_idx = -1
-
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
         """Handles mouse move events"""
-        if not self.origin.isNull() and event.modifiers() == Qt.ShiftModifier:
-            self.selection_box.setGeometry(QRect(self.origin, event.position().toPoint()).normalized())
+        if self._press_pos is not None and event.buttons() & Qt.LeftButton:
+            pos = event.position()
+            if not self._dragging and (pos - self._press_pos).manhattanLength() < 4:
+                return                                      # a click, not a drag (yet)
+            self._dragging = True
+            self._autoscroll(pos)
+            self._drag_to(pos)
             event.accept()
             return
         super().mouseMoveEvent(event)
 
+    def _autoscroll(self, pos):
+        """Dragging near the top or bottom edge scrolls the page, so a selection can be longer than the view."""
+        edge, height = 24, self.viewport().height()
+        bar = self.verticalScrollBar()
+        if pos.y() < edge:
+            bar.setValue(bar.value() - int((edge - pos.y()) * 0.8) - 2)
+        elif pos.y() > height - edge:
+            bar.setValue(bar.value() + int((pos.y() - height + edge) * 0.8) + 2)
+
     def mouseReleaseEvent(self, event):
         """Handles mouse release events."""
-        if not self.origin.isNull():
-            rect = self.selection_box.geometry()
-            self.origin = QPoint()
-            self.extract_text(rect)
+        if self._press_pos is not None and event.button() == Qt.LeftButton:
+            self._press_pos = None
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
-    def extract_text(self, rect):
-        """Extracts text from a specified pixel coordinate bounding box on the screen."""
-        doc = self.document()
-        if not doc or doc.pageCount() == 0: return
-        
-        v_val = self.verticalScrollBar().value()
-        h_val = self.horizontalScrollBar().value()
-        dpi_x, dpi_y = self.logicalDpiX(), self.logicalDpiY()
-        
-        current_y_px = self.documentMargins().top()
-        
-        for i in range(doc.pageCount()):
-            size_pt = doc.pagePointSize(i)
-            page_w_px = int((size_pt.width() * self.zoomFactor() * (dpi_x / 72.0)) + 0.5)
-            page_h_px = int((size_pt.height() * self.zoomFactor() * (dpi_y / 72.0)) + 0.5)
-            
-            center_y_px = rect.center().y() + v_val
-            
-            if current_y_px <= center_y_px <= current_y_px + page_h_px:
-                viewport_w = self.viewport().width()
-                x_start_px = self.documentMargins().left() if self.horizontalScrollBar().maximum() > 0 else (viewport_w - page_w_px) / 2
-                
-                px1 = rect.left() + h_val - x_start_px
-                py1 = rect.top() + v_val - current_y_px
-                px2 = rect.right() + h_val - x_start_px
-                py2 = rect.bottom() + v_val - current_y_px
-                
-                pt_x1 = (px1 / self.zoomFactor()) * (72.0 / dpi_x)
-                pt_y1 = (py1 / self.zoomFactor()) * (72.0 / dpi_y)
-                pt_x2 = (px2 / self.zoomFactor()) * (72.0 / dpi_x)
-                pt_y2 = (py2 / self.zoomFactor()) * (72.0 / dpi_y)
-                
-                start_x, end_x = min(pt_x1, pt_x2), max(pt_x1, pt_x2)
-                start_y, end_y = min(pt_y1, pt_y2), max(pt_y1, pt_y2)
+    def mouseDoubleClickEvent(self, event):
+        """A double click selects the word under the mouse."""
+        if event.button() != Qt.LeftButton:
+            return super().mouseDoubleClickEvent(event)
+        pos = event.position()
+        index = self._page_at(pos)
+        ordered = self._ordered_words(index) if index >= 0 else []
+        if ordered:
+            x, y = self._to_pdf(index, pos)
+            hit = hit_index(ordered, x, y)
+            w = ordered[hit]
+            if w[0] - 3 <= x <= w[2] + 3 and w[1] - 3 <= y <= w[3] + 3:
+                self._select(index, hit, hit)
+        self._press_pos = None
+        event.accept()
 
-                self.selection_page_idx = i
-                self.selection_pdf_rect = QRectF(start_x, start_y, end_x - start_x, end_y - start_y)
-                
-                words = self._page_words(i)
-                if words is not None:
-                    # The words whose centre is in the drawn rectangle. The box is then drawn around exactly these
-                    # words, so what is outlined is what is selected (before, the outline stayed where the mouse
-                    # was and the text snapped to the nearest letters, sometimes to nothing).
-                    text, bounds = select_words(words, (start_x, start_y, end_x, end_y))
-                    self.selected_text = text
-                    if bounds:
-                        pad = 1.0
-                        self.selection_pdf_rect = QRectF(bounds[0] - pad, bounds[1] - pad,
-                                                         bounds[2] - bounds[0] + 2 * pad,
-                                                         bounds[3] - bounds[1] + 2 * pad)
-                else:
-                    self.selected_text = self._scan_text(doc, i, size_pt, start_x, end_x, start_y, end_y)
-                self.update_selection_box_pos()
-                break
-            current_y_px += page_h_px + self.pageSpacing()
-
-    @staticmethod
-    def _scan_text(doc, page, size_pt, start_x, end_x, start_y, end_y):
-        """Fallback when the words cannot be read from the file: the text line by line from QPdfDocument."""
-        collected_lines = []
-        current_scan_y = start_y
-        while current_scan_y <= end_y:
-            pt_start = QPointF(max(0, start_x), current_scan_y)
-            pt_end = QPointF(min(size_pt.width(), end_x), current_scan_y)
-            selection = doc.getSelection(page, pt_start, pt_end)
-            if selection and selection.text():
-                chunk = selection.text().strip()
-                if chunk and (not collected_lines or collected_lines[-1] != chunk):
-                    collected_lines.append(chunk)
-            current_scan_y += 4.0
-        return " ".join(collected_lines)
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.Copy) and self.selected_text:
+            self.copy_to_clipboard()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def show_context_menu(self, global_pos):
         """Displays a pop-up context menu."""
@@ -566,15 +628,8 @@ class SelectablePdfView(QPdfView):
         QApplication.clipboard().setText(self.selected_text)
 
     def check_plagiarism(self):
-        """Opens the system's default web browser to perform a Google Search of the selected text."""
+        """Searches the selected text on Google as exact phrases, after explaining what that does and means."""
         if not self.selected_text:
             return
-            
-        clean_text = " ".join(self.selected_text.split())
-        
-        if len(clean_text) > 300:
-            clean_text = clean_text[:300]
-            print("Ostrzeżenie: Przekroczono limit 300 znaków. Tekst został przycięty.")
-
-        encoded_phrase = quote_plus(f'"{clean_text}"')
-        webbrowser.open(f"https://www.google.com/search?q={encoded_phrase}")
+        from .plagiarism_dialog import check_plagiarism
+        check_plagiarism(self.selected_text, self)
