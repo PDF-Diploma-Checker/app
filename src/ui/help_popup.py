@@ -48,9 +48,10 @@ class HelpPopup(QFrame):
         rows = "".join(
             f"<tr><td style='padding:2px 14px 2px 0; color:{styles.TEXT}; white-space:nowrap;'>"
             f"{motion.shortcut_text(key)}</td><td style='padding:2px 0;'>{t(label)}</td></tr>"
-            for key, label in (("Ctrl+C", "help.key_copy"), ("Ctrl+K", "help.key_commands"),
-                               ("Ctrl+G", "help.key_page"), ("Ctrl+=", "help.key_zoom_in"),
-                               ("Ctrl+-", "help.key_zoom_out"), ("Alt+Left", "help.key_back")))
+            for key, label in (("Ctrl+F", "help.key_find"), ("Ctrl+C", "help.key_copy"),
+                               ("Ctrl+K", "help.key_commands"), ("Ctrl+G", "help.key_page"),
+                               ("Ctrl+=", "help.key_zoom_in"), ("Ctrl+-", "help.key_zoom_out"),
+                               ("Alt+Left", "help.key_back")))
         root.addWidget(_label(f"<table>{rows}</table>", body, rich=True))
 
     def show_under(self, button):

@@ -19,6 +19,7 @@ _PATHS = {
     "upload": '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
     "download": '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
     "chevron-down": '<polyline points="6 9 12 15 18 9"/>',
+    "chevron-up": '<polyline points="6 15 12 9 18 15"/>',
     "arrow-left": '<path d="M19 12H5M11 6l-6 6 6 6"/>',
     "close": '<path d="M6 6l12 12M18 6L6 18"/>',
     "check": '<polyline points="5 12.5 10 17.5 19 7.5"/>',
