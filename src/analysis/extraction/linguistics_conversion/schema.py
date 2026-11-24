@@ -25,6 +25,9 @@ class WordInfo:  # Położenie XY oraz relatywne słowa
     is_index: bool = False
     glued_to_prev: bool = False        # a "[n]" span that touches the word before it (no gap in the PDF)
     missing_bib_space: int = 0         # 1 = no space between the text and a bibliography reference: "tekst[17]"
+    # a word hyphenated at the end of a line is one word ("Ope-" + "nUSD" = "OpenUSD"): bbox/page_number/line are
+    # those of its first part, this holds the rest as (page_number, line, bbox)
+    extra_boxes: list = field(default_factory=list)
 
 
 @dataclass
@@ -476,6 +479,17 @@ def ends_with_lead_in(combined_words):
     return combined_words[-1].text.rstrip().endswith(":")
 
 
+def word_pieces(words):
+    """(page_number, line, bbox, word) of every printed piece of the words, in reading order: a word hyphenated at
+    the end of a line gives its first part and the rest on the next line."""
+    pieces = []
+    for word in words:
+        pieces.append((getattr(word, "page_number", 0), getattr(word, "line", 0), getattr(word, "bbox", None), word))
+        for page, line, bbox in getattr(word, "extra_boxes", None) or []:
+            pieces.append((page, line, bbox, word))
+    return pieces
+
+
 def is_widow_func(combined_words):
     """
     Detects typographical 'widows' within a paragraph. A widow is defined here as
@@ -491,8 +505,9 @@ def is_widow_func(combined_words):
     current_line = []
     last_line_id = None
 
-    for word in combined_words:
-        line_id = (word.page_number, word.line)
+    # by printed pieces: the rest of a word hyphenated at the end of a line ("kon-" / "strukcja.") is on the last line
+    for page, line, _bbox, word in word_pieces(combined_words):
+        line_id = (page, line)
         if last_line_id is None or line_id == last_line_id:
             current_line.append(word)
         else:
@@ -524,8 +539,8 @@ def ends_with_link(combined_words):
     break ("https://doi.org/10.1000/" / "abc-def"). Such a line cannot be shortened, so it is not a widow.
     """
     lines = {}
-    for word in combined_words:
-        lines.setdefault((word.page_number, word.line), []).append(word.text)
+    for page, line, _bbox, word in word_pieces(combined_words):
+        lines.setdefault((page, line), []).append(word.text)
     lines = list(lines.values())
 
     if any(_LINK.search(text) for text in lines[-1]):
@@ -560,21 +575,22 @@ def is_bekart_func(combined_words):
     is_bekart = 0
 
     if combined_words:
-        first_page = combined_words[0].page_number
-        first_line = combined_words[0].line
+        pieces = word_pieces(combined_words)        # the rest of a hyphenated word is on its own line
+        first_page = pieces[0][0]
+        first_line = pieces[0][1]
         page_lines_buf = 1
         has_page_break = False
         words_line_buf = 1
 
-        for word in combined_words:
-            if word.page_number != first_page:
-                first_page = word.page_number
-                first_line = word.line
+        for page, line, _bbox, _word in pieces[1:]:
+            if page != first_page:
+                first_page = page
+                first_line = line
                 page_lines_buf = 1
                 has_page_break = True
                 words_line_buf = 1
-            elif word.line != first_line:
-                first_line = word.line
+            elif line != first_line:
+                first_line = line
                 page_lines_buf += 1
                 words_line_buf = 1
             else:
@@ -607,19 +623,20 @@ def is_szewc_func(combined_words):
     is_szewc = 0
 
     if combined_words:
-        first_page = combined_words[0].page_number
-        first_line = combined_words[0].line
+        pieces = word_pieces(combined_words)        # the rest of a hyphenated word is on its own line
+        first_page = pieces[0][0]
+        first_line = pieces[0][1]
         page_lines_buf = 1
         has_page_break = False
         words_first_line_buf = 1
 
-        for word in combined_words[1:]:
-            if word.page_number != first_page:
+        for page, line, _bbox, _word in pieces[1:]:
+            if page != first_page:
                 has_page_break = True
                 break
 
-            elif word.line != first_line:
-                first_line = word.line
+            elif line != first_line:
+                first_line = line
                 page_lines_buf += 1
 
             elif page_lines_buf == 1:

@@ -696,8 +696,17 @@ class PDFMapper:
                 if combined_words:
                     combined_words[-1].end_char = current_offset
 
-            for word in data["words"]:
+            for k, word in enumerate(data["words"]):
                 shift = current_offset + len(separator)
+                if removed_hyphen and k == 0 and combined_words:
+                    # "Ope-" + "nUSD": one word "OpenUSD" whose second part is drawn on the next line
+                    first_part = combined_words[-1]
+                    first_part.text = first_part.text[:-1] + word.text
+                    first_part.end_char = word.end_char + shift
+                    first_part.extra_boxes = list(first_part.extra_boxes) + [
+                        (word.page_number, word.line, word.bbox)
+                    ] + list(getattr(word, "extra_boxes", None) or [])
+                    continue
                 combined_words.append(
                     WordInfo(
                         word_index=len(combined_words),
@@ -713,6 +722,7 @@ class PDFMapper:
                         line=word.line,
                         is_index = getattr(word, "is_index", False),
                         glued_to_prev = getattr(word, "glued_to_prev", False),
+                        extra_boxes = list(getattr(word, "extra_boxes", None) or []),
                     )
                 )
 
@@ -3115,6 +3125,8 @@ class PDFMapper:
             if id(w) not in removed_ids and not (w.start_char == 0 and w.end_char == 0)
         ]
         cross_line_deleted = []
+        hyphen_joins = []           # (first part, rest): "Ope-" + "nUSD" -> one word "OpenUSD"
+        joined_into = {}
         in_url = False
         for w1, w2 in zip(active_words, active_words[1:]):
             is_line_break = (
@@ -3149,6 +3161,9 @@ class PDFMapper:
                 cross_line_deleted.append(w1.end_char - 1)
                 if w2.start_char == w1.end_char + 1 and w1.end_char < len(text) and text[w1.end_char] == " ":
                     cross_line_deleted.append(w1.end_char)
+                target = joined_into.get(id(w1), w1)
+                hyphen_joins.append((target, w2))
+                joined_into[id(w2)] = target
                 in_url = False
             else:
                 in_url = False
@@ -3159,6 +3174,18 @@ class PDFMapper:
                 word.end_char -= sum(pos < word.end_char for pos in cross_line_deleted)
             deleted = set(cross_line_deleted)
             text = "".join(char for i, char in enumerate(text) if i not in deleted)
+
+        for target, rest in hyphen_joins:
+            # one word, drawn in two places: its first part keeps bbox/line, the rest goes to extra_boxes
+            if target.text.endswith("-"):
+                target.text = target.text[:-1]
+            target.text += rest.text
+            target.end_char = rest.end_char
+            target.extra_boxes = list(target.extra_boxes) + [(rest.page_number, rest.line, rest.bbox)] \
+                + list(rest.extra_boxes)
+            target.incorrect_bibliography = max(target.incorrect_bibliography, rest.incorrect_bibliography)
+            target.missing_bib_space = max(target.missing_bib_space, rest.missing_bib_space)
+            removed.append(rest)
 
         return text, removed
 
