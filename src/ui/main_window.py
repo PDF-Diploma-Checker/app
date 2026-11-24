@@ -206,6 +206,8 @@ class PDFReader(QMainWindow):
         self.export_btn.setToolTip(motion.with_hint(t("main.export_pdf"), "Ctrl+E"))
         self.commands_btn.setText(t("palette.button"))
         self.commands_btn.setToolTip(motion.with_hint(t("palette.button"), "Ctrl+K"))
+        self.help_btn.setToolTip(t("help.button"))
+        self.help_btn.setAccessibleName(t("help.button"))
         self.btn_zoom_in.setToolTip(motion.with_hint(t("main.zoom_in"), "Ctrl+="))
         self.btn_zoom_in.setAccessibleName(t("main.zoom_in"))
         self.btn_zoom_out.setToolTip(motion.with_hint(t("main.zoom_out"), "Ctrl+-"))
@@ -491,6 +493,12 @@ class PDFReader(QMainWindow):
         self.commands_btn.clicked.connect(self.open_command_menu)
         l.addWidget(self.commands_btn)
 
+        self.help_btn = self._tool_button("help", "", "")
+        self.help_btn.setFixedSize(40, 40)
+        self.help_btn.setIconSize(QSize(20, 20))
+        self.help_btn.clicked.connect(self.show_help)
+        l.addWidget(self.help_btn)
+
         self.lang_switch = LanguageSwitch()
         l.addWidget(self.lang_switch)
         l.addSpacing(8)
@@ -523,6 +531,11 @@ class PDFReader(QMainWindow):
         l.addWidget(self.logs_btn)
 
         return toolbar
+
+    def show_help(self):
+        """The "?" of the toolbar: how to select text, the right-click menu (plagiarism search) and the shortcuts."""
+        from .help_popup import HelpPopup
+        HelpPopup(self).show_under(self.help_btn)
 
     def show_log_window(self):
         """Show the live log window, creating it on first use."""
@@ -705,7 +718,7 @@ class PDFReader(QMainWindow):
         if not self.current_pdf_path:
             return
 
-        if self.pdf_view.selection_box.isVisible() and self.pdf_view.selection_box.geometry().contains(pos):
+        if self.pdf_view.selected_text and self.pdf_view.has_selection_at(pos):
             return
 
         tekst, ok = QInputDialog.getMultiLineText(self, t("main.own_comment_title"), t("main.own_comment_prompt"))
