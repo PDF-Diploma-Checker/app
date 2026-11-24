@@ -1725,20 +1725,31 @@ class RedactionValidator:
         mirror_pattern = (abs(references[0][0] - references[1][1]) <= tolerance
                           and abs(references[0][1] - references[1][0]) <= tolerance
                           and abs(references[0][0] - references[0][1]) > tolerance)
-        valid = True
+        bad_pages = []
         for page_num, margin in evidence.items():
             expected = references[page_num % 2]
             # Indentation and short lines may enlarge the visible margins. Only
             # text intruding into an established margin proves a violation.
             if mirror_pattern and all(a >= b - tolerance for a, b in zip(margin, expected)):
                 continue
-            comment = (f"Inconsistent mirror margins: left={margin[0]:.1f}, right={margin[1]:.1f}."
-                       if lang == "en" else
-                       f"Niespójne marginesy lustrzane: lewy={margin[0]:.1f}, prawy={margin[1]:.1f}.")
-            self.errors.append(Error(id=self._get_next_id(), module=self.module, category="config_file",
-                                     page_number=page_num, bounding_box=(0, 0, 0, 0), text=None, comments=comment))
-            valid = False
-        return valid
+            bad_pages.append(page_num)
+        if not bad_pages:
+            return True
+
+        # One finding for the whole thesis (shown as its own section: all pages or ranges of pages), not a marker on
+        # every page. `text` carries the data: the pages and how many pages could be measured.
+        share = len(bad_pages) / len(evidence)
+        if lang == "en":
+            comment = (f"Inconsistent mirror margins on {len(bad_pages)} of {len(evidence)} measured pages "
+                       f"({share:.0%}).")
+        else:
+            comment = (f"Niespójne marginesy lustrzane na {len(bad_pages)} z {len(evidence)} ocenionych stron "
+                       f"({share:.0%}).")
+        self.errors.append(Error(id=self._get_next_id(), module=self.module, category="inconsistent_margins",
+                                 page_number=None, bounding_box=(0, 0, 0, 0),
+                                 text=json.dumps({"pages": sorted(bad_pages), "evaluated": len(evidence)}),
+                                 comments=comment))
+        return False
 
     def check_format(self, doc_data: DocumentData) -> bool:
         tolerance = 10
