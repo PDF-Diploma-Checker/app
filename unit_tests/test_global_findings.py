@@ -124,7 +124,7 @@ class GlobalFindingsTest(unittest.TestCase):
         panel, _ = build_report_panel({}, lambda: None, self.errors)
         details = panel.findChild(QPlainTextEdit, "BibliographyDetails")
         self.assertIn("Example <Book>", details.toPlainText())
-        toggle = next(button for button in panel.findChildren(QToolButton) if button.isCheckable())
+        toggle = next(button for button in panel.findChildren(QToolButton) if button.isCheckable() and button.objectName() != "FindingsListToggle")
         self.assertTrue(details.isHidden())
         self.assertEqual(toggle.toolButtonStyle(), Qt.ToolButtonTextBesideIcon)
         self.assertEqual(toggle.arrowType(), Qt.RightArrow)
