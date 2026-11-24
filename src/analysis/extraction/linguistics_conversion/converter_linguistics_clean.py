@@ -41,7 +41,7 @@ from analysis.extraction.linguistics_conversion.schema import (
     is_szewc_func,
 )
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace as dataclass_replace
 
 @dataclass
 class LineGeom:
@@ -74,6 +74,121 @@ class PDFMapper:
     TAB_PATTERN = re.compile(
         r"^(tabela\.?|tab\.|table\.?)\s*(?:\d+|[A-Z]\.\d+|[IVX]+)", re.IGNORECASE
     )
+
+    # how far (pt) from the edge of a figure its caption and sub-captions "(a)", "(b)" may lie
+    FIGURE_CAPTION_MAX_GAP = 40.0
+
+    def _is_figure_caption_fragment(self, words) -> bool:
+        """
+        True when every word is set smaller than the body text and lies directly under (or above) a figure, in the
+        horizontal range of its image. Such text is a caption or a sub-caption "(a) ...", "(b) ..." (which has no
+        "Rys. N" prefix and whose lines may be split into separate blocks), not a paragraph of the text.
+        """
+        if not words:
+            return False
+        body_size = getattr(self, "main_font_size", None)
+        boxes_by_page = getattr(self, "page_image_bboxes", {})
+        gap = self.FIGURE_CAPTION_MAX_GAP
+        for w in words:
+            if body_size and w.size >= body_size - 0.5:
+                return False
+            cx = (w.bbox[0] + w.bbox[2]) / 2
+            near_figure = any(
+                b[0] - 2 <= cx <= b[2] + 2
+                and (
+                    b[3] - 2 <= w.bbox[1] <= b[3] + gap      # below the image
+                    or b[1] - gap <= w.bbox[3] <= b[1] + 2    # above the image
+                )
+                for b in boxes_by_page.get(w.page_number, [])
+            )
+            if not near_figure:
+                return False
+        return True
+
+    # label that opens a sub-caption of a multi-part figure: "(a) ...", "(b) ..."
+    SUBCAPTION_RE = re.compile(r"^\(\s*[a-zA-Z]\s*\)(?:\s|$)")
+
+    @staticmethod
+    def _block_text(block) -> str:
+        return " ".join(span.text for line in block.lines for span in line.spans).strip()
+
+    def _merge_subcaption_blocks(self, page):
+        """
+        PyMuPDF returns one block per line, and in the reading order the second lines of sub-captions that stand side
+        by side ("(a) ...", "(b) ...") come after the first lines of all of them. Left alone, those second lines are
+        glued into one paragraph. Here every sub-caption gets its lines back: a block set smaller than the body text,
+        directly under the previous line of the sub-caption and inside its horizontal range, continues that
+        sub-caption. Returns the blocks of the page in which each sub-caption is a single block.
+        """
+        blocks = list(page.text_blocks)
+        body_size = getattr(self, "main_font_size", None)
+        images = [image.bbox for image in page.images]
+        if not blocks or not images:
+            return blocks
+        gap_max = self.FIGURE_CAPTION_MAX_GAP
+
+        def is_small(block):
+            sizes = [span.size for line in block.lines for span in line.spans]
+            return bool(sizes) and (not body_size or max(sizes) < body_size - 0.5)
+
+        def near_figure(block):
+            x0, y0, x1, y1 = block.bbox
+            cx = (x0 + x1) / 2
+            return any(
+                b[0] - 2 <= cx <= b[2] + 2
+                and (b[3] - 2 <= y0 <= b[3] + gap_max or b[1] - gap_max <= y1 <= b[1] + 2)
+                for b in images
+            )
+
+        def is_plain(block):
+            text = self._block_text(block)
+            return not (self.IMG_PATTERN.match(text) or self.TAB_PATTERN.match(text) or self.SUBCAPTION_RE.match(text))
+
+        starts = [
+            i for i, b in enumerate(blocks)
+            if getattr(b, "block_type", "text") == "text" and is_small(b) and near_figure(b)
+            and self.SUBCAPTION_RE.match(self._block_text(b))
+        ]
+        if not starts:
+            return blocks
+
+        taken = {}          # index of a continuation block -> index of the block that opens its sub-caption
+        chains = {i: [i] for i in starts}
+        for start in starts:
+            last = blocks[start]
+            progressed = True
+            while progressed:
+                progressed = False
+                for j, cand in enumerate(blocks):
+                    if j in taken or j in chains or getattr(cand, "block_type", "text") != "text":
+                        continue
+                    if not (is_small(cand) and is_plain(cand)):
+                        continue
+                    lx0, _, lx1, ly1 = last.bbox
+                    cx0, cy0, cx1, _ = cand.bbox
+                    if -3.0 <= cy0 - ly1 <= 6.0 and cx0 >= lx0 - 3.0 and cx1 <= lx1 + 3.0:
+                        taken[j] = start
+                        chains[start].append(j)
+                        last = cand
+                        progressed = True
+                        break
+        if not taken:
+            return blocks
+
+        merged = []
+        for i, block in enumerate(blocks):
+            if i in taken:
+                continue
+            if i in chains and len(chains[i]) > 1:
+                parts = [blocks[k] for k in chains[i]]
+                lines = [line for part in parts for line in part.lines]
+                bbox = (
+                    min(part.bbox[0] for part in parts), min(part.bbox[1] for part in parts),
+                    max(part.bbox[2] for part in parts), max(part.bbox[3] for part in parts),
+                )
+                block = dataclass_replace(block, lines=lines, bbox=bbox)
+            merged.append(block)
+        return merged
 
     def _use_geom(self) -> bool:
         """
@@ -750,7 +865,11 @@ class PDFMapper:
                     block_type = "keywords"
         # a caption of a figure or a table is not a paragraph of the text: its short last line is no widow and its
         # place at the top of a page is no bastard
-        is_caption = bool(self.IMG_PATTERN.match(combined_content.strip()) or self.TAB_PATTERN.match(combined_content.strip()))
+        is_caption = bool(
+            self.IMG_PATTERN.match(combined_content.strip())
+            or self.TAB_PATTERN.match(combined_content.strip())
+            or self._is_figure_caption_fragment(combined_words)
+        )
         if block_type == "paragraph" and not is_caption:
             is_widow = (
                 is_widow_func(combined_words)
@@ -1339,6 +1458,7 @@ class PDFMapper:
 
         self.main_font_size = old_doc.get_most_common_font_size()
         self.page_heights = {page.number: page.height for page in old_doc.pages}
+        self.page_image_bboxes = {page.number: [image.bbox for image in page.images] for page in old_doc.pages}
 
         self.avg_line_spacing = old_doc.metadata.get("avarge_line_spacing", 18.0)
 
@@ -1436,7 +1556,7 @@ class PDFMapper:
             self._formula_regions(page, content_right) if self._use_geom() else []
         )
 
-        for block in page.text_blocks:
+        for block in self._merge_subcaption_blocks(page):
             if inside_figure(block.bbox):
                 self._empty_paragraph_buffer("figure text")
                 prev_geom = None
