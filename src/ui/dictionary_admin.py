@@ -1,4 +1,6 @@
 """Explicit admin application mode; credentials stay in memory and requests run on workers."""
+import uuid
+
 import requests
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -13,13 +15,14 @@ class AdminWorker(QThread):
         super().__init__(parent)
         self.credentials = (user, password)
         self.review = review
+        self.idempotency_key = str(uuid.uuid4())   # a repeated click on the same decision is the same request
 
     def run(self):
         try:
             url = service_url()
             if self.review is not None:
                 response = requests.post(url + '/admin/review', auth=self.credentials,
-                                         headers={'X-Dictionary-Review': '1'}, json=self.review,
+                                         headers={'X-Dictionary-Review': '1', 'Idempotency-Key': self.idempotency_key}, json=self.review,
                                          timeout=(3, 10), allow_redirects=False)
                 if response.status_code != 200:
                     raise ValueError(f'Review failed ({response.status_code}). Refresh before retrying.')

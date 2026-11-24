@@ -2,12 +2,12 @@ import logging
 import os
 
 import fitz
-from PySide6.QtCore import QMargins, QPointF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPalette, QPixmap
+from PySide6.QtCore import QEvent, QMargins, QPointF, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPalette, QPixmap, QShortcut
 from PySide6.QtPdf import QPdfDocument
 from PySide6.QtPdfWidgets import QPdfView
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
+    QApplication, QButtonGroup, QDialog, QFileDialog, QFrame, QHBoxLayout, QInputDialog,
     QLabel, QLineEdit, QMainWindow, QProgressBar, QPushButton,
     QScrollArea, QSplitter, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
@@ -16,8 +16,8 @@ from common.path import resource_path
 
 from common.findings import finding_kind
 
-from . import icons, report_panel, report_pdf, styles
-from .i18n import language_signals, t
+from . import icons, motion, report_panel, report_pdf, styles
+from .i18n import current_locale, language_signals, set_locale, t
 from .language_switch import LanguageSwitch
 from .analysis_dialog import AnalysisDialog
 from .log_window import LogWindow
@@ -55,6 +55,7 @@ class PDFReader(QMainWindow):
         self.start_page.fileDropped.connect(self.load_and_switch)
 
         self.start_page.openRequested.connect(self.open_existing_file)
+        self.start_page.commandsRequested.connect(self.open_command_menu)
 
         self.start_page.deleteRequested.connect(self.delete_document)
         self.stack.addWidget(self.start_page)
@@ -68,19 +69,97 @@ class PDFReader(QMainWindow):
         self.overlay.setStyleSheet(styles.OVERLAY_STYLE)
         self.overlay.hide()
 
+        self.toasts = motion.ToastHost(self)
+        self._last_deleted = None
+        self._palette = None
+        self._setup_shortcuts()
+        QApplication.instance().installEventFilter(self)
+
         language_signals.changed.connect(self.retranslate_ui)
         self.retranslate_ui()
+
+    # ------------------------------------------------------------ shortcuts and command menu
+    def _setup_shortcuts(self):
+        """Keyboard shortcuts of the whole window. The same keys are shown in tooltips and in the command menu."""
+        def bind(key, callback):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.WindowShortcut)
+            shortcut.activated.connect(callback)
+            return shortcut
+
+        in_reader = lambda fn: (lambda: fn() if self.stack.currentIndex() == 1 else None)
+        bind("Ctrl+K", self.open_command_menu)
+        bind("Ctrl+O", self.open_file_dialog)
+        bind("Ctrl+,", self.start_page.open_settings)
+        bind("Ctrl+Shift+L", self.toggle_language)
+        bind("Ctrl+Z", self.undo_delete)
+        bind("Alt+Left", in_reader(self.go_back))
+        bind("Ctrl+=", in_reader(self.zoom_in))
+        bind("Ctrl++", in_reader(self.zoom_in))
+        bind("Ctrl+-", in_reader(self.zoom_out))
+        bind("Ctrl+G", in_reader(self.focus_page_input))
+        bind("Ctrl+E", in_reader(self.export_pdf_with_annotations))
+
+    def eventFilter(self, obj, event):
+        """The side 'back' button of a mouse goes back from the reader, as in a browser."""
+        if (event.type() == QEvent.MouseButtonPress and event.button() == Qt.BackButton
+                and self.isActiveWindow() and self.stack.currentIndex() == 1):
+            self.go_back()
+            return True
+        return super().eventFilter(obj, event)
+
+    def go_back(self):
+        motion.fade_to(self.stack, 0)
+
+    def focus_page_input(self):
+        self.page_input.setFocus()
+        self.page_input.selectAll()
+
+    def toggle_language(self):
+        set_locale("pl" if current_locale() == "en" else "en")
+
+    def open_command_menu(self):
+        if self._palette is not None and self._palette.isVisible():
+            return
+        commands = [
+            motion.Command(t("palette.open_file"), self.open_file_dialog, "Ctrl+O", "pdf plik file add dodaj"),
+            motion.Command(t("palette.settings"), self.start_page.open_settings, "Ctrl+,", "config ustawienia"),
+            motion.Command(t("palette.language"), self.toggle_language, "Ctrl+Shift+L", "język language pl en"),
+        ]
+        if self.stack.currentIndex() == 1:
+            commands += [
+                motion.Command(t("palette.back"), self.go_back, "Alt+Left", "wróć back lista"),
+                motion.Command(t("palette.go_to_page"), self.focus_page_input, "Ctrl+G", "strona page"),
+                motion.Command(t("palette.zoom_in"), self.zoom_in, "Ctrl+=", "zoom powiększ"),
+                motion.Command(t("palette.zoom_out"), self.zoom_out, "Ctrl+-", "zoom pomniejsz"),
+                motion.Command(t("palette.export"), self.export_pdf_with_annotations, "Ctrl+E", "export eksport pdf"),
+                motion.Command(t("palette.report"), lambda: send_report(self, self.current_pdf_path), None, "błąd bug"),
+                motion.Command(t("palette.logs"), self.show_log_window, None, "logi logs"),
+            ]
+        if self._last_deleted:
+            commands.insert(0, motion.Command(t("palette.undo"), self.undo_delete, "Ctrl+Z", "cofnij undo"))
+        for doc in self.manager.data.get("documents", [])[:30]:
+            path = doc.get("local_path", "")
+            name = doc.get("file_name", os.path.basename(path))
+            commands.append(motion.Command(t("palette.open_doc", name=name),
+                                           lambda p=path: self.open_existing_file(p), None, name))
+        self._palette = motion.CommandPalette(self, commands)
+        self._palette.exec()
 
     def retranslate_ui(self, *_):
         """Re-apply all window texts after the UI language changes."""
         self.setWindowTitle(t("main.window_title"))
         self.v_label.setText(t("main.verification"))
         self.back_btn.setText("  " + t("main.back"))
-        self.back_btn.setToolTip(t("main.back_tooltip"))
+        self.back_btn.setToolTip(motion.with_hint(t("main.back_tooltip"), "Alt+Left"))
         self.page_input.setAccessibleName(t("main.page_number"))
-        self.btn_zoom_in.setToolTip(t("main.zoom_in"))
+        self.page_input.setToolTip(motion.with_hint(t("main.page_number"), "Ctrl+G"))
+        self.export_btn.setToolTip(motion.with_hint(t("main.export_pdf"), "Ctrl+E"))
+        self.commands_btn.setText(t("palette.button"))
+        self.commands_btn.setToolTip(motion.with_hint(t("palette.button"), "Ctrl+K"))
+        self.btn_zoom_in.setToolTip(motion.with_hint(t("main.zoom_in"), "Ctrl+="))
         self.btn_zoom_in.setAccessibleName(t("main.zoom_in"))
-        self.btn_zoom_out.setToolTip(t("main.zoom_out"))
+        self.btn_zoom_out.setToolTip(motion.with_hint(t("main.zoom_out"), "Ctrl+-"))
         self.btn_zoom_out.setAccessibleName(t("main.zoom_out"))
         self.export_btn.setText("  " + t("main.export_pdf"))
         self.report_btn.setText("  " + t("main.report_problem"))
@@ -96,6 +175,8 @@ class PDFReader(QMainWindow):
         super().resizeEvent(event)
         if hasattr(self, "overlay") and self.overlay is not None:
             self.overlay.resize(event.size())
+        if hasattr(self, "toasts"):
+            self.toasts.reposition()
 
     def open_existing_file(self, path):
         """Loads an already listed file from the disk storage and transitions the interface view
@@ -118,8 +199,10 @@ class PDFReader(QMainWindow):
                 else:
                     self.pdf_view.update()
 
-            self.load_ai_analysis()
-            self.stack.setCurrentIndex(1)
+            # Show the reader at once with a skeleton; the saved report is built a moment later.
+            self.report_scroll.setWidget(motion.skeleton_report())
+            motion.fade_to(self.stack, 1)
+            QTimer.singleShot(120, self.load_ai_analysis)
 
     def setup_reader_ui(self):
         """Assembles layout components, content areas, sidebar panels and toolbar items."""
@@ -244,13 +327,14 @@ class PDFReader(QMainWindow):
         self.back_btn = QPushButton()
         self.back_btn.setIcon(icons.icon("arrow-left", styles.TEXT_3, 18, 2.25))
         self.back_btn.setIconSize(QSize(18, 18))
-        self.back_btn.setFixedHeight(40)
         self.back_btn.setCursor(Qt.PointingHandCursor)
         self.back_btn.setStyleSheet(
             styles.ICON_BUTTON_STYLE
             + f"QPushButton {{ padding: 0 12px 0 8px; font-size: 14px; font-weight: 500; color: {styles.TEXT_3}; }}"
         )
-        self.back_btn.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+        self.back_btn.clicked.connect(self.go_back)
+        self.back_btn.setFixedHeight(44)
+        self.back_slop = motion.HitSlop(toolbar, self.back_btn)
         l.addWidget(self.back_btn)
         l.addWidget(self._divider())
 
@@ -278,6 +362,9 @@ class PDFReader(QMainWindow):
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setStyleSheet(styles.TOOLS_LABEL_STYLE)
 
+        for label in (self.page_input, self.total_pages_label, self.zoom_label):
+            motion.tabular(label)
+
         self.btn_zoom_in = self._tool_button("plus", "", "")
         self.btn_zoom_in.clicked.connect(self.zoom_in)
 
@@ -292,6 +379,15 @@ class PDFReader(QMainWindow):
         tl.addWidget(self.btn_zoom_in)
         l.addWidget(tools, alignment=Qt.AlignVCenter)
         l.addStretch(1)
+
+        self.commands_btn = QPushButton()
+        self.commands_btn.setIcon(icons.icon("search", styles.TEXT_3, 16, 2.25))
+        self.commands_btn.setIconSize(QSize(16, 16))
+        self.commands_btn.setFixedHeight(40)
+        self.commands_btn.setCursor(Qt.PointingHandCursor)
+        self.commands_btn.setStyleSheet(styles.GRAY_BUTTON_STYLE)
+        self.commands_btn.clicked.connect(self.open_command_menu)
+        l.addWidget(self.commands_btn)
 
         self.lang_switch = LanguageSwitch()
         l.addWidget(self.lang_switch)
@@ -373,7 +469,7 @@ class PDFReader(QMainWindow):
             self.manager.save_errors(path, errors)
             self.manager.save_ai_result(path, report_data)
 
-            self.stack.setCurrentIndex(1)
+            motion.fade_to(self.stack, 1)
 
             if errors:
                 self.pdf_view.add_errors(errors, lang=lang)
@@ -393,7 +489,8 @@ class PDFReader(QMainWindow):
                                    t("analysis.ai_failed_text", error=failure.get("error", "?")))
 
     def generate_thumbnails(self):
-        """Clears out old thumbnails and renders a preview for each page of the loaded PDF."""
+        """Creates a button for every page at once, each with a blurred low-resolution preview, and then
+        renders the sharp previews a few at a time while the window stays responsive."""
         for btn in self.thumb_buttons:
             self.thumb_group.removeButton(btn)
         self.thumb_buttons = []
@@ -402,6 +499,8 @@ class PDFReader(QMainWindow):
             if w:
                 w.setParent(None)
 
+        self._thumb_generation = getattr(self, "_thumb_generation", 0) + 1
+        self._thumb_queue = []
         thumb_w = 118
         for i in range(self.document.pageCount()):
             size_pt = self.document.pagePointSize(i)
@@ -412,16 +511,12 @@ class PDFReader(QMainWindow):
             btn.setCheckable(True)
             btn.setText(str(i + 1))
             btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            page_pixmap = QPixmap.fromImage(self.document.render(i, QSize(thumb_w, thumb_h)))
-            painter = QPainter(page_pixmap)
-            painter.setPen(QColor(styles.BORDER_STRONG))
-            painter.drawRect(0, 0, page_pixmap.width() - 1, page_pixmap.height() - 1)
-            painter.end()
-            btn.setIcon(page_pixmap)
+            btn.setIcon(self._page_pixmap(i, thumb_w, thumb_h, blurred=True))
             btn.setIconSize(QSize(thumb_w, thumb_h))
             btn.setAccessibleName(t("main.page_n", n=i + 1))
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(styles.THUMB_BUTTON_STYLE)
+            motion.tabular(btn)
             btn.clicked.connect(
                 lambda chk, idx=i: self.pdf_view.pageNavigator().jump(
                     idx, QPointF(0, 0), self.pdf_view.zoomFactor()
@@ -430,9 +525,38 @@ class PDFReader(QMainWindow):
             self.thumb_group.addButton(btn)
             self.thumb_buttons.append(btn)
             self.thumb_layout.addWidget(btn, alignment=Qt.AlignHCenter)
+            self._thumb_queue.append((i, thumb_w, thumb_h))
 
         if self.thumb_buttons:
             self.thumb_buttons[0].setChecked(True)
+        QTimer.singleShot(0, lambda g=self._thumb_generation: self._render_thumbnails(g))
+
+    def _page_pixmap(self, index, width, height, blurred=False):
+        """Preview of one page. The blurred version is rendered tiny and scaled up smoothly: it shows the
+        page's layout and tones right away, as a placeholder until the sharp one is ready."""
+        render_w = max(8, width // 8) if blurred else width
+        render_h = max(8, height // 8) if blurred else height
+        image = self.document.render(index, QSize(render_w, render_h))
+        pixmap = QPixmap.fromImage(image)
+        if blurred:
+            pixmap = pixmap.scaled(width, height, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        painter = QPainter(pixmap)
+        painter.setPen(QColor(styles.BORDER_STRONG))
+        painter.drawRect(0, 0, pixmap.width() - 1, pixmap.height() - 1)
+        painter.end()
+        return pixmap
+
+    def _render_thumbnails(self, generation, batch=3):
+        """Renders the next few sharp previews; stops when another document has been opened meanwhile."""
+        if generation != self._thumb_generation:
+            return
+        for _ in range(batch):
+            if not self._thumb_queue:
+                return
+            index, width, height = self._thumb_queue.pop(0)
+            if index < len(self.thumb_buttons):
+                self.thumb_buttons[index].setIcon(self._page_pixmap(index, width, height))
+        QTimer.singleShot(0, lambda: self._render_thumbnails(generation))
 
     def add_comment(self, pos):
         """Converts a context-menu click position to PDF coordinates and adds a note there."""
@@ -680,16 +804,33 @@ class PDFReader(QMainWindow):
             MessageBox.critical(self, texts["error"], texts["rep_err_gen"].format(str(e)))
 
     def delete_document(self, path):
-        """Removes a document from the index and refreshes the start page."""
-        reply = MessageBox.question(
-            self, t("main.confirm_title"),
-            t("main.confirm_delete"),
-            MessageBox.Yes | MessageBox.No, MessageBox.No,
+        """Removes a document from the list at once (no confirmation) and offers to undo it for a few seconds.
+        Only the list entry goes; the PDF file itself is never touched."""
+        entry, position = self.manager.take_document(path)
+        if entry is None:
+            return
+        self._last_deleted = (entry, position)
+        self.refresh_file_list()
+        name = entry.get("file_name", os.path.basename(path))
+        self.toasts.show(
+            t("toast.deleted", name=name), t("toast.undo"), on_action=self.undo_delete,
+            action_hint=motion.shortcut_text("Ctrl+Z"),
+            on_expire=lambda e=entry: self._forget_deleted(e),
         )
 
-        if reply == MessageBox.Yes:
-            self.manager.delete_document(path)
-            self.refresh_file_list()
+    def _forget_deleted(self, entry):
+        if self._last_deleted and self._last_deleted[0] is entry:
+            self._last_deleted = None
+
+    def undo_delete(self):
+        """Puts the last removed document back where it was."""
+        if not self._last_deleted:
+            return
+        entry, position = self._last_deleted
+        self._last_deleted = None
+        self.toasts.dismiss_current()
+        self.manager.restore_document(entry, position)
+        self.refresh_file_list()
 
     def refresh_file_list(self):
         """Synchronizes the start page list with the data store managed by SavingFiles."""

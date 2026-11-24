@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unicodedata
+import uuid
 from urllib.parse import urlsplit
 
 import requests
@@ -92,9 +93,10 @@ def contains(word):
     return unicodedata.normalize('NFC', word).casefold() in _words
 
 
-def propose(word):
+def propose(word, idempotency_key=None):
     # Never include a finding, PDF path, sentence, logs, or thesis attachment.
-    response = requests.post(service_url() + '/proposals', json={'word': normalize_word(word)}, timeout=(3, 10), allow_redirects=False)
+    response = requests.post(service_url() + '/proposals', json={'word': normalize_word(word)}, timeout=(3, 10), allow_redirects=False,
+                             headers={'Idempotency-Key': idempotency_key or str(uuid.uuid4())})
     if response.status_code != 201:
         raise ValueError(f'Proposal could not be submitted ({response.status_code}). Please try again later.')
     data = response.json()
