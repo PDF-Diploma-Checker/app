@@ -7,7 +7,7 @@ from PySide6.QtPdfWidgets import QPdfView
 import os
 import sys
 
-from common.findings import finding_kind
+from common.findings import assign_finding_ids, finding_kind, finding_label
 
 from . import styles
 from .i18n import t
@@ -38,9 +38,12 @@ class ErrorMarker(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setStyleSheet(styles.ERROR_MARKER_STYLE)
         self.setText("!")
+        label = finding_label(error_data)
+        self.setToolTip(f"{label} · {error_data.get('category', '')}".strip(" ·") if label else "")
         if self.data.get("category") == "TYPOS":
             self.setStyleSheet(styles.SPELLING_MARKER_STYLE)
-            self.setToolTip("Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo")
+            hint = "Right-click: propose a correct word" if lang == "en" else "Prawy przycisk: zaproponuj poprawne słowo"
+            self.setToolTip(f"{label} · {hint}" if label else hint)
         self.clicked.connect(self.show_details)
         if self.data.get("category") == "TYPOS":
             self.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -67,8 +70,9 @@ class ErrorMarker(QPushButton):
         kat = self.data.get('category', t["def_cat"])
         tekst = self.data.get('found_text', '')
 
-        info = (f"<b>{t['cat']}</b> {kat}<br>"
-                f"<b>{t['desc']}</b> {opis}<br>")
+        label = finding_label(self.data)
+        info = (f"<b>{label}</b><br>" if label else "") + (f"<b>{t['cat']}</b> {kat}<br>"
+                                                         f"<b>{t['desc']}</b> {opis}<br>")
         
         if tekst and str(tekst).strip() not in ["[Brak tekstu]", "[No text]", ""]:
             info += f"<b>{t['refers']}</b> <i>{tekst}</i>"
@@ -114,7 +118,8 @@ class SpellingHighlightBox(QPushButton):
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAutoDefault(False)
-        self.setToolTip(t('main.spelling_click_hint'))
+        label = finding_label(getattr(marker, 'data', None))
+        self.setToolTip(f"{label} · {t('main.spelling_click_hint')}" if label else t('main.spelling_click_hint'))
         self.setAccessibleName(t('main.spelling_proposal_action'))
         self.setAccessibleDescription(t('main.spelling_click_hint'))
         self.clicked.connect(marker.open_proposal)
@@ -178,7 +183,8 @@ class SelectablePdfView(QPdfView):
     def add_errors(self, errors_list, lang="pl"):
         """Clears existing errors and overlays a new list of error markers and highlight boxes"""
         self.clear_markers()
-        
+        errors_list = assign_finding_ids(errors_list)
+
         new_boxes = []
         for box in self.highlight_boxes:
             if getattr(box, 'is_error', False):
