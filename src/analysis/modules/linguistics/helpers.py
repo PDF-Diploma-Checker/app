@@ -14,6 +14,7 @@ from spellchecker import SpellChecker
 from common.path import LANGUAGETOOL_DIR, resource_path
 import sys
 import re
+import string
 import unicodedata
 from pathlib import Path
 import logging
@@ -110,10 +111,15 @@ nlp_en = get_nlp("en_core_web_lg")
 nlp_en.add_pipe("sentencizer", before="parser")
 nlp_en.add_pipe("fix_sentence_limits", after="sentencizer")
 
+EDGE_PUNCTUATION = string.punctuation + "„”“‘’«»…–—"
+
+
 @functools.cache
 def lemmatization(word_base, text_language):
-    '''Returns the lemma of a single word cached for repeated lookups.'''
-    word = word_base.lower()
+    '''Returns the lemma of a single word cached for repeated lookups.
+    Punctuation at the edges is cut off first ("subskrybcji," -> "subskrybcji", "0,6," -> "0,6"),
+    otherwise the lemma of the last token would be the punctuation mark itself (",").'''
+    word = word_base.lower().strip(EDGE_PUNCTUATION + string.whitespace) or word_base.lower()
     if text_language == "pl":
         nlp = nlp_pl
     else:
