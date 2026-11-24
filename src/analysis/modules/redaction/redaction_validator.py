@@ -158,6 +158,16 @@ def _listed_caption_on_page(page, entry, kind):
     return False
 
 
+def widow_max_words_setting():
+    """How many words a short last line may have to be a widow: 2 (the default: one or two words) or 1 (only a single
+    word), chosen in the analysis dialog and kept in app_config.json as "widow_max_words"."""
+    try:
+        from analysis.modules.llm.config import load_config
+        return 1 if int(load_config().get("widow_max_words", 2)) == 1 else 2
+    except Exception:
+        return 2
+
+
 @dataclass
 class Configuration:
     interlinia: float
@@ -270,8 +280,10 @@ class RedactionValidator:
         document_data_linguistics: FinalDocument,
         config_path: str = None,
         language="pl",
+        widow_max_words=None,
     ):
         self.document_data = document_data
+        self.widow_max_words = widow_max_words if widow_max_words is not None else widow_max_words_setting()
         self.language = language
         self.document_data_linguistics = document_data_linguistics
         if config_path is not None:
@@ -817,6 +829,13 @@ class RedactionValidator:
             comments=comment,
         )
 
+    def _is_reported_widow(self, words):
+        """A widow of `words` words is reported; with "only a single word" (widow_max_words 1) a last line of two or
+        more words is not."""
+        if words <= 0:
+            return False
+        return words == 1 or getattr(self, "widow_max_words", 2) >= 2
+
     def check_widows(self):
         """
         Scans all paragraph blocks for 'widow' flags (a very short line left at the
@@ -826,7 +845,7 @@ class RedactionValidator:
             if getattr(block, "type", "") == "paragraph":
                 # Flaga: wdowy
                 widow_which = getattr(block, "is_widow", 0)
-                if widow_which > 0:
+                if self._is_reported_widow(widow_which):
                     error = self._handle_widow(block, widow_which)
                     if error:
                         self.errors.append(error)
@@ -834,7 +853,7 @@ class RedactionValidator:
                 # elementy listy (m.in. wpisy bibliografii): wdowa jest zapisana przy kazdym elemencie
                 for item in getattr(block, "items", []):
                     item_widow = getattr(item, "is_widow", 0)
-                    if item_widow > 0:
+                    if self._is_reported_widow(item_widow):
                         error = self._handle_widow(item, item_widow)
                         if error:
                             self.errors.append(error)
