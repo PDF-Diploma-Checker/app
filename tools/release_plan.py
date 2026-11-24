@@ -89,6 +89,15 @@ def plan_variants(since, changes, modules_dir, force_full=False):
     return plan
 
 
+def classify(since, modules_dir, force_full=False):
+    """(the changes that reach the app, plan_variants for them). Files that never reach a build (tests, workflows,
+    docker, tools) are left out first: they must not make a variant need a full build."""
+    changes = reaches_the_app(since, patch_code.changed_files(since))
+    if not changes:
+        return [], {}
+    return changes, plan_variants(since, changes, modules_dir, force_full)
+
+
 def is_ancestor(since):
     return subprocess.run(["git", "merge-base", "--is-ancestor", since, "HEAD"], cwd=ROOT).returncode == 0
 
@@ -116,16 +125,16 @@ def make_plan(repo, force_full=False, since=None, base_tag=None):
         why = "a full build was asked for" if force_full else f"the commit of {base_tag} is unknown"
         plan["variants"] = {key: {"mode": "full", "reasons": [why]} for key in keys()}
         return plan
-    changes = patch_code.changed_files(since)
-    if not reaches_the_app(since, changes):
-        plan.update(skip=True, reason=f"nothing since {since} reaches the app")
-        return plan
     with tempfile.TemporaryDirectory() as folder:
         try:
             gh("release", "download", base_tag, "-R", repo, "-p", "*.modules.json", "-D", folder, "--clobber")
         except RuntimeError:
             pass
-        plan["variants"] = plan_variants(since, changes, folder)
+        changes, variants = classify(since, folder)
+    if not changes:
+        plan.update(skip=True, reason=f"nothing since {since} reaches the app")
+        return plan
+    plan["variants"] = variants
     return plan
 
 

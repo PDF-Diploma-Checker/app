@@ -158,6 +158,19 @@ class PlanTest(unittest.TestCase):
                          {"linux-base": "full", "linux-cpu": "patch", "linux-gpu": "patch",
                           "windows-base": "full", "windows-cpu": "patch", "windows-gpu": "patch"})
 
+    def test_a_docker_or_workflow_change_next_to_code_does_not_force_a_full_build(self):
+        _write(self.repo, {"src/app/x.py": "import json\n# changed\n", "docker/build_in_container.sh": "#!/bin/sh\n",
+                           ".github/workflows/w.yml": "a: 2\n", ".gitignore": "x\n"})
+        self.commit("code and ci")
+        with tempfile.TemporaryDirectory() as folder:
+            for key in release_plan.keys():
+                platform, variant = key.split("-")
+                (Path(folder) / list_bundled_modules.modules_name(platform, variant)).write_text(
+                    json.dumps({"modules": ["json"]}))
+            changes, plan = release_plan.classify(self.since, folder)
+        self.assertEqual([path for _, path in changes], ["src/app/x.py"])
+        self.assertTrue(all(item["mode"] == "patch" for item in plan.values()))
+
     def test_launcher_and_build_scripts_need_a_full_build(self):
         _write(self.repo, {"src/app/launcher.py": "pass # changed\n", "build_linux.sh": "#!/bin/sh\n# changed\n"})
         self.commit("build")
