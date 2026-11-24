@@ -380,7 +380,9 @@ class StartPage(QWidget):
         self.docs_card.setObjectName("DocsCard")
 
         card_layout = QVBoxLayout(self.docs_card)
-        card_layout.setContentsMargins(0, 0, 0, 0)
+        # 1 px inset: the card paints its own border, and the grey column header (full width) painted over its sides,
+        # so the table looked split in two boxes
+        card_layout.setContentsMargins(1, 1, 1, 1)
         card_layout.setSpacing(0)
 
         toolbar = QWidget()
