@@ -650,10 +650,13 @@ class PDFMapper:
 
 
         math_font_names = ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm")
+        max_size = max((w.size for w in words if getattr(w, "size", 0)), default=0.0)
         prose_words = [
             w for w in words
             if not any(mf in (w.font or "").lower() for mf in math_font_names)
             and sum(c.isalpha() for c in w.text) >= 3
+            and not getattr(w, "is_index", False)
+            and (max_size <= 0 or getattr(w, "size", max_size) >= max_size * 0.8)
         ]
         if len(prose_words) >= 3:
             return 0

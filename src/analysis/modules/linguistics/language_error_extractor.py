@@ -144,6 +144,10 @@ def language_tool_analisys(blocks):
             matches = tool_pl.check(contents) if text_language == "pl" else tool_en.check(contents)
             new_matches = []
             for match in matches:
+                matched_span = contents[match.offset:match.offset + match.error_length]
+                if is_noop_suggestion(matched_span, match.replacements):
+                    dropped("all suggestions match the original text", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                    continue
                 if (match.category == 'TYPOGRAPHY' or match.category == 'PUNCTUATION'):
                     if block.block.type != "paragraph":
                         dropped("punctuation outside a paragraph", match.category, match.rule_id, contents, match.offset, match.error_length, block)
@@ -370,6 +374,15 @@ def removed_enumeration_comma(contents, offset, length, replacements):
             if is_enumeration_comma(contents, offset + i):
                 return True
     return False
+
+def is_noop_suggestion(matched_text, replacements):
+    '''True when LanguageTool gives suggestions, but every one is identical to the text already written
+    (e.g. Polish JEDNE_DZIECKO suggesting "ponowne" in place of "ponowne").'''
+    if not replacements:
+        return False
+    target = matched_text.strip()
+    return all(r.strip() == target for r in replacements)
+
 
 COMPARISON_BOUNDARY_TOKENS = {",", ";", ":", ".", "!", "?", "(", ")", "–", "—"}
 
