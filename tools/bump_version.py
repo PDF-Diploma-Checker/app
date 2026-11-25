@@ -45,9 +45,16 @@ def set_by_hand(before, after, root=ROOT):
     return old is not None and old != version_at(after, root)
 
 
-def bump(latest, root=ROOT):
-    """Write the version after release `latest` to every place that holds it and return it, None when it is already
-    there. The places must agree."""
+def write_version(target, root=ROOT):
+    """Write `target` to every place that holds the version. The places must agree before. Returns the old version."""
+    matches, found = _places(root)
+    current = found.pop()
+    for path, (text, match) in matches.items():
+        path.write_text(text[:match.start(1)] + target + text[match.end(1):], encoding="utf-8", newline="\n")
+    return current
+
+
+def _places(root):
     matches, found = {}, set()
     for name, pattern in PLACES.items():
         path = Path(root) / name
@@ -59,12 +66,18 @@ def bump(latest, root=ROOT):
         matches[path] = (text, match)
     if len(found) != 1:
         sys.exit(f"The files hold different versions: {sorted(found)}")
-    current = found.pop()
+    return matches, found
+
+
+def bump(latest, root=ROOT):
+    """Write the version after release `latest` to every place that holds it and return it, None when it is already
+    there. The places must agree."""
+    _, found = _places(root)
+    current = next(iter(found))
     target = target_version(current, latest.lstrip("vV"))
     if target == current:
         return None
-    for path, (text, match) in matches.items():
-        path.write_text(text[:match.start(1)] + target + text[match.end(1):], encoding="utf-8", newline="\n")
+    write_version(target, root)
     return target
 
 

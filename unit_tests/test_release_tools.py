@@ -188,9 +188,16 @@ class PlanTest(unittest.TestCase):
         _, plan = self.plan(None)
         self.assertTrue(all(item["mode"] == "full" for item in plan.values()))
 
-    def make_plan(self, latest_tag="v1.0.0", **kwargs):
-        body = json.dumps({"tag_name": latest_tag, "body": f"Built from {self.since[:7]}"})
-        with mock.patch.object(release_plan, "gh", side_effect=lambda *args: body if args[0] == "api" else ""):
+    def make_plan(self, latest_tag="v1.0.0", released=("v1.0.0",), **kwargs):
+        def gh(*args):
+            if args[0] != "api":
+                return ""
+            tag = args[1].rsplit("/", 1)[-1]
+            if "tags/" in args[1] and tag not in released:
+                raise RuntimeError("HTTP 404")
+            return json.dumps({"tag_name": latest_tag if "latest" in args[1] else tag,
+                               "body": f"Built from {self.since[:7]}"})
+        with mock.patch.object(release_plan, "gh", side_effect=gh):
             return release_plan.make_plan("o/r", **kwargs)
 
     def test_code_that_came_while_the_version_was_being_released_gets_the_next_version(self):
@@ -210,6 +217,22 @@ class PlanTest(unittest.TestCase):
         plan = self.make_plan()
         self.assertTrue(plan["skip"])
         self.assertFalse(plan["bumped"])
+        self.assertIn('"1.0.0"', (self.repo / "src/common/version.py").read_text(encoding="utf-8"))
+
+    def test_a_chosen_version_on_an_older_base(self):
+        # several releases are folded into one: version 2.0.0, a patch of the older v1.0.0 (not of the newest release)
+        _write(self.repo, {"src/app/x.py": "import json\n# the code of the folded releases\n"})
+        self.commit("changes")
+        plan = self.make_plan(latest_tag="v1.0.3", released=("v1.0.0", "v1.0.3"), base_tag="v1.0.0", new_version="2.0.0")
+        self.assertFalse(plan["skip"])
+        self.assertEqual((plan["version"], plan["tag"], plan["base"], plan["bumped"]), ("2.0.0", "v2.0.0", "v1.0.0", True))
+        self.assertEqual(plan["since"], self.since[:7])          # from the notes of the OLDER base release
+        for name in ("src/common/version.py", "pyproject.toml", "uv.lock"):
+            self.assertIn("2.0.0", (self.repo / name).read_text(encoding="utf-8"), name)
+
+    def test_a_chosen_version_that_is_released_is_not_released_again(self):
+        plan = self.make_plan(released=("v1.0.0", "v2.0.0"), new_version="2.0.0")
+        self.assertTrue(plan["skip"])
         self.assertIn('"1.0.0"', (self.repo / "src/common/version.py").read_text(encoding="utf-8"))
 
     def test_nothing_is_bumped_when_asked_not_to(self):

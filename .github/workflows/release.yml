@@ -28,6 +28,14 @@ on:
         description: "Publish the release when it is complete (off: leave the draft)"
         type: boolean
         default: true
+      version:
+        description: "Release this version instead of the next number (e.g. 0.8.0); empty = the next number"
+        type: string
+        default: ""
+      base:
+        description: "Make it a patch of this older release (e.g. v0.7.5), so that releases after it can be removed"
+        type: string
+        default: ""
 
 concurrency:
   group: release
@@ -69,8 +77,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}      # reading the public download repository
           FORCE_FULL: ${{ inputs.force_full }}
+          VERSION: ${{ inputs.version }}
+          BASE: ${{ inputs.base }}
         run: |
-          if [ "$FORCE_FULL" = "true" ]; then python tools/release_plan.py --force-full; else python tools/release_plan.py; fi
+          args=()
+          [ "$FORCE_FULL" = "true" ] && args+=(--force-full)
+          [ -n "$VERSION" ] && args+=(--version "$VERSION")
+          [ -n "$BASE" ] && args+=(--base "$BASE")
+          python tools/release_plan.py "${args[@]}"
 
       - name: The token for the download repository
         if: steps.plan.outputs.skip != 'true'

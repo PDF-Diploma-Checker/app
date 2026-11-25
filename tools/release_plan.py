@@ -103,7 +103,7 @@ def is_ancestor(since):
     return subprocess.run(["git", "merge-base", "--is-ancestor", since, "HEAD"], cwd=ROOT).returncode == 0
 
 
-def make_plan(repo, force_full=False, since=None, base_tag=None, bump=True):
+def make_plan(repo, force_full=False, since=None, base_tag=None, bump=True, new_version=None):
     version = patch_code.app_version()
     plan = {"version": version, "tag": f"v{version}", "base": None, "since": None, "skip": False, "reason": "",
             "head": subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=ROOT, capture_output=True,
@@ -113,11 +113,23 @@ def make_plan(repo, force_full=False, since=None, base_tag=None, bump=True):
     plan["bumped"] = False
     latest = json.loads(gh("api", f"repos/{repo}/releases/latest"))
     base_tag = base_tag or latest["tag_name"]
-    if base_tag == plan["tag"]:
+    # the notes of the base release say which commit it was built from (an older base than the newest release is asked
+    # for to fold several releases into one: the new one must not rely on the parts of the releases that go away)
+    base_release = latest if base_tag == latest["tag_name"] else json.loads(gh("api", f"repos/{repo}/releases/tags/{base_tag}"))
+    if new_version and new_version != version:
+        try:
+            gh("api", f"repos/{repo}/releases/tags/v{new_version}")
+            plan.update(skip=True, reason=f"v{new_version} is already released")
+            return plan
+        except RuntimeError:
+            pass
+        bump_version.write_version(new_version, root=ROOT)
+        plan.update(version=new_version, tag=f"v{new_version}", bumped=True)
+    elif base_tag == plan["tag"]:
         # The version of the code is the one that was released. When the code changed since, a merge came while that
         # release was being built (this run waited for it): the version bump of that merge saw the older release and
         # kept the number. Give the new code the next number now.
-        built = BUILT_FROM.search(latest.get("body") or "")
+        built = BUILT_FROM.search(base_release.get("body") or "")
         newer = bool(built and is_ancestor(built.group(1))
                      and reaches_the_app(built.group(1), patch_code.changed_files(built.group(1))))
         new_version = bump_version.bump(base_tag, root=ROOT) if newer and bump else None
@@ -126,7 +138,7 @@ def make_plan(repo, force_full=False, since=None, base_tag=None, bump=True):
             return plan
         plan.update(version=new_version, tag=f"v{new_version}", bumped=True)
     plan["base"] = base_tag
-    notes = latest.get("body") or "" if latest["tag_name"] == base_tag else ""
+    notes = base_release.get("body") or ""
     match = BUILT_FROM.search(notes)
     since = since or (match.group(1) if match else None)
     if since and not is_ancestor(since):
@@ -169,9 +181,10 @@ def main(argv=None):
     ap.add_argument("--force-full", action="store_true", help="build everything from scratch")
     ap.add_argument("--since", help="the commit of the base release (default: from its notes)")
     ap.add_argument("--base", help="the base release (default: the newest published one)")
+    ap.add_argument("--version", help="release this version (writes it into the files) instead of the next number")
     args = ap.parse_args(argv)
 
-    plan = make_plan(args.repo, args.force_full, args.since, args.base)
+    plan = make_plan(args.repo, args.force_full, args.since, args.base, new_version=args.version)
     print(json.dumps(plan, indent=2))
     values = outputs(plan)
     target = os.environ.get("GITHUB_OUTPUT")
