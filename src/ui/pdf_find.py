@@ -159,11 +159,15 @@ class PdfFindBar(QFrame):
         """Anchor the bar to the top-right corner of the visible part of `view`."""
         self._view = view
         view.installEventFilter(self)
+        view.viewport().installEventFilter(self)
         self._place()
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Resize, QEvent.Show):
+            # the viewport of the view still has its old size when the filter sees the event: place the bar again
+            # when the event has been handled
             self._place()
+            QTimer.singleShot(0, self._place)
         return False
 
     def _place(self):
