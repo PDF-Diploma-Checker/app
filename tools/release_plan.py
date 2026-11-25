@@ -56,7 +56,10 @@ def reaches_the_app(since, changes):
     for status, path in changes:
         if path.startswith(NOT_RELEASED):
             continue
-        if path in patch_code.VERSION_ONLY and patch_code.version_only_change(since, path):
+        # a bare version number (the bump that follows every merge) is not a change of the app: without this every
+        # release would call for the next one
+        if (path in patch_code.VERSION_ONLY or path == "src/common/version.py") \
+                and patch_code.version_only_change(since, path):
             continue
         relevant.append((status, path))
     return relevant

@@ -130,9 +130,15 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(reaching, [])
 
     def test_a_bare_version_change_does_not_reach_the_app(self):
-        _write(self.repo, {"pyproject.toml": 'name = "a"\nversion = "1.0.1"\n'})
+        _write(self.repo, {"pyproject.toml": 'name = "a"\nversion = "1.0.1"\n',
+                           "src/common/version.py": 'APP_VERSION = "1.0.1"\n'})
         self.commit("version")
         self.assertEqual(self.plan({"json"})[0], [])
+
+    def test_a_version_next_to_code_is_still_a_change(self):
+        _write(self.repo, {"src/common/version.py": 'APP_VERSION = "1.0.1"\nOTHER = 2\n'})
+        self.commit("version and more")
+        self.assertEqual([path for _, path in self.plan({"json"})[0]], ["src/common/version.py"])
 
     def test_code_that_imports_what_the_build_holds_is_patched(self):
         _write(self.repo, {"src/app/x.py": "import json\nimport uuid\n"})
