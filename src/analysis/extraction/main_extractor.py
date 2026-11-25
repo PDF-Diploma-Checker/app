@@ -31,7 +31,10 @@ from analysis.extraction.raw_extraction.table_extractor import (
     extract_tables,
 )
 
-from analysis.extraction.raw_extraction.text_extractor import (parse_text_block)
+from analysis.extraction.raw_extraction.text_extractor import (
+    merge_same_row_inline_math_blocks,
+    parse_text_block,
+)
 from analysis.extraction.raw_extraction.front_and_back_matter import (
     TableOfContentsExtractor, 
     TableOfFiguresExtractor, 
@@ -137,6 +140,8 @@ def extractPDF(file_path: str) -> DocumentData:
                     cur_page.text_blocks.append(text_block)
                     if not is_ftr and not is_fn:
                         blank_page = False
+
+        cur_page.text_blocks = merge_same_row_inline_math_blocks(cur_page.text_blocks)
 
         # Dopiero po zebraniu tekstu procesujemy obrazy rastrowe, aby opisy pod nimi były już dostępne
         detected_img_priority = extract_raster_images(

@@ -91,5 +91,70 @@ class ExtractionTest(unittest.TestCase):
         self.assertLess(bbox[0], joined.bbox[0])
 
 
+class SameRowInlineMathMergeTest(unittest.TestCase):
+    def test_merges_tail_block_with_hyphenated_word_even_when_sorted_first(self):
+        from analysis.extraction.raw_extraction.bare_struct import TextBlock, TextLine, TextSpan
+        from analysis.extraction.raw_extraction.text_extractor import merge_same_row_inline_math_blocks
+
+        tail = TextBlock(
+            block_id=21,
+            lines=[
+                TextLine(
+                    spans=[TextSpan(1, "𝑡", "LatinModernMath-Regular", 7.0, 0, False, False, (458.2, 468.7, 461.2, 475.6))],
+                    bbox=(458.2, 468.7, 461.2, 475.6),
+                    baseline=475.6,
+                ),
+                TextLine(
+                    spans=[TextSpan(2, "defi-", "ArialMT", 10.0, 0, False, False, (492.5, 464.1, 511.9, 474.0))],
+                    bbox=(492.5, 464.1, 511.9, 474.0),
+                    baseline=474.0,
+                ),
+            ],
+            bbox=(458.2, 464.1, 511.9, 475.6),
+        )
+        main = TextBlock(
+            block_id=22,
+            lines=[
+                TextLine(
+                    spans=[
+                        TextSpan(3, "Estymator", "ArialMT", 10.0, 0, False, False, (403.1, 463.7, 448.0, 474.0)),
+                        TextSpan(4, "𝐴̂", "LatinModernMath-Regular", 10.0, 0, False, False, (450.7, 463.7, 458.2, 473.7)),
+                        TextSpan(5, "GAE", "ArialMT", 7.0, 0, False, False, (458.2, 461.2, 472.9, 468.2)),
+                        TextSpan(6, "(𝛾, 𝜆)", "LatinModernMath-Regular", 7.0, 0, False, False, (472.9, 461.0, 489.2, 468.0)),
+                    ],
+                    bbox=(85.0, 461.0, 489.2, 476.5),
+                    baseline=474.0,
+                ),
+            ],
+            bbox=(85.0, 461.0, 489.2, 476.5),
+        )
+
+        merged = merge_same_row_inline_math_blocks([tail, main])
+        self.assertEqual(len(merged), 1)
+        texts = [s.text for s in merged[0].lines[0].spans]
+        self.assertEqual(texts[0], "Estymator")
+        self.assertEqual(texts[-1], "defi-")
+
+    def test_does_not_merge_separated_columns(self):
+        from analysis.extraction.raw_extraction.bare_struct import TextBlock, TextLine, TextSpan
+        from analysis.extraction.raw_extraction.text_extractor import merge_same_row_inline_math_blocks
+
+        col1 = TextBlock(
+            block_id=1,
+            lines=[TextLine([TextSpan(1, "Etap", "ArialMT", 9.0, 0, False, False, (108.8, 242.1, 127.2, 251.1))],
+                            (108.8, 242.1, 127.2, 251.1), 251.1)],
+            bbox=(108.8, 242.1, 127.2, 251.1),
+        )
+        col2 = TextBlock(
+            block_id=2,
+            lines=[TextLine([TextSpan(2, "Maks. poziom", "ArialMT", 9.0, 0, False, False, (139.2, 242.1, 194.5, 251.1))],
+                            (139.2, 242.1, 194.5, 251.1), 251.1)],
+            bbox=(139.2, 242.1, 194.5, 251.1),
+        )
+
+        merged = merge_same_row_inline_math_blocks([col1, col2])
+        self.assertEqual(len(merged), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -185,6 +185,108 @@ def _is_math_font(font):
     return any(m in (font or "").lower() for m in MATH_FONT_NAMES)
 
 
+def _is_single_visual_row(block: TextBlock) -> bool:
+    """True when all spans of a text block belong to one horizontal text row (possibly with sub/superscripts)."""
+    if block.block_type != "text" or not block.lines:
+        return False
+    spans = [s for line in block.lines for s in line.spans if s.text.strip()]
+    if not spans:
+        return False
+    y0 = min(s.bbox[1] for s in spans)
+    y1 = max(s.bbox[3] for s in spans)
+    if (y1 - y0) > 24.0:
+        return False
+    # Two normal-sized spans stacked vertically mean a genuine multi-line block, not one row with indices.
+    max_size = max(s.size for s in spans)
+    main_spans = [s for s in spans if s.size >= max_size * 0.85]
+    if len(main_spans) >= 2:
+        main_y0s = [s.bbox[1] for s in main_spans]
+        if max(main_y0s) - min(main_y0s) > max(6.0, max_size * 0.6):
+            return False
+    return True
+
+
+def _has_math_or_script(left: TextBlock, right: TextBlock) -> bool:
+    spans = [s for b in (left, right) for line in b.lines for s in line.spans if s.text.strip()]
+    if not spans:
+        return False
+    if any(_is_math_font(s.font) for s in spans):
+        return True
+    max_size = max(s.size for s in spans)
+    return any(s.size <= max_size * 0.8 for s in spans)
+
+
+def merge_same_row_inline_math_blocks(text_blocks: list[TextBlock]) -> list[TextBlock]:
+    """Merge single-row text blocks that PyMuPDF split at an inline math symbol with sub/superscripts.
+
+    In LuaTeX/LaTeX, a symbol like `\\hat{A}_t^{\\text{GAE}(\\gamma,\\lambda)} defi-` draws the superscript
+    and then moves the cursor back left for the subscript, causing PyMuPDF to start a second block for
+    `t` and the rest of the line (`defi-`). That tail block can even sort before the main line and be
+    discarded as math, leaving `niuje` orphaned on the next line.
+    """
+    result = list(text_blocks)
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(result):
+            a = result[i]
+            if not _is_single_visual_row(a):
+                i += 1
+                continue
+            merged_j = None
+            for j in range(i + 1, min(len(result), i + 6)):
+                b = result[j]
+                if not _is_single_visual_row(b):
+                    continue
+                y_overlap = min(a.bbox[3], b.bbox[3]) - max(a.bbox[1], b.bbox[1])
+                min_h = min(a.bbox[3] - a.bbox[1], b.bbox[3] - b.bbox[1])
+                if min_h <= 0 or y_overlap < 0.5 * min_h:
+                    continue
+                left, right = (a, b) if a.bbox[0] <= b.bbox[0] else (b, a)
+                gap_x = right.bbox[0] - left.bbox[2]
+                if gap_x <= 2.0 or (gap_x <= 8.0 and _has_math_or_script(left, right)):
+                    merged_j = j
+                    break
+            if merged_j is None:
+                i += 1
+                continue
+            b = result.pop(merged_j)
+            left, right = (a, b) if a.bbox[0] <= b.bbox[0] else (b, a)
+            all_spans = [
+                s for blk in (left, right) for line in blk.lines for s in line.spans if s.text.strip()
+            ]
+            all_spans.sort(key=lambda s: (s.bbox[0], s.bbox[1]))
+            union_bbox = (
+                min(a.bbox[0], b.bbox[0]),
+                min(a.bbox[1], b.bbox[1]),
+                max(a.bbox[2], b.bbox[2]),
+                max(a.bbox[3], b.bbox[3]),
+            )
+            primary_line = left.lines[0]
+            align = (
+                "justified"
+                if any(l.alignement == "justified" for blk in (left, right) for l in blk.lines)
+                else primary_line.alignement
+            )
+            merged_line = TextLine(
+                spans=all_spans,
+                bbox=union_bbox,
+                baseline=primary_line.baseline,
+                alignement=align,
+                spacing_consistency=primary_line.spacing_consistency,
+                line_spacing=primary_line.line_spacing,
+            )
+            result[i] = TextBlock(
+                block_id=left.block_id,
+                lines=[merged_line],
+                bbox=union_bbox,
+                block_type="text",
+            )
+            changed = True
+    return result
+
+
 def move_math_accents_to_symbols(block_words: list, raw_block: dict) -> list:
     """
     A math accent drawn right after a word of text ends up in that word: "gdzie \\hat{\\mathbb{E}}_t" gives the

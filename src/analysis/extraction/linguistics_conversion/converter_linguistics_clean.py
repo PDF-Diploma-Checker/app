@@ -2070,6 +2070,15 @@ class PDFMapper:
                 continue
 
             is_math_type = self.is_math(words_info)
+            if (
+                is_math_type > 0
+                and self.paragraph_buffer
+                and self.paragraph_buffer[-1]["content"].rstrip().endswith("-")
+                and words_info
+                and words_info[0].text[:1].islower()
+                and not any(mf in (words_info[0].font or "").lower() for mf in ("math", "cmmi", "cmr", "cmsy", "cmex", "symbol", "msbm"))
+            ):
+                is_math_type = 0
             if not getattr(self, "in_bibliography_section", False) and is_math_type > 0:
                 math_bbox = [
                     min(w.bbox[0] for w in words_info),
