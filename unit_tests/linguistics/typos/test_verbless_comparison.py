@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from analysis.modules.linguistics.language_error_extractor import (
+    is_noop_suggestion,
     is_verbless_comparison,
     typo_check,
 )
@@ -34,6 +35,17 @@ class VerblessComparisonTest(unittest.TestCase):
         self.assertFalse(_verbless("Działa tak samo jak opisano wcześniej."))
         self.assertFalse(_verbless("Jest równie szybki jak opisano w rozdziale 2."))
         self.assertFalse(_verbless("Wyczerpanie limitu kończy epizod tak samo jak dzieje się przy upadku."))
+
+
+class NoopSuggestionTest(unittest.TestCase):
+    def test_identical_suggestion_is_dropped(self):
+        self.assertTrue(is_noop_suggestion("ponowne", ["ponowne"]))
+        self.assertTrue(is_noop_suggestion(" ponowne ", ["ponowne"]))
+
+    def test_real_or_empty_suggestions_are_kept(self):
+        self.assertFalse(is_noop_suggestion("Jedne", ["Jedno"]))
+        self.assertFalse(is_noop_suggestion("polska", ["Polska"]))
+        self.assertFalse(is_noop_suggestion("krocząych", []))
 
 
 class RoboticsTermsWhitelistTest(unittest.TestCase):

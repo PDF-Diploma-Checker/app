@@ -156,5 +156,34 @@ class SameRowInlineMathMergeTest(unittest.TestCase):
         self.assertEqual(len(merged), 2)
 
 
+class FormulaSubscriptMathTest(unittest.TestCase):
+    def test_equation_with_text_subscripts_is_detected_as_math(self):
+        from analysis.extraction.linguistics_conversion.converter_linguistics_clean import PDFMapper
+
+        def tok(idx, text, font, size):
+            return WordInfo(
+                word_index=idx, text=text, start_char=0, end_char=len(text),
+                font=font, size=size, bold=False, italic=False,
+                bbox=[100 + idx * 15, 720, 114 + idx * 15, 720 + size],
+                page_number=19, line=0,
+            )
+
+        words = [
+            tok(0, "ℒ", "LatinModernMath-Regular", 10.0),
+            tok(1, "distill", "ArialMT", 7.0),
+            tok(2, "(𝜃)", "LatinModernMath-Regular", 10.0),
+            tok(3, "=", "LatinModernMath-Regular", 10.0),
+            tok(4, "∑", "LatinModernMath-Regular", 10.0),
+            tok(5, "𝔼", "LatinModernMath-Regular", 10.0),
+            tok(6, "[𝒟", "LatinModernMath-Regular", 10.0),
+            tok(7, "divergence", "ArialMT", 7.0),
+            tok(8, "(𝜋", "LatinModernMath-Regular", 10.0),
+            tok(9, "teach", "ArialMT", 7.0),
+            tok(10, "(⋅|𝑠))]", "LatinModernMath-Regular", 10.0),
+            tok(11, "(2.14)", "ArialMT", 10.0),
+        ]
+        self.assertGreater(PDFMapper.is_math(words), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
