@@ -12,7 +12,8 @@ from collections import Counter
 
 from common.figure_findings import figure_details
 from common.findings import (
-    assign_finding_ids, finding_kind, finding_label, finding_text, margin_summary, page_ranges,
+    assign_finding_ids, finding_category_key, finding_kind, finding_label, finding_text,
+    group_findings_by_category, margin_summary, page_ranges,
 )
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
@@ -400,17 +401,52 @@ def _margins_section(root, errors, on_page):
     root.addWidget(card)
 
 
+def _category_title(category_key, raw_category):
+    """Human-readable label for a finding category in the UI language."""
+    if not category_key:
+        return t("finding_categories.other")
+    key = f"finding_categories.{category_key}"
+    translated = t(key)
+    if translated != key:
+        return translated
+    return raw_category or t("finding_categories.other")
+
+
+def _finding_category_block(category_key, raw_category, items, on_page):
+    """One category subsection inside the findings card: heading with count and its finding buttons."""
+    block = QWidget()
+    block.setObjectName("FindingCategoryGroup")
+    block.setProperty("findingCategory", category_key or "other")
+    block.setStyleSheet("background: transparent;")
+    lay = QVBoxLayout(block)
+    lay.setContentsMargins(0, 2, 0, 0)
+    lay.setSpacing(6)
+    title = _category_title(category_key, raw_category)
+    header = _label(f"{title} ({len(items)})", f"font-size: 13px; font-weight: 700; color: {styles.TEXT}; {TRANSPARENT}")
+    header.setObjectName("FindingCategoryHeader")
+    lay.addWidget(header)
+    lay.addWidget(_finding_buttons(items, on_page))
+    return block
+
+
 def _findings_section(root, errors, on_page):
-    """How many findings the text has and where: the markers on the pages alone do not tell it."""
+    """How many findings the text has and where, grouped into subsections by category."""
     root.addWidget(_section(t("main.findings_header")))
     card, lay = _card()
-    pages = Counter(int(error.get("page", 0)) for error in errors
-                    if isinstance(error, dict) and finding_kind(error) == "page")
+    groups = group_findings_by_category(errors)
+    page_errors = [error for _key, _raw, items in groups for error in items]
+    pages = Counter(int(error.get("page", 0)) for error in page_errors)
     if pages:
-        lay.addWidget(_note(t("main.findings_count", count=sum(pages.values()), pages=len(pages)), "bad"))
+        lay.addWidget(_note(t("main.findings_count", count=len(page_errors), pages=len(pages)), "bad"))
         lay.addWidget(_label(t("main.findings_hint"), f"font-size: 12px; color: {styles.TEXT_3}; {TRANSPARENT}"))
-        lay.addWidget(_finding_buttons(errors, on_page))
-        if any(isinstance(error, dict) and error.get("category") == "TYPOS" for error in errors):
+        for index, (category_key, raw_category, items) in enumerate(groups):
+            if index > 0:
+                divider = QFrame()
+                divider.setFixedHeight(1)
+                divider.setStyleSheet(f"background-color: {styles.BORDER}; border: none;")
+                lay.addWidget(divider)
+            lay.addWidget(_finding_category_block(category_key, raw_category, items, on_page))
+        if any(finding_category_key(error) == "typos" for error in page_errors):
             lay.addWidget(_note(t("main.word_proposal_hint"), "off"))
     else:
         lay.addWidget(_note(t("main.findings_none"), "ok"))

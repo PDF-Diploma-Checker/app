@@ -11,6 +11,114 @@ NUMBERING_CATEGORIES = {
     "Wrong_page_numbering_start", "numeration_invalid",
 }
 
+CATEGORY_ORDER = (
+    # Language & spelling
+    "typos",
+    "spelling",
+    "punctuation",
+    "grammar",
+    "syntax",
+    "style",
+    "typography",
+    "casing",
+    "compounding",
+    "collocations",
+    "confused_words",
+    "proper_nouns",
+    "redundancy",
+    "semantics",
+    "plain_english",
+    "phonetics",
+    "gender",
+    "word_order",
+    "numbers",
+    "decimal",
+    "acronym_undefined",
+    "personal_form",
+    "no_subject",
+    "no_verb",
+    # Lists
+    "list_casing",
+    "list_ending",
+    "list_marker_style",
+    "list_coherence",
+    # Citations & bibliography
+    "unresolved_reference",
+    "unresolved_citation",
+    "incorrect_bibliography_reference",
+    "missing_space_before_citation",
+    "missing_final_dot",
+    "missing_date",
+    "missing_access_date_or_doi",
+    "author_format_coherence",
+    "date_format_coherence",
+    # Document lists (TOC / TOF / TOT)
+    "lack_of_toc",
+    "toc_mismatch",
+    "toc_order_error",
+    "lack_of_tof",
+    "tof_mismatch",
+    "tof_order_error",
+    "lack_of_tot",
+    "tot_mismatch",
+    "tot_order_error",
+    # Page typography & layout
+    "widow",
+    "orphan",
+    "bastard",
+    "shoemaker",
+    "corridor",
+    "justification",
+    "blank_page",
+    "config_file",
+    "misc",
+)
+
+_CATEGORY_RANK = {name: index for index, name in enumerate(CATEGORY_ORDER)}
+_CATEGORY_ALIASES = {
+    "incorrect bibiography refference": "incorrect_bibliography_reference",
+}
+
+
+def finding_category_key(error):
+    """Normalized category key for grouping/translating a finding, or '' when uncategorized."""
+    if not isinstance(error, dict):
+        return ""
+    raw = str(error.get("category", error.get("kategoria", "")) or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.casefold()
+    return _CATEGORY_ALIASES.get(normalized, normalized)
+
+
+def group_findings_by_category(errors):
+    """Page findings grouped by normalized category, ordered logically with reading-order findings in each group.
+
+    Returns [(category_key, raw_category, [errors...])].
+    """
+    page_errors = sorted(
+        (error for error in (errors or []) if isinstance(error, dict) and finding_kind(error) == "page"),
+        key=lambda error: error.get("finding_id") or 0,
+    )
+    groups = {}
+    raw_names = {}
+    for error in page_errors:
+        key = finding_category_key(error)
+        if key not in groups:
+            groups[key] = []
+            raw_names[key] = str(error.get("category", error.get("kategoria", "")) or "").strip()
+        groups[key].append(error)
+
+    def sort_key(category_key):
+        if not category_key:
+            return (2, 0, "")
+        rank = _CATEGORY_RANK.get(category_key)
+        if rank is not None:
+            return (0, rank, category_key)
+        return (1, 0, category_key)
+
+    return [(key, raw_names[key], groups[key]) for key in sorted(groups, key=sort_key)]
+
 
 def _is_legacy_margin_finding(error, category):
     """Findings saved before the margins had their own category: one per page, with this comment."""
