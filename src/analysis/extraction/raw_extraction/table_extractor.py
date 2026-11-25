@@ -217,6 +217,13 @@ def extract_apa_tables(
 
     horizontal_lines = sorted(horizontal_lines, key=lambda r: r.y0)
 
+    caption_prefixes = ("tabela", "tab.", "tabele", "table", "rysunek", "rys.", "figure", "fig.")
+    caption_ys = []
+    for block in cur_page.text_blocks:
+        btext = " ".join(span.text for line in block.lines for span in line.spans).strip().lower()
+        if btext.startswith(caption_prefixes):
+            caption_ys.append((block.bbox[1], block.bbox[3]))
+
     grouped_table_rects = []
     used_lines = set()
 
@@ -231,6 +238,13 @@ def extract_apa_tables(
                 continue
             if abs(line.x0 - other_line.x0) < 25 and abs(line.x1 - other_line.x1) < 25:
                 if other_line.y0 - current_group[-1].y0 < 500:
+                    prev_y1 = current_group[-1].y1
+                    has_caption_between = any(
+                        prev_y1 + 2 < cy0 and cy1 < other_line.y0 - 2
+                        for cy0, cy1 in caption_ys
+                    )
+                    if has_caption_between:
+                        break
                     current_group.append(other_line)
                     used_lines.add(j)
 
@@ -294,8 +308,8 @@ def extract_apa_tables(
                     last_x1 = w[2]
                     continue
 
-                if w[0] > last_x1 + 15:
-                    col_dividers.append(w[0] - 5)
+                if w[0] > last_x1 + 8:
+                    col_dividers.append((last_x1 + w[0]) / 2)
                 last_x1 = max(last_x1, w[2])
             col_dividers.append(apa_rect.x1 + 10)
 

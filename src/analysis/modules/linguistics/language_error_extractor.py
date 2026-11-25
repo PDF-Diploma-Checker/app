@@ -164,6 +164,10 @@ def language_tool_analisys(blocks):
                         if reason:
                             dropped(f"predicative adjective, not a second verb ({reason})", match.category, match.rule_id, contents, match.offset, match.error_length, block)
                             continue
+                    elif match.rule_id == "ROWNIE_JAK" and text_language == "pl" and is_verbless_comparison(
+                            contents, match.offset, match.error_length):
+                        dropped("comparison without a verb", match.category, match.rule_id, contents, match.offset, match.error_length, block)
+                        continue
                     elif text_language == "pl" and removed_enumeration_comma(
                             contents, match.offset, match.error_length, match.replacements):
                         dropped("comma between items of an enumeration", match.category, match.rule_id, contents, match.offset, match.error_length, block)
@@ -366,6 +370,30 @@ def removed_enumeration_comma(contents, offset, length, replacements):
             if is_enumeration_comma(contents, offset + i):
                 return True
     return False
+
+COMPARISON_BOUNDARY_TOKENS = {",", ";", ":", ".", "!", "?", "(", ")", "–", "—"}
+
+
+def is_verbless_comparison(contents, offset, length):
+    '''Checks if a Polish comparison matched by ROWNIE_JAK ("tak samo jak upadek", "równie szybki jak poprzedni")
+    has no verb after "jak" up to the next clause boundary. In Polish, a comma before comparative "jak" is only
+    required when it introduces a subordinate clause with a verb.'''
+    after_start = offset + length
+    doc = nlp_pl(contents)
+    seen_word = False
+    for token in doc:
+        if token.idx < after_start:
+            continue
+        if token.text in COMPARISON_BOUNDARY_TOKENS:
+            break
+        if token.is_space:
+            continue
+        if token.pos_ in {"VERB", "AUX"}:
+            return False
+        if not token.is_punct:
+            seen_word = True
+    return seen_word
+
 
 def is_adjective_verb_homograph(word):
     '''Checks if word is both an adjective and a past tense verb in Morfeusz, e.g. "stała" (stały / stać).'''
