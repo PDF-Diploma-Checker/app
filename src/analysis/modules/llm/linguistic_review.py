@@ -26,7 +26,9 @@ N_CTX = 2048
 NOTIFY_EVERY = 20
 MAX_COPIED_CHARS = 40   # a longer fragment would not fit into the answer
 REVIEWED_SOURCES = ("language_tool", "sentence_check", "decimal_check")
-FORMAT_RULES = ("PERSONAL_FORM", "DECIMAL")   # thesis format policy is not settled by grammatical correctness
+# thesis writing policy is not settled by grammatical correctness: no "we", the decimal point, and a subject in every
+# sentence (a sentence like "Na podstawie badań można sformułować wnioski" is correct Polish and still a finding)
+FORMAT_RULES = ("PERSONAL_FORM", "DECIMAL", "NO_SUBJECT")
 _POLISH_LETTERS = {"a": "ą", "c": "ć", "e": "ę", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "źż"}
 MAX_MISSING_LETTERS = 2
 _ALPHABET = "aąbcćdeęfghijklłmnńoóprsśtuwyzźż"
