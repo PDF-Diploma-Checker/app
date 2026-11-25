@@ -27,7 +27,6 @@ NOTIFY_EVERY = 20
 MAX_COPIED_CHARS = 40   # a longer fragment would not fit into the answer
 REVIEWED_SOURCES = ("language_tool", "sentence_check", "decimal_check")
 FORMAT_RULES = ("PERSONAL_FORM", "DECIMAL")   # thesis format policy is not settled by grammatical correctness
-SENTENCE_PARTS_CATEGORIES = ("NO_SUBJECT", "NO_VERB")
 _POLISH_LETTERS = {"a": "ą", "c": "ć", "e": "ę", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "źż"}
 MAX_MISSING_LETTERS = 2
 _ALPHABET = "aąbcćdeęfghijklłmnńoóprsśtuwyzźż"
@@ -57,41 +56,6 @@ Details from the tool: {why}
 An automatic tool found a language error in this place. Decide whether it really is an error in this context.
 It is not an error when the reported fragment is correct and the tool does not understand it, for example: a proper name, a technical term, a name of a library, function or variable, a foreign word used on purpose, an abbreviation, a version number, a title, a part of a formula or code.
 It is an error when the text really has a typo, a wrong form, a missing comma or another error that the report describes.
-If you are not sure, treat it as an error.
-Return JSON with the keys {keys}.""",
-}
-
-_SENTENCE_PARTS_PROMPTS = {
-    "pl": """Fragment pracy dyplomowej z kontekstem sąsiednich zdań (zgłoszone zdanie stoi między « i »):
-{context}
-
-Zgłoszone zdanie: {found}
-Treść zgłoszenia: {message}
-Szczegóły z narzędzia: {why}
-
-Automatyczny analizator składniowy uznał, że w tym zdaniu brakuje podmiotu lub orzeczenia. Oceń, czy w tym kontekście to naprawdę błąd składniowy.
-Nie przeredagowuj tekstu – oceń wyłącznie, czy zdanie jest poprawne w swoim kontekście.
-To NIE jest błąd (blad: false), gdy:
-- w zdaniu w rzeczywistości jest podmiot i/lub orzeczenie (np. analizator błędnie rozpoznał czasownik lub rzeczownik),
-- jest to poprawna konstrukcja bezosobowa, która w języku polskim nie wymaga podmiotu (np. „można”, „trzeba”, „należy”, „warto”, „widać”, „słychać”, formy na „-no/-to”, konstrukcje z „się” typu „stosuje się”, „oblicza się”),
-- brakujący podmiot (podmiot domyślny) lub orzeczenie (elipsa) jasno i jednoznacznie wynika z kontekstu sąsiednich zdań, nagłówka albo opisu tabeli/rysunku/wzoru (np. „Oznaczenia w tabeli 6.1.”) – czytając zdanie w tym kontekście od razu wiadomo, kto lub co wykonuje czynność.
-To JEST błąd (blad: true), gdy nawet w kontekście sąsiednich zdań zdanie jest urwane, niekompletne albo podmiot/orzeczenie zaginęło (np. po redakcji lub przeniesieniu akapitu) i nie wiadomo, do czego zdanie się odnosi.
-Jeśli nie masz pewności, uznaj to za błąd.
-Zwróć JSON z kluczami {keys}.""",
-    "en": """A fragment of a thesis with surrounding sentences (the reported sentence stands between « and »):
-{context}
-
-Reported sentence: {found}
-What was reported: {message}
-Details from the tool: {why}
-
-An automatic syntax parser reported a missing subject or missing verb in this sentence. Decide whether it really is a grammatical error in this context.
-Do not rewrite the text — only judge whether the sentence is valid in its context.
-It is NOT an error (blad: false) when:
-- the sentence actually contains a subject and/or verb that the parser misread,
-- it is a valid impersonal, passive or elliptical construction in this context,
-- the implied subject or verb follows clearly from the surrounding sentences, heading, or table/figure/formula description (reading it in context makes it immediately clear who or what performs the action).
-It IS an error (blad: true) when even with the surrounding sentences the sentence is genuinely broken, incomplete, or its subject/verb was lost during editing so the meaning is unclear.
 If you are not sure, treat it as an error.
 Return JSON with the keys {keys}.""",
 }
@@ -164,8 +128,6 @@ def _why_not_asked(match, language):
         return "a comma between clauses, the model does not judge it well"
     if not match.context:
         return "no text around it"
-    if match.category in SENTENCE_PARTS_CATEGORIES:
-        return None
     if language != "pl":
         return None
     fixed = _with_polish_letters(match.content)
@@ -183,12 +145,6 @@ def _is_short(match):
     return len(match.content) <= MAX_COPIED_CHARS
 
 
-def _needs_spelling_copy(match):
-    """Short typo/word findings ask the model to retype the word so it cannot silently read a typo as the right word.
-    Subject/verb context checks judge grammar in context, never spelling."""
-    return match.category not in SENTENCE_PARTS_CATEGORIES and _is_short(match)
-
-
 def _verdict(answer, match):
     """(True if an error, False if correct, None without a clear answer; the reason). The model reads "czesto" as
     "często" and calls it correct, so for a short fragment what it would write decides: a change means an error."""
@@ -200,7 +156,7 @@ def _verdict(answer, match):
     reason = str(answer.get("uzasadnienie") or "")
     if not isinstance(value, bool):
         return None, reason
-    if value or not _needs_spelling_copy(match):
+    if value or not _is_short(match):
         return value, reason
     fixed = answer.get("poprawny_zapis")
     if not isinstance(fixed, str):
@@ -210,14 +166,9 @@ def _verdict(answer, match):
     return False, reason
 
 
-def _prompt_for(match, language):
-    prompts = _SENTENCE_PARTS_PROMPTS if match.category in SENTENCE_PARTS_CATEGORIES else _PROMPTS
-    return prompts.get(language, prompts["pl"])
-
-
 def _ask(llm, template, match, language):
     keys = _ANSWER_KEYS.get(language, _ANSWER_KEYS["pl"])
-    if _needs_spelling_copy(match):
+    if _is_short(match):
         keys = _SPELLING_KEY.get(language, _SPELLING_KEY["pl"]) + keys
     prompt = (template.replace("{keys}", keys).replace("{context}", match.context).replace("{found}", match.content)
               .replace("{message}", match.message).replace("{why}", match.why or "-"))
@@ -258,7 +209,7 @@ def review_findings(matches, language="pl"):
                 run_control.notify(t("progress.language_review_count", done=done, total=len(to_ask)))
             try:
                 match_language = getattr(match, "language", "") or language
-                template = _prompt_for(match, match_language)
+                template = _PROMPTS.get(match_language, _PROMPTS["pl"])
                 answer = _ask(llm, template, match, match_language)
             except Exception:
                 logger.exception("Review of the finding %r failed", match.content)

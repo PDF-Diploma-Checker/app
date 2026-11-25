@@ -154,48 +154,6 @@ class ReviewTest(unittest.TestCase):
         self.assertIn("uczy «sie» dalej", prompt)
         self.assertIn("Literówka", prompt)
 
-    def test_no_subject_and_no_verb_use_context_prompt_without_copy_requirement(self):
-        impersonal = finding("Podobnie można ocenić akcję.", source="sentence_check",
-                             context="Poprzednie zdanie.\n«Podobnie można ocenić akcję.»")
-        impersonal.category = "NO_SUBJECT"
-        impersonal.message = "Brak podmiotu w zdaniu."
-
-        table_ref = finding("Oznaczenia w tabeli 6.1.", source="sentence_check",
-                            context="Tabela 6.1. Nagroda.\n«Oznaczenia w tabeli 6.1.»\nWyjaśnienie symboli.")
-        table_ref.category = "NO_VERB"
-        table_ref.message = "Brak orzeczenia w zdaniu."
-
-        broken = finding("W kolejnym kroku.", source="sentence_check",
-                         context="Wstęp.\n«W kolejnym kroku.»\nNastępny rozdział.")
-        broken.category = "NO_VERB"
-        broken.message = "Brak orzeczenia w zdaniu."
-
-        llm = model(
-            json.dumps({"uzasadnienie": "Poprawna forma bezosobowa.", "blad": False}),
-            json.dumps({"uzasadnienie": "Orzeczenie wynika z kontekstu opisu tabeli.", "blad": False}),
-            json.dumps({"uzasadnienie": "Urwane zdanie bez orzeczenia.", "blad": True}),
-        )
-        kept = self.run_review([impersonal, table_ref, broken], llm)
-        self.assertEqual(kept, [broken])
-        for call in llm.create_chat_completion.call_args_list:
-            prompt = call.kwargs["messages"][0]["content"]
-            self.assertIn("konstrukcja bezosobowa", prompt)
-            self.assertIn("wynika z kontekstu", prompt)
-            self.assertNotIn("poprawny_zapis", prompt)
-
-    def test_english_no_subject_uses_english_context_prompt(self):
-        match = finding("See Table 6.1.", source="sentence_check",
-                        context="Results are summarized.\n«See Table 6.1.»")
-        match.category = "NO_SUBJECT"
-        match.language = "en"
-        match.message = "No subject in the sentence."
-        llm = model(json.dumps({"uzasadnienie": "Implied subject in context.", "blad": False}))
-        with patch.object(review, "make_llama", return_value=llm):
-            self.assertEqual(review.review_findings([match], "pl"), [])
-        prompt = llm.create_chat_completion.call_args.kwargs["messages"][0]["content"]
-        self.assertIn("implied subject or verb follows clearly from the surrounding sentences", prompt)
-        self.assertNotIn("poprawny_zapis", prompt)
-
 
 class IsolatedReviewTest(unittest.TestCase):
     def run_isolated(self, outcome):
