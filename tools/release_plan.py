@@ -28,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "src"))
 
+import bump_version  # noqa: E402
 import patch_code  # noqa: E402
 from common.update_check import GITHUB_REPO  # noqa: E402
 from list_bundled_modules import modules_name  # noqa: E402
@@ -102,18 +103,28 @@ def is_ancestor(since):
     return subprocess.run(["git", "merge-base", "--is-ancestor", since, "HEAD"], cwd=ROOT).returncode == 0
 
 
-def make_plan(repo, force_full=False, since=None, base_tag=None):
+def make_plan(repo, force_full=False, since=None, base_tag=None, bump=True):
     version = patch_code.app_version()
     plan = {"version": version, "tag": f"v{version}", "base": None, "since": None, "skip": False, "reason": "",
             "head": subprocess.run(["git", "rev-parse", "--short=7", "HEAD"], cwd=ROOT, capture_output=True,
                                    text=True, check=True).stdout.strip(),
             "sha": subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
                                   check=True).stdout.strip(), "variants": {}}
+    plan["bumped"] = False
     latest = json.loads(gh("api", f"repos/{repo}/releases/latest"))
     base_tag = base_tag or latest["tag_name"]
     if base_tag == plan["tag"]:
-        plan.update(skip=True, reason=f"{plan['tag']} is already released")
-        return plan
+        # The version of the code is the one that was released. When the code changed since, a merge came while that
+        # release was being built (this run waited for it): the version bump of that merge saw the older release and
+        # kept the number. Give the new code the next number now.
+        built = BUILT_FROM.search(latest.get("body") or "")
+        newer = bool(built and is_ancestor(built.group(1))
+                     and reaches_the_app(built.group(1), patch_code.changed_files(built.group(1))))
+        new_version = bump_version.bump(base_tag, root=ROOT) if newer and bump else None
+        if not new_version:
+            plan.update(skip=True, reason=f"{plan['tag']} is already released")
+            return plan
+        plan.update(version=new_version, tag=f"v{new_version}", bumped=True)
     plan["base"] = base_tag
     notes = latest.get("body") or "" if latest["tag_name"] == base_tag else ""
     match = BUILT_FROM.search(notes)
@@ -141,6 +152,7 @@ def make_plan(repo, force_full=False, since=None, base_tag=None):
 def outputs(plan):
     """What the workflow needs, as name -> value (lists are comma separated)."""
     values = {"skip": str(plan["skip"]).lower(), "reason": plan["reason"], "version": plan["version"],
+              "bumped": str(plan.get("bumped", False)).lower(),
               "tag": plan["tag"], "base": plan["base"] or "", "since": plan["since"] or "", "head": plan["head"],
               "sha": plan["sha"]}
     chosen = plan["variants"]
