@@ -160,6 +160,10 @@ class PdfFindBar(QFrame):
         self._view = view
         view.installEventFilter(self)
         view.viewport().installEventFilter(self)
+        # placing again once the resize has been handled: a timer of this widget, so that it dies with it
+        self._replace_timer = QTimer(self)
+        self._replace_timer.setSingleShot(True)
+        self._replace_timer.timeout.connect(self._place)
         self._place()
 
     def eventFilter(self, obj, event):
@@ -167,7 +171,7 @@ class PdfFindBar(QFrame):
             # the viewport of the view still has its old size when the filter sees the event: place the bar again
             # when the event has been handled
             self._place()
-            QTimer.singleShot(0, self._place)
+            self._replace_timer.start(0)
         return False
 
     def _place(self):

@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 try:
     from PySide6.QtCore import QEvent
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication, QScrollArea, QWidget
 except Exception as error:      # pragma: no cover
     raise unittest.SkipTest(f"Qt is not available: {error}")
@@ -15,7 +16,6 @@ except Exception as error:      # pragma: no cover
 def _settle(app):
     for _ in range(3):
         app.processEvents()
-        app.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 class OverlayPlacementTest(unittest.TestCase):
@@ -66,12 +66,14 @@ class ToastHostTest(unittest.TestCase):
         window.show()
         self.addCleanup(window.close)
         host = motion.ToastHost(window)
-        toast = host.show("Usunięto komentarz", "Cofnij", timeout=10)
+        toast = host.show("Usunięto komentarz", "Cofnij", timeout=60000)
         toast._finish()                                  # what the end of the fade-out does
         _settle(self.app)
+        self.app.sendPostedEvents(toast, QEvent.DeferredDelete)       # only this one: other tests own live objects
         host.reposition()                                # a resize of the window after the toast was deleted
         host.dismiss_current()
         self.assertIsNone(host._current)
+        QTest.qWait(300)                                 # let every fade-out end before the window goes away
 
     def test_a_new_toast_replaces_the_old_one(self):
         from ui import motion
@@ -84,6 +86,7 @@ class ToastHostTest(unittest.TestCase):
         second = host.show("Drugi")
         self.assertIs(host._current, second)
         host.dismiss_current()
+        QTest.qWait(400)                                 # let every fade-out end before the window goes away
 
 
 if __name__ == "__main__":
