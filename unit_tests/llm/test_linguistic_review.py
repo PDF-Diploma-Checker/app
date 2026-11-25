@@ -95,7 +95,7 @@ class ReviewTest(unittest.TestCase):
             self.assertEqual(review.review_findings(matches), matches)
         make.assert_not_called()
 
-    def test_a_missing_subject_stays_in_the_detailed_mode_too(self):
+    def test_a_missing_subject_or_verb_stays_in_the_detailed_mode_too(self):
         # the rule says every sentence of a thesis has a subject; the model, asked whether the sentence is correct
         # Polish, calls an impersonal one correct and the finding would vanish from the report of the detailed mode
         sentence = "Na podstawie badań można sformułować wnioski."
@@ -104,9 +104,9 @@ class ReviewTest(unittest.TestCase):
         verb = finding("Brak.", source="sentence_check", context="«Brak.»")
         verb.category = "NO_VERB"
         self.assertIsNotNone(review._why_not_asked(match, "pl"))
-        self.assertIsNone(review._why_not_asked(verb, "pl"))              # a missing verb is still read by the model
+        self.assertIsNotNone(review._why_not_asked(verb, "pl"))
         with patch.object(review, "make_llama") as make:
-            self.assertEqual(review.review_findings([match]), [match])
+            self.assertEqual(review.review_findings([match, verb]), [match, verb])
         make.assert_not_called()
 
     def test_decimal_format_findings_cannot_be_rejected_by_the_model(self):
