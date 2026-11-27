@@ -89,37 +89,59 @@ class ModelDownloadDialog(QDialog):
         layout.addSpacing(6)
         layout.addLayout(buttons)
 
+        self._cancelling = False
         self.worker = _DownloadWorker()
         self.worker.progress.connect(self._on_progress)
         self.worker.failed.connect(self._on_failed)
         self.worker.succeeded.connect(self._on_done)
+        self.worker.finished.connect(self._on_worker_finished)
         self.worker.start()
 
     def _on_progress(self, value, text):
+        if self._cancelling or self.worker.token.is_cancelled():
+            return
         if self.bar.maximum() == 0:
             self.bar.setRange(0, 100)
         self.bar.setValue(max(value, self.bar.value()))
         self.status.setText(text)
 
     def _on_done(self):
+        if self._cancelling or self.worker.token.is_cancelled():
+            return
         self.ok = app_config.are_ai_models_downloaded()
         MessageBox.information(self, t("models.title"), t("models.done"))
         self.accept()
 
     def _on_failed(self, message):
+        if self._cancelling or self.worker.token.is_cancelled():
+            return
         MessageBox.critical(self, t("common.error"), message)
         super().reject()
+
+    def _on_worker_finished(self):
+        if self._cancelling:
+            super().reject()
 
     def reject(self):
         """Cancel: the download stops within a fraction of a second, also in the middle of a file (see
         config.cancellable_downloads); what was downloaded is continued next time."""
         if self.worker.isRunning():
+            if self._cancelling:
+                return
+            self._cancelling = True
             self.worker.token.cancel()
             self.cancel_btn.setEnabled(False)
             self.status.setText(t("models.cancelling"))
-            self.worker.finished.connect(lambda: QDialog.reject(self))
+            if self.worker.isFinished():
+                super().reject()
             return
         super().reject()
+
+    def done(self, result):
+        if self.worker.isRunning():
+            self.worker.token.cancel()
+            self.worker.wait(10000)
+        super().done(result)
 
 
 def download_models(parent):
