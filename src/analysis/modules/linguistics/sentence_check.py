@@ -23,7 +23,7 @@ SENTENCE_END_RE = re.compile(r'([.!?…:])["”»’)\]]*\s*$')
 OECD_HEADING_RE = re.compile(r'(Field\s+of\s+science\s+and\s+technology|Dziedzina\s+nauki\s+i\s+techniki)\b[^:]*?\bOECD\b[^:]*:', re.IGNORECASE)
 #na stronie z nagłówkiem ABSTRACT/STRESZCZENIE wystarczy samo słowo OECD
 OECD_RE = re.compile(r'\bOECD\b')
-ABSTRACT_TITLES = {"abstract", "streszczenie"}
+ABSTRACT_TITLES = {"abstract", "streszczenie", "abstrakt"}
 VERB_TAGS = {"fin", "praet", "imps", "impt", "bedzie", "winien", "pred"}
 
 #skróty, po których kropka praktycznie nigdy nie kończy zdania
