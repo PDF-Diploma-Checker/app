@@ -5,7 +5,7 @@ status pills and figure lists, a running header and "page x of y" footers.
     build_report_pdf(report_data, document_name, lang, save_path, ...)
 
 `report_data` is the AI result the app stores for a document (content_grade, ocena, r1..r3, image_analysis,
-jakosc_obrazkow, czcionki_obrazkow, statystyki_zdan). No Qt here: only PyMuPDF, so it can be tested on its own.
+jakosc_obrazkow, czcionki_obrazkow, statystyki_zdan, abstract_word_count). No Qt here: only PyMuPDF, so it can be tested on its own.
 """
 
 import datetime
@@ -13,6 +13,8 @@ import os
 import re
 
 import fitz
+
+from analysis.modules.linguistics.abstract_word_count import RECOMMENDED_MIN_WORDS, abstract_count
 
 from . import styles
 
@@ -24,7 +26,7 @@ STRINGS = {
         "warning": "Ostrzeżenie", "unknown_fig": "Nieznany rysunek", "no_format": "Brak formatu",
         "no_title": "Brak tytułu", "panel_pts": "pkt", "panel_fig_prefix": "Rys.",
         "rep_no_data_warn": "Brak danych szczegółowej analizy merytorycznej dla tego dokumentu.",
-        "rep_file_prefix": "Raport_Merytoryczny_", "rep_dialog_title": "Zapisz Raport Szczegółowy",
+        "rep_file_prefix": "Raport_z_analizy_", "rep_dialog_title": "Zapisz Raport Szczegółowy",
         "rep_main_title": "Szczegółowy Raport Analizy Merytorycznej", "rep_doc_label": "Dokument:",
         "rep_eval_title": "Ogólna ocena merytoryczna", "rep_score_lbl": "Wynik punktowy:",
         "rep_off_topic_lbl": "Podrozdziały poza tematem:", "rep_off_topic_ident": "Zidentyfikowane sekcje niezgodne z celem pracy:",
@@ -52,6 +54,11 @@ STRINGS = {
         "rep_passive_lbl": "Zdania w stronie biernej", "rep_passive_desc": "Stosowana przy opisie procedur badawczych oraz stanu wiedzy.",
         "rep_verbless_lbl": "Równoważniki zdań", "rep_verbless_desc": "Konstrukcje bezorzecznikowe, dopuszczalne głównie w nagłówkach i spisach.",
         "rep_stats_no_data": "Brak dostępnych danych statystycznych (uruchom analizę w Trybie Dokładnym).",
+        "rep_abstract_title": "Liczba słów w streszczeniu", "rep_abstract_desc": "Rekomendowane co najmniej {min} słów.",
+        "rep_abstract_pl": "Streszczenie (PL)", "rep_abstract_en": "Abstract (EN)", "rep_abstract_value": "{count} słów",
+        "rep_abstract_range": "Słowa liczone od \"{first}\" do \"{last}\" włącznie.",
+        "rep_abstract_not_found": "Nie wykryto streszczenia ani abstraktu. Prawdopodobna przyczyna: brak streszczenia lub abstraktu w pracy albo literówka w tytule streszczenia.",
+        "rep_abstract_not_found_hint": "Zweryfikuj, czy Twoja uczelnia wymaga obecności streszczenia lub abstraktu.",
         "rep_footer_date": "Data:", "rep_success_saved": "Raport został zapisany pomyślnie:\n{}", "rep_err_gen": "Błąd podczas generowania raportu:\n{}",
         "rep_page": "Strona {n} z {total}", "rep_summary": "Podsumowanie", "rep_tile_score": "Ocena merytoryczna",
         "rep_tile_completion": "Realizacja wytycznych", "rep_tile_figures": "Rysunki poprawne", "rep_tile_off": "Sekcje poza tematem",
@@ -63,7 +70,7 @@ STRINGS = {
         "warning": "Warning", "unknown_fig": "Unknown figure", "no_format": "No format",
         "no_title": "No title", "panel_pts": "pts", "panel_fig_prefix": "Fig.",
         "rep_no_data_warn": "No detailed substantive analysis data for this document.",
-        "rep_file_prefix": "Content_Report_", "rep_dialog_title": "Save Detailed Report",
+        "rep_file_prefix": "Analysis_Report_", "rep_dialog_title": "Save Detailed Report",
         "rep_main_title": "Detailed Content Analysis Report", "rep_doc_label": "Document:",
         "rep_eval_title": "Overall Content Evaluation", "rep_score_lbl": "Score:",
         "rep_off_topic_lbl": "Off-topic subsections:", "rep_off_topic_ident": "Identified sections irrelevant to the thesis objective:",
@@ -91,6 +98,11 @@ STRINGS = {
         "rep_passive_lbl": "Passive voice sentences", "rep_passive_desc": "Used when describing research procedures and state of knowledge.",
         "rep_verbless_lbl": "Sentence equivalents", "rep_verbless_desc": "Verbless constructions, acceptable mainly in headers and lists.",
         "rep_stats_no_data": "No statistical data available (run analysis in Detailed Mode).",
+        "rep_abstract_title": "Abstract Word Count", "rep_abstract_desc": "At least {min} words are recommended.",
+        "rep_abstract_pl": "Streszczenie (PL)", "rep_abstract_en": "Abstract (EN)", "rep_abstract_value": "{count} words",
+        "rep_abstract_range": "Words counted from \"{first}\" to \"{last}\" inclusive.",
+        "rep_abstract_not_found": "No abstract (STRESZCZENIE, ABSTRAKT or ABSTRACT) detected. Likely cause: the abstract is missing or its title has a typo.",
+        "rep_abstract_not_found_hint": "Check whether your university requires an abstract.",
         "rep_footer_date": "Date:", "rep_success_saved": "Report saved successfully:\n{}", "rep_err_gen": "Error during report generation:\n{}",
         "rep_page": "Page {n} of {total}", "rep_summary": "Summary", "rep_tile_score": "Content score",
         "rep_tile_completion": "Guideline completion", "rep_tile_figures": "Correct figures", "rep_tile_off": "Off-topic sections",
@@ -641,3 +653,22 @@ def _content(w, s, data):
         w.card(rows[:-1], keep=True)
     else:
         w.card([w.r_note(s["rep_stats_no_data"], "off")])
+
+    # ---- abstract word count: only the abstracts found in the thesis; a notice when the count ran and found none
+    abstract_words = data.get("abstract_word_count")
+    found = isinstance(abstract_words, dict) and any(lang in abstract_words for lang in ("pl", "en"))
+    if isinstance(abstract_words, dict) and not found:
+        w.heading(s["rep_abstract_title"])
+        w.card([w.r_note(s["rep_abstract_not_found"], "warn"), w.r_gap(4),
+                w.r_text(s["rep_abstract_not_found_hint"], 9.5, color=C["text2"])], keep=True)
+    if found:
+        w.heading(s["rep_abstract_title"], s["rep_abstract_desc"].format(min=RECOMMENDED_MIN_WORDS))
+        rows = []
+        for lang in ("pl", "en"):
+            if lang in abstract_words:
+                count, first, last = abstract_count(abstract_words[lang])
+                colour = C["success"] if count >= RECOMMENDED_MIN_WORDS else C["warning"]
+                span = s["rep_abstract_range"].format(first=first, last=last) if first and last else None
+                rows += [w.r_bar(s["rep_abstract_" + lang], s["rep_abstract_value"].format(count=count),
+                                 count / RECOMMENDED_MIN_WORDS, span, color=colour), w.r_gap(6)]
+        w.card(rows[:-1], keep=True)

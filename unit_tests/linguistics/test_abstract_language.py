@@ -26,6 +26,11 @@ class AbstractLanguageTest(unittest.TestCase):
         apply_abstract_languages(NS(logical_blocks=blocks))
         self.assertEqual([b.language for b in blocks], ['pl', 'pl'])
 
+    def test_abstrakt_heading_uses_polish(self):
+        blocks = [block('ABSTRAKT', 'heading', 'en'), block('Tekst abstraktu', language='en')]
+        apply_abstract_languages(NS(logical_blocks=blocks))
+        self.assertEqual([b.language for b in blocks], ['pl', 'pl'])
+
     def test_abstract_on_second_page_is_not_skipped_or_redetected_as_polish(self):
         from analysis.modules.linguistics.helpers import get_context
         document = NS(logical_blocks=[block('ABSTRACT', 'heading', page=1),

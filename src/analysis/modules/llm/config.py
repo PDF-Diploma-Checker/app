@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -319,18 +320,61 @@ def are_ai_models_downloaded(model_dir=None, profile=None):
     return _embedding_complete(_embedding_dir(base)) or _embedding_in_hf_cache() is not None
 
 
-def java_available():
+JAVA_MIN_VERSION = 17
+
+
+def java_version():
+    """Major version of the Java on PATH (8 for "1.8.0_292", 17 for "17.0.2"), or None if it is missing or unreadable."""
     java = shutil.which("java")
     if not java:
-        return False
+        return None
     try:
-        subprocess.run(
-            [java, "-version"], check=True, capture_output=True, timeout=15,
+        # `java -version` writes to stderr
+        result = subprocess.run(
+            [java, "-version"], capture_output=True, text=True, timeout=15,
             stdin=subprocess.DEVNULL, creationflags=_NO_WINDOW,
         )
-        return True
     except Exception:
-        return False
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r'version "([^"]+)"', (result.stderr or "") + (result.stdout or ""))
+    if not match:
+        return None
+    parts = match.group(1).split(".")
+    try:
+        if parts[0] == "1" and len(parts) > 1:  # old scheme: 1.8 means Java 8
+            return int(parts[1])
+        return int(re.match(r"\d+", parts[0]).group())
+    except (AttributeError, ValueError):
+        return None
+
+
+def java_available():
+    version = java_version()
+    return version is not None and version >= JAVA_MIN_VERSION
+
+
+class LanguageToolUnavailable(RuntimeError):
+    """LanguageTool cannot run (usually no Java or a too old one): the analysis stops, the message says what to fix."""
+
+
+def java_howto():
+    """Steps for this system that put a new enough Java where the app looks for it (the first `java` on PATH)."""
+    from ui.i18n import t
+    system = "windows" if platform.system() == "Windows" else "linux"
+    return t(f"analysis.java_howto_{system}", min=JAVA_MIN_VERSION)
+
+
+def java_problem():
+    """None when the Java on PATH can run LanguageTool, otherwise a message telling the user how to fix it."""
+    from ui.i18n import t
+    version = java_version()
+    if version is None:
+        return t("analysis.java_missing", min=JAVA_MIN_VERSION, howto=java_howto())
+    if version < JAVA_MIN_VERSION:
+        return t("analysis.java_too_old", version=version, min=JAVA_MIN_VERSION, howto=java_howto())
+    return None
 
 
 def download_specific_language(lang_code=None):

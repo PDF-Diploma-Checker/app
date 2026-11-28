@@ -51,6 +51,25 @@ class DecisionLogTest(unittest.TestCase):
             decision_log.reported("list_check", match())
         self.assertIn("«kot»", logs.output[0])
 
+    def test_context_includes_neighboring_blocks_for_standalone_sentence(self):
+        b0 = SimpleNamespace(contents="A.3. Wybór celu w magazynie", language="pl",
+                             block=SimpleNamespace(block_id=1, type="heading"))
+        b1 = SimpleNamespace(contents="Użytkownik wskazuje cel na mapie.", language="pl",
+                             block=SimpleNamespace(block_id=2, type="paragraph"))
+        b2 = SimpleNamespace(contents="Po dojściu do celu można wybrać kolejny punkt.", language="pl",
+                             block=SimpleNamespace(block_id=3, type="paragraph"))
+        b3 = SimpleNamespace(contents="Robot planuje nową trasę.", language="pl",
+                             block=SimpleNamespace(block_id=4, type="paragraph"))
+        m = Error_type(content=b2.contents, category="NO_SUBJECT", message="Brak podmiotu w zdaniu.",
+                       offset=0, error_length=len(b2.contents), block_id=3, page_start=1, page_end=1,
+                       word_idxs=[], error_coordinate=[], rule="sentence_parts")
+        with self.assertLogs(decision_log.logger, "INFO"):
+            decision_log.report_sources([("sentence_check", [m])], [m], [b0, b1, b2, b3])
+        self.assertIn("A.3. Wybór celu w magazynie", m.context)
+        self.assertIn("Użytkownik wskazuje cel na mapie.", m.context)
+        self.assertIn("«Po dojściu do celu można wybrać kolejny punkt.»", m.context)
+        self.assertIn("Robot planuje nową trasę.", m.context)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@ def apply_abstract_languages(document):
     for block in document.logical_blocks:
         if block.type == 'heading':
             title = ' '.join(block.content.split()).strip(' .:').casefold()
-            section_language = {'abstract': 'en', 'streszczenie': 'pl'}.get(title)
+            section_language = {'abstract': 'en', 'streszczenie': 'pl', 'abstrakt': 'pl'}.get(title)
         if section_language:
             # Formatting checks use block.language; grammar uses Block_context.
             block.language = section_language

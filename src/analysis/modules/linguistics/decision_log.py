@@ -51,14 +51,57 @@ def _match_context(match, block):
     return sentence_with_mark(block.contents, position, len(match.content))
 
 
-def _text_around(match, block):
-    '''The text around the finding, which stands between « ». Empty when the text does not hold it.'''
+_CONTEXT_BLOCK_TYPES = {"paragraph", "heading", "list", "image_description", "table_description"}
+_MAX_NEIGHBOR_BLOCKS = 2
+
+
+def _neighbor_text(blocks, start_index, step, budget):
+    """Collect up to `budget` chars from adjacent prose/heading blocks so the model sees multi-sentence context
+    even when a finding sits at the very start or end of its paragraph."""
+    if not blocks or start_index is None or budget <= 0:
+        return ""
+    parts = []
+    remaining = budget
+    idx = start_index + step
+    taken = 0
+    while 0 <= idx < len(blocks) and taken < _MAX_NEIGHBOR_BLOCKS and remaining > 0:
+        neighbor = blocks[idx]
+        btype = str(getattr(neighbor.block, "type", "")).lower()
+        if btype in _CONTEXT_BLOCK_TYPES:
+            txt = _flat(neighbor.contents)
+            if txt:
+                if step < 0:
+                    snippet = txt[-remaining:] if len(txt) > remaining else txt
+                    parts.append(snippet)
+                else:
+                    snippet = txt[:remaining] if len(txt) > remaining else txt
+                    parts.append(snippet)
+                remaining -= len(snippet) + 1
+                taken += 1
+        idx += step
+    if step < 0:
+        parts.reverse()
+    return "\n".join(parts)
+
+
+def _text_around(match, block, blocks=None, block_index=None):
+    '''The text around the finding, which stands between « ». Empty when the text does not hold it.
+    Pulls adjacent paragraphs/headings when the finding sits near the start or end of its block.'''
     position = _position(match, block)
     if position is None:
         return ""
     end = position + len(match.content)
     text = block.contents
-    return f"{_flat(text[max(0, position - CONTEXT_CHARS):position])} «{_flat(text[position:end])}» {_flat(text[end:end + CONTEXT_CHARS])}".strip()
+    before = _flat(text[max(0, position - CONTEXT_CHARS):position])
+    hit = _flat(text[position:end])
+    after = _flat(text[end:end + CONTEXT_CHARS])
+    core = f"{before} «{hit}» {after}".strip()
+    if blocks is not None and block_index is not None:
+        prev_ctx = _neighbor_text(blocks, block_index, -1, CONTEXT_CHARS - len(before)) if len(before) < CONTEXT_CHARS else ""
+        next_ctx = _neighbor_text(blocks, block_index, 1, CONTEXT_CHARS - len(after)) if len(after) < CONTEXT_CHARS else ""
+        chunks = [c for c in (prev_ctx, core, next_ctx) if c]
+        return "\n".join(chunks)
+    return core
 
 
 def _block_info(block):
@@ -107,6 +150,7 @@ def not_reviewed(reason, match):
 def report_sources(sources, kept, blocks):
     '''One line for every finding left after the last filter. `sources`: (name of the check, its findings).'''
     by_id = {b.block.block_id: b for b in blocks}
+    index_by_id = {b.block.block_id: i for i, b in enumerate(blocks)}
     sections, section = {}, ""
     for b in blocks:
         if "head" in str(b.block.type).lower():
@@ -118,7 +162,7 @@ def report_sources(sources, kept, blocks):
             match.source = source
             block = by_id.get(match.block_id)
             match.language = block.language if block else ""
-            match.context = _text_around(match, by_id.get(match.block_id))
+            match.context = _text_around(match, block, blocks, index_by_id.get(match.block_id))
             if id(match) in kept_ids:
                 reported(source, match, by_id.get(match.block_id), sections.get(match.block_id, ""))
             else:

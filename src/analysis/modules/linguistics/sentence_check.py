@@ -19,6 +19,11 @@ DESCRIPTION_WHITELIST= {"wersja", "wersji", "wersjom", "wersjach", "wersję", "w
 
 CAPTION_RE = re.compile(r'^\s*((Rys|Ryc|Rysunek|Tab|Tabela|Wykres|Listing|Fig|Figure|Table)\.?\s*[A-Z]?\d+([.:]\d+)*[.:]?\s|Źródło)')
 SENTENCE_END_RE = re.compile(r'([.!?…:])["”»’)\]]*\s*$')
+#nagłówek klasyfikacji OECD w streszczeniu; ani on, ani następne zdanie (lista dziedzin) nie są zdaniami (brak NO_VERB/NO_SUBJECT)
+OECD_HEADING_RE = re.compile(r'(Field\s+of\s+science\s+and\s+technology|Dziedzina\s+nauki\s+i\s+techniki)\b[^:]*?\bOECD\b[^:]*:', re.IGNORECASE)
+#na stronie z nagłówkiem ABSTRACT/STRESZCZENIE wystarczy samo słowo OECD
+OECD_RE = re.compile(r'\bOECD\b')
+ABSTRACT_TITLES = {"abstract", "streszczenie", "abstrakt"}
 VERB_TAGS = {"fin", "praet", "imps", "impt", "bedzie", "winien", "pred"}
 
 #skróty, po których kropka praktycznie nigdy nie kończy zdania
@@ -126,7 +131,15 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
     verbless_count = 0
     impersonal_count = 0
     checked_matches = []
+    skip_oecd_list = False
+    abstract_pages = find_abstract_pages(blocks)
     for block in blocks:
+        on_abstract_page = bool(block_pages(block) & abstract_pages)
+        if block.block.type != "paragraph":
+            #nagłówek OECD wyekstrahowany jako osobny blok (np. nagłówek) - lista dziedzin jest w następnym akapicie
+            if oecd_headings(block.contents or "", on_abstract_page):
+                skip_oecd_list = True
+            continue
         if block.block.type == "paragraph":
             if block.language == 'pl':
                 nlp = nlp_pl
@@ -136,8 +149,12 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
             clean_text, idx_map = exclude_brackets(text)
             content = nlp(clean_text)
             sentence_before = ""
-            sentences = merge_abbreviation_splits(content.sents) if block.language == 'pl' else content.sents
+            sentences = merge_abbreviation_splits(content.sents) if block.language == 'pl' else list(content.sents)
+            skip_ranges, skip_oecd_list = oecd_skip_ranges(clean_text, sentences, skip_oecd_list, on_abstract_page)
             for sentence in sentences:
+                if any(sentence.start_char < end and sentence.end_char > start for start, end in skip_ranges):
+                    sentence_before = sentence.text
+                    continue
                 first_upper = None
                 if sum(1 for letter in sentence.text if letter.isalpha()) < 15:
                     sentence_before = sentence.text
@@ -300,6 +317,58 @@ def sentence_check(blocks, chapter_nums, check_first_person=True, acronyms_with_
     for cat, count in match_cats.most_common():
         logger.info("  Sentence error type '%s': %d", cat, count)
     return checked_matches, analisys
+
+def block_pages(block):
+    return {w.page_number for w in getattr(block.block, "words", None) or []}
+
+def find_abstract_pages(blocks):
+    '''Pages with an ABSTRACT / STRESZCZENIE heading (a block that is only that word, or starts with it in capitals).'''
+    pages = set()
+    for block in blocks:
+        contents = " ".join((block.contents or "").split())
+        first = contents.split(" ", 1)[0].strip(" .:") if contents else ""
+        if contents.strip(" .:").casefold() in ABSTRACT_TITLES or (first.isupper() and first.casefold() in ABSTRACT_TITLES):
+            pages |= block_pages(block)
+    return pages
+
+def oecd_headings(text, on_abstract_page):
+    '''
+    (start, end) of each OECD classification heading in the text. Anywhere: the full heading ("Field of science and
+    technology according to the OECD classification:", "Dziedzina nauki i techniki zgodna z OECD:"). On a page with
+    an ABSTRACT / STRESZCZENIE heading the word OECD is enough; that heading ends at the next colon, or at the end of
+    the sentence when there is no colon.
+    '''
+    headings = [(m.start(), m.end()) for m in OECD_HEADING_RE.finditer(text)]
+    if on_abstract_page:
+        for m in OECD_RE.finditer(text):
+            if any(start <= m.start() < end for start, end in headings):
+                continue
+            sentence_end = re.search(r'[.!?](\s|$)', text[m.end():])
+            end = m.end() + sentence_end.start() + 1 if sentence_end else len(text)
+            colon = text.find(":", m.end(), end)
+            headings.append((m.start(), colon + 1 if colon != -1 else end))
+    return headings
+
+def oecd_skip_ranges(text, sentences, skip_first, on_abstract_page=False):
+    '''
+    Returns character ranges of the OECD classification heading and the sentence after it (list of fields), which are
+    not checked for NO_VERB/NO_SUBJECT. skip_first means the heading ended the previous block, so the first sentence
+    of this block is the list. Second value tells if the heading ends this block (the list is in the next block).
+    '''
+    ranges = []
+    content_sents = [s for s in sentences if s.text.strip()]
+    if skip_first and content_sents:
+        ranges.append((content_sents[0].start_char, content_sents[0].end_char))
+    heading_at_end = False
+    for start, end in oecd_headings(text, on_abstract_page):
+        following = next((s for s in content_sents
+                          if s.end_char > end and text[max(s.start_char, end):s.end_char].strip()), None)
+        if following is None:
+            heading_at_end = True
+            ranges.append((start, len(text)))
+        else:
+            ranges.append((start, following.end_char))
+    return ranges, heading_at_end
 
 def morfeusz_check(text):
     '''

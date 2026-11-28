@@ -117,6 +117,37 @@ class TestSentenceCheck(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(check(text), [])
 
+    def test_oecd_classification_not_detected(self):
+        heading = "Field of science and technology according to the OECD classification:"
+        fields = "Engineering and technology, Electrical engineering, electronic engineering and information engineering, Robotics and Automation."
+        self.assertEqual(check(f"{heading} {fields}", "en"), [])
+        matches, _ = sentence_check([make_block(heading, 1, "en"), make_block(fields, 2, "en")], set())
+        self.assertEqual([m.category for m in matches if m.category in ("NO_SUBJECT", "NO_VERB")], [])
+        self.assertEqual(check("Dziedzina nauki i techniki zgodna z OECD: Inżynieria i technika, automatyka, elektronika i elektrotechnika."), [])
+        # only the heading and the next sentence are skipped
+        self.assertEqual(check(f"{heading} {fields} Wpływ temperatury dyszy na średnią rezystancję próbek."), ["NO_VERB"])
+
+    def test_oecd_on_abstract_page_not_detected(self):
+        fields = "Engineering and technology, Electrical engineering, electronic engineering and information engineering, Robotics and Automation."
+
+        def on_page(text, block_id, page):
+            block = make_block(text, block_id, "en")
+            for word in block.block.words:
+                word.page_number = page
+            return block
+
+        def categories(blocks):
+            matches, _ = sentence_check(blocks, set())
+            return [m.category for m in matches if m.category in ("NO_SUBJECT", "NO_VERB")]
+
+        # on a page with ABSTRACT / STRESZCZENIE the word OECD is enough, only the next sentence is skipped
+        for title in ("ABSTRACT", "Streszczenie"):
+            with self.subTest(title=title):
+                self.assertEqual(categories([on_page(title, 1, 2), on_page("Classification OECD:", 2, 2), on_page(fields, 3, 2)]), [])
+        # without the abstract heading on that page a short OECD heading is not enough
+        self.assertEqual(categories([on_page("ABSTRACT", 1, 5), on_page("Classification OECD:", 2, 2), on_page(fields, 3, 2)]),
+                         ["NO_SUBJECT", "NO_VERB"])
+
     def test_english_message(self):
         matches, _ = sentence_check([make_block("The results of the second experiment with the new dataset.", language="en")], set())
         self.assertEqual([m.message for m in matches], ["No subject in the sentence.", "No verb in the sentence."])
