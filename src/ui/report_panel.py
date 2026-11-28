@@ -10,6 +10,7 @@ the rest is in the detailed report.
 import re
 from collections import Counter
 
+from analysis.modules.linguistics.abstract_word_count import RECOMMENDED_MIN_WORDS
 from common.figure_findings import figure_details
 from common.findings import (
     assign_finding_ids, finding_category_key, finding_kind, finding_label, finding_text,
@@ -574,6 +575,22 @@ def build_report_panel(report_data, on_download, errors=None, on_page=lambda ind
                                   ("verbless_ratio", "main.stats_verbless", styles.TEXT_2)):
             value = _number(stats.get(key, 0))
             lay.addWidget(_bar(t(name).rstrip(":"), f"{_fmt(value)}%", value / 100, color=colour))
+        root.addWidget(card)
+
+    # ---- abstract word count: only the abstracts found in the thesis
+    abstract_words = data.get("abstract_word_count")
+    if isinstance(abstract_words, dict) and any(lang in abstract_words for lang in ("pl", "en")):
+        root.addWidget(_section(t("main.abstract_words_header")))
+        card, lay = _card()
+        lay.setSpacing(12)
+        for lang in ("pl", "en"):
+            if lang in abstract_words:
+                count = int(_number(abstract_words[lang]))
+                colour = styles.SUCCESS if count >= RECOMMENDED_MIN_WORDS else styles.WARNING
+                lay.addWidget(_bar(t("main.abstract_words_" + lang), t("main.abstract_words_value", count=count),
+                                   count / RECOMMENDED_MIN_WORDS, color=colour))
+        lay.addWidget(_label(t("main.abstract_words_recommended", min=RECOMMENDED_MIN_WORDS),
+                             f"font-size: 12px; color: {styles.TEXT_2}; {TRANSPARENT}"))
         root.addWidget(card)
 
     if errors is not None:
