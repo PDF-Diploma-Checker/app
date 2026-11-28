@@ -144,15 +144,42 @@ class GlobalFindingsTest(unittest.TestCase):
         self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
 
     def test_abstract_word_count_shows_only_found_abstracts(self):
-        panel, _ = build_report_panel({"abstract_word_count": {"pl": 250}}, lambda: None, [])
+        panel, _ = build_report_panel({"abstract_word_count": {"pl": {"count": 250, "first": "W", "last": "MAE"}}}, lambda: None, [])
         texts = [label.text() for label in panel.findChildren(QLabel)]
         self.assertIn("Abstract word count", texts)
         self.assertIn("Streszczenie (PL)", texts)
         self.assertIn("250 words", texts)
+        self.assertIn("Words counted from “W” to “MAE” inclusive.", texts)
         self.assertNotIn("Abstract (EN)", texts)
         self.assertIn("At least 300 words are recommended.", texts)
         panel, _ = build_report_panel({"abstract_word_count": {}}, lambda: None, [])
+        texts = [label.text() for label in panel.findChildren(QLabel)]
+        self.assertIn("Abstract word count", texts)
+        self.assertTrue(any(text.startswith("No abstract (STRESZCZENIE, ABSTRAKT or ABSTRACT) detected.") for text in texts))
+        self.assertIn("Check whether your university requires an abstract.", texts)
+        # an older result without the count: nothing is shown
+        panel, _ = build_report_panel({"content_grade": {"grade": 80}}, lambda: None, [])
         self.assertNotIn("Abstract word count", [label.text() for label in panel.findChildren(QLabel)])
+
+    def test_abstract_word_count_in_pdf_report(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "report.pdf")
+            build_report_pdf({"abstract_word_count": {"en": {"count": 320, "first": "The", "last": "MAE"}}}, "Thesis", "en", path)
+            with fitz.open(path) as pdf:
+                text = " ".join(page.get_text() for page in pdf)
+            self.assertIn("Abstract Word Count", text)
+            self.assertIn("320 words", text)
+            self.assertIn("Words counted from \"The\" to \"MAE\" inclusive.", " ".join(text.split()))
+            self.assertNotIn("Streszczenie (PL)", text)
+            self.assertIn("At least 300 words are recommended.", text)
+            build_report_pdf({}, "Thesis", "en", path)
+            with fitz.open(path) as pdf:
+                self.assertNotIn("Abstract Word Count", " ".join(page.get_text() for page in pdf))
+            build_report_pdf({"abstract_word_count": {}}, "Thesis", "en", path)
+            with fitz.open(path) as pdf:
+                text = " ".join(" ".join(page.get_text() for page in pdf).split())
+            self.assertIn("No abstract (STRESZCZENIE, ABSTRAKT or ABSTRACT) detected.", text)
+            self.assertIn("Check whether your university requires an abstract.", text)
 
     def test_global_and_bibliography_sections_follow_analysis_results(self):
         data = {"content_grade": {"grade": 80}, "statystyki_zdan": {"active_ratio": 70}}

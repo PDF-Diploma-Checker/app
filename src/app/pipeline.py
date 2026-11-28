@@ -93,7 +93,7 @@ class AnalysisPipeline:
         )
 
         ling_ready_event = threading.Event()
-        abstract_words = {}
+        abstract_words = {}  # "result": the count; missing when it did not run
 
         def task_llm():
             ling_ready_event.wait()
@@ -139,7 +139,7 @@ class AnalysisPipeline:
                 try:
                     from analysis.modules.linguistics.abstract_word_count import count_abstract_words
 
-                    abstract_words.update(count_abstract_words(raw_blocks))
+                    abstract_words["result"] = count_abstract_words(raw_blocks)
                 except Exception as e:
                     logger.warning(f"[PIPELINE] Abstract word count failed: {e}", exc_info=True)
 
@@ -267,7 +267,7 @@ class AnalysisPipeline:
         image_analysis["image_raster"] = raster_figure_numbers
         final_report.llm_result["image_analysis"] = image_analysis
         final_report.llm_result["statystyki_zdan"] = ling_stats
-        final_report.llm_result["abstract_word_count"] = abstract_words
+        final_report.llm_result["abstract_word_count"] = abstract_words.get("result")
 
         final_report.llm_result["language"] = language
 

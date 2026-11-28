@@ -4,7 +4,11 @@ from pathlib import Path
 from types import SimpleNamespace as NS
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
-from analysis.modules.linguistics.abstract_word_count import count_abstract_words
+from analysis.modules.linguistics.abstract_word_count import count_abstract_words as count_with_range
+
+
+def count_abstract_words(document):
+    return {lang: result['count'] for lang, result in count_with_range(document).items()}
 
 
 def doc(*blocks):
@@ -34,6 +38,16 @@ class AbstractWordCountTest(unittest.TestCase):
         document = doc(('heading', 'ABSTRACT'), ('paragraph', 'One two.'), ('heading', '1. Introduction'),
                        ('paragraph', 'Many more words here.'))
         self.assertEqual(count_abstract_words(document), {'en': 2})
+
+    def test_first_and_last_counted_word(self):
+        document = doc(('heading', 'STRESZCZENIE'), ('paragraph', 'W pracy (ang. Mean Absolute Error, MAE).'),
+                       ('heading', 'Słowa kluczowe:'))
+        self.assertEqual(count_with_range(document), {'pl': {'count': 7, 'first': 'W', 'last': 'MAE'}})
+
+    def test_abstrakt_is_the_polish_abstract(self):
+        document = doc(('heading', 'ABSTRAKT'), ('paragraph', 'Jedno dwa trzy.'), ('keywords', 'Słowa kluczowe: x'),
+                       ('heading', 'Abstract'), ('paragraph', 'One two.'), ('acronyms', 'Keywords: y'))
+        self.assertEqual(count_abstract_words(document), {'pl': 3, 'en': 2})
 
     def test_no_abstract_and_abstract_inside_a_sentence(self):
         self.assertEqual(count_abstract_words(doc(('paragraph', 'abstract algebra is fun'))), {})
