@@ -271,13 +271,29 @@ def resolve_embedding_model(name=None):
     return name or EMBEDDING_MODEL
 
 
-def ai_models_status():
-    """Which model files are present: {'gemma': bool, 'vision': bool, 'mmproj': bool, 'embeddings': bool}."""
+def _embedding_dir(model_dir):
+    return Path(model_dir) / "embeddings" / EMBEDDING_MODEL.split("/")[-1]
+
+
+def ai_models_status(model_dir=None, profile=None):
+    """Which model files are present: {'gemma': bool, 'vision': bool, 'mmproj': bool, 'embeddings': bool}.
+
+    With no arguments, checks the active config paths. When `model_dir` or `profile` is given, checks that
+    folder and profile instead."""
+    if model_dir is None and profile is None:
+        return {
+            "gemma": MODEL_PATH.is_file(),
+            "vision": VISION_MODEL_PATH.is_file(),
+            "mmproj": VISION_MMPROJ_PATH.is_file(),
+            "embeddings": embedding_path() is not None,
+        }
+    base = Path(model_dir) if model_dir is not None else MODEL_DIR
+    prof = profile or MODEL_PROFILE
     return {
-        "gemma": MODEL_PATH.is_file(),
-        "vision": VISION_MODEL_PATH.is_file(),
-        "mmproj": VISION_MMPROJ_PATH.is_file(),
-        "embeddings": embedding_path() is not None,
+        "gemma": text_model_path(base, prof).is_file(),
+        "vision": (base / VISION_SUBDIR / VISION_FILE).is_file(),
+        "mmproj": (base / VISION_SUBDIR / VISION_MMPROJ_FILE).is_file(),
+        "embeddings": _embedding_complete(_embedding_dir(base)) or _embedding_in_hf_cache() is not None,
     }
 
 
@@ -290,8 +306,18 @@ def _remove_replaced_models():
             logger.warning("Could not remove the old model file %s", MODEL_DIR / name)
 
 
-def are_ai_models_downloaded():
-    return all(ai_models_status().values())
+def are_ai_models_downloaded(model_dir=None, profile=None):
+    if model_dir is None and profile is None:
+        return all(ai_models_status().values())
+    base = Path(model_dir) if model_dir is not None else MODEL_DIR
+    prof = profile or MODEL_PROFILE
+    if not (
+        text_model_path(base, prof).is_file()
+        and (base / VISION_SUBDIR / VISION_FILE).is_file()
+        and (base / VISION_SUBDIR / VISION_MMPROJ_FILE).is_file()
+    ):
+        return False
+    return _embedding_complete(_embedding_dir(base)) or _embedding_in_hf_cache() is not None
 
 
 JAVA_MIN_VERSION = 17

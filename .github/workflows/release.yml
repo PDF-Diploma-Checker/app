@@ -28,6 +28,14 @@ on:
         description: "Publish the release when it is complete (off: leave the draft)"
         type: boolean
         default: true
+      version:
+        description: "Release this version instead of the next number (e.g. 0.8.0); empty = the next number"
+        type: string
+        default: ""
+      base:
+        description: "Make it a patch of this older release (e.g. v0.7.5), so that releases after it can be removed"
+        type: string
+        default: ""
 
 concurrency:
   group: release
@@ -40,14 +48,16 @@ jobs:
   plan:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write        # the version bump of a run that waited for another release
     outputs:
       skip: ${{ steps.plan.outputs.skip }}
       reason: ${{ steps.plan.outputs.reason }}
       tag: ${{ steps.plan.outputs.tag }}
       base: ${{ steps.plan.outputs.base }}
       since: ${{ steps.plan.outputs.since }}
-      head: ${{ steps.plan.outputs.head }}
-      sha: ${{ steps.plan.outputs.sha }}
+      head: ${{ steps.head.outputs.short }}
+      sha: ${{ steps.head.outputs.sha }}
       patch: ${{ steps.plan.outputs.patch }}
       full_linux: ${{ steps.plan.outputs.full_linux }}
       full_windows: ${{ steps.plan.outputs.full_windows }}
@@ -67,8 +77,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}      # reading the public download repository
           FORCE_FULL: ${{ inputs.force_full }}
+          VERSION: ${{ inputs.version }}
+          BASE: ${{ inputs.base }}
         run: |
-          if [ "$FORCE_FULL" = "true" ]; then python tools/release_plan.py --force-full; else python tools/release_plan.py; fi
+          args=()
+          [ "$FORCE_FULL" = "true" ] && args+=(--force-full)
+          [ -n "$VERSION" ] && args+=(--version "$VERSION")
+          [ -n "$BASE" ] && args+=(--base "$BASE")
+          python tools/release_plan.py "${args[@]}"
 
       - name: The token for the download repository
         if: steps.plan.outputs.skip != 'true'
@@ -76,6 +92,20 @@ jobs:
           TOKEN: ${{ secrets.DOWNLOAD_REPO_TOKEN }}
         run: |
           test -n "$TOKEN" || { echo "::error::Add the secret DOWNLOAD_REPO_TOKEN (write access to diploma-checker-download)"; exit 1; }
+
+      # A run that waited for another release finds its version already released, while the code has changed since:
+      # the plan gave it the next version number (in the files), here it goes into main, and the release is of that commit.
+      - id: head
+        if: steps.plan.outputs.skip != 'true'
+        run: |
+          if [ "${{ steps.plan.outputs.bumped }}" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -am "Set the version to ${{ steps.plan.outputs.version }}"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_OUTPUT"
 
   patch:
     needs: plan

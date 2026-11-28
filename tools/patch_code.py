@@ -67,7 +67,8 @@ def bundled_modules(since):
 def version_only_change(since, path):
     """True when only the version number changed in `path` (pyproject.toml, uv.lock)."""
     lines = git("diff", "--unified=0", since, "--", path).splitlines()
-    return not any(line[0] in "+-" and not line.startswith(("+++", "---", "+version = ", "-version = "))
+    return not any(line[0] in "+-" and not line.startswith(("+++", "---", "+version = ", "-version = ",
+                                                              "+APP_VERSION = ", "-APP_VERSION = "))
                    for line in lines if line)
 
 

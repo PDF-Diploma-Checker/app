@@ -45,6 +45,10 @@ class TestNamesAreNotAcronyms(unittest.TestCase):
         text = "Wydajność zweryfikowano na karcie graficznej NVIDIA GeForce RTX 5060 Ti."
         self.assertNotIn("RTX", reported([text]))
 
+    def test_rtx_needs_no_expansion_without_a_model_number_too(self):
+        text = "Trening przyspieszono na kartach RTX, a obliczenia przeniesiono na GPU."
+        self.assertNotIn("RTX", reported([text]))
+
     def test_real_undefined_acronym_still_reported(self):
         text = "Procedura obejmuje szum pomiarowy w odczytach enkoderów i jednostki IMU oraz losowe impulsy."
         self.assertIn("IMU", reported([text]))

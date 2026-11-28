@@ -69,7 +69,7 @@ def check_if_was_defined(blocks, acronyms_with_definitions, proper_names):
     global_acronyms = {
         "USA", "EU", "UN", "NATO", "WHO", "UNESCO", "ONZ", "UE", "PL", "EN", 
         "IT", "PC", "USB", "GPS", "WiFi", "PDF", "PhD", "MSc", "BSc", "SI", "CEO", "MIN", "MAX", 
-        "3D", "2D","1D", "°C", "CO2", "H2O", "NVIDIA", "ISO", "PN-ISO"
+        "3D", "2D","1D", "°C", "CO2", "H2O", "NVIDIA", "RTX", "ISO", "PN-ISO"
     }
     quote_marks = {'"', '„', '”', '«', '»', '“', '‟', '‘', '’'}
     category = "ACRONYM_UNDEFINED"

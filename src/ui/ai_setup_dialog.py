@@ -434,7 +434,7 @@ class AiSetupDialog(QDialog):
         directory = Path(text).expanduser()
         free = gpu_check.free_space_gb(directory)
         profile = self._profile()
-        if app_config._models_present(directory, profile):
+        if app_config.are_ai_models_downloaded(directory, profile):
             return "present", free
         if not _can_write(directory):
             return "readonly", free
