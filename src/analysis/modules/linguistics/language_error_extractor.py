@@ -21,6 +21,7 @@ os.environ.setdefault("LTP_PATH", str(Path.home() / ".cache" / "language_tool_py
 # ===== CACHE LANGUAGE TOOLS NA POZIOMIE MODUŁU =====
 _TOOL_EN = None
 _TOOL_PL = None
+_INIT_ERROR = None      # why the last start of LanguageTool failed, for the message to the user
 
 
 def _close_language_tools():
@@ -39,7 +40,7 @@ atexit.register(_close_language_tools)
 
 def _init_language_tools():
     '''Inicialize language tools only once during first boot.'''
-    global _TOOL_EN, _TOOL_PL
+    global _TOOL_EN, _TOOL_PL, _INIT_ERROR
 
     if _TOOL_EN is None:
         try:
@@ -68,6 +69,7 @@ def _init_language_tools():
         except Exception as e:
             logger.exception("Failed to initialize LanguageTool EN")
             _TOOL_EN = None
+            _INIT_ERROR = f"{type(e).__name__}: {e}"
     
     if _TOOL_PL is None:
         try:
@@ -92,6 +94,21 @@ def _init_language_tools():
         except Exception as e:
             logger.exception("Failed to initialize LanguageTool PL")
             _TOOL_PL = None
+            _INIT_ERROR = f"{type(e).__name__}: {e}"
+
+
+def start_language_tools():
+    """Start LanguageTool PL and EN (cached), or raise LanguageToolUnavailable with a message for the user.
+
+    The pipeline calls it before the analysis starts: without LanguageTool the report would look complete but miss
+    every language finding, and a failure found later would only reach the user after the AI stage."""
+    _init_language_tools()
+    if _TOOL_PL is None or _TOOL_EN is None:
+        from analysis.modules.llm.config import LanguageToolUnavailable, java_problem
+        from ui.i18n import t
+        raise LanguageToolUnavailable(java_problem() or t("analysis.languagetool_failed", error=_INIT_ERROR))
+    return _TOOL_PL, _TOOL_EN
+
 
 def language_tool_analisys(blocks):
     '''Finds mistakes in text: grammar, style, typos, punctuation in paragraphs and more.'''
@@ -130,9 +147,7 @@ def language_tool_analisys(blocks):
         'SEMANTICS': "Sematics error.",
     }
 
-    _init_language_tools()
-    tool_pl = _TOOL_PL
-    tool_en = _TOOL_EN
+    tool_pl, tool_en = start_language_tools()
 
     for block in blocks:
         if block.block.type not in {"acronyms", "keywords", "math", "code_snippet", "toc", "tof", "tot"}:
