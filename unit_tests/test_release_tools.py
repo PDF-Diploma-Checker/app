@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,12 +96,16 @@ class PlanTest(unittest.TestCase):
         _git(self.repo, "config", "user.name", "t")
         _write(self.repo, {"src/app/x.py": "import json\n", "src/app/launcher.py": "pass\n", "src/common/version.py":
                            'APP_VERSION = "1.0.0"\n', "pyproject.toml": 'name = "a"\nversion = "1.0.0"\n',
+                           "uv.lock": 'name = "pdf-diploma-checker"\nversion = "1.0.0"\n',
                            "build_linux.sh": "#!/bin/sh\n", "unit_tests/t.py": "pass\n"})
         self.since = self.commit("base")
         for module in (patch_code, release_plan):
             old = module.ROOT
             module.ROOT = self.repo
             self.addCleanup(setattr, module, "ROOT", old)
+        old_version_file = patch_code.VERSION_FILE
+        patch_code.VERSION_FILE = self.repo / "src" / "common" / "version.py"
+        self.addCleanup(setattr, patch_code, "VERSION_FILE", old_version_file)
 
     def commit(self, message):
         _git(self.repo, "add", "-A")
@@ -125,9 +130,15 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(reaching, [])
 
     def test_a_bare_version_change_does_not_reach_the_app(self):
-        _write(self.repo, {"pyproject.toml": 'name = "a"\nversion = "1.0.1"\n'})
+        _write(self.repo, {"pyproject.toml": 'name = "a"\nversion = "1.0.1"\n',
+                           "src/common/version.py": 'APP_VERSION = "1.0.1"\n'})
         self.commit("version")
         self.assertEqual(self.plan({"json"})[0], [])
+
+    def test_a_version_next_to_code_is_still_a_change(self):
+        _write(self.repo, {"src/common/version.py": 'APP_VERSION = "1.0.1"\nOTHER = 2\n'})
+        self.commit("version and more")
+        self.assertEqual([path for _, path in self.plan({"json"})[0]], ["src/common/version.py"])
 
     def test_code_that_imports_what_the_build_holds_is_patched(self):
         _write(self.repo, {"src/app/x.py": "import json\nimport uuid\n"})
@@ -182,6 +193,58 @@ class PlanTest(unittest.TestCase):
         self.commit("code")
         _, plan = self.plan(None)
         self.assertTrue(all(item["mode"] == "full" for item in plan.values()))
+
+    def make_plan(self, latest_tag="v1.0.0", released=("v1.0.0",), **kwargs):
+        def gh(*args):
+            if args[0] != "api":
+                return ""
+            tag = args[1].rsplit("/", 1)[-1]
+            if "tags/" in args[1] and tag not in released:
+                raise RuntimeError("HTTP 404")
+            return json.dumps({"tag_name": latest_tag if "latest" in args[1] else tag,
+                               "body": f"Built from {self.since[:7]}"})
+        with mock.patch.object(release_plan, "gh", side_effect=gh):
+            return release_plan.make_plan("o/r", **kwargs)
+
+    def test_code_that_came_while_the_version_was_being_released_gets_the_next_version(self):
+        _write(self.repo, {"src/app/x.py": "import json\n# the code of a later merge\n"})
+        self.commit("ctrl+f")
+        plan = self.make_plan()                                  # the version of the files is the released one
+        self.assertFalse(plan["skip"])
+        self.assertTrue(plan["bumped"])
+        self.assertEqual((plan["version"], plan["tag"]), ("1.0.1", "v1.0.1"))
+        for name, expected in (("src/common/version.py", 'APP_VERSION = "1.0.1"'), ("pyproject.toml", 'version = "1.0.1"'),
+                               ("uv.lock", 'version = "1.0.1"')):
+            self.assertIn(expected, (self.repo / name).read_text(encoding="utf-8"), name)
+
+    def test_a_released_version_without_new_code_is_not_released_again(self):
+        _write(self.repo, {"unit_tests/t.py": "pass # changed\n"})
+        self.commit("tests")
+        plan = self.make_plan()
+        self.assertTrue(plan["skip"])
+        self.assertFalse(plan["bumped"])
+        self.assertIn('"1.0.0"', (self.repo / "src/common/version.py").read_text(encoding="utf-8"))
+
+    def test_a_chosen_version_on_an_older_base(self):
+        # several releases are folded into one: version 2.0.0, a patch of the older v1.0.0 (not of the newest release)
+        _write(self.repo, {"src/app/x.py": "import json\n# the code of the folded releases\n"})
+        self.commit("changes")
+        plan = self.make_plan(latest_tag="v1.0.3", released=("v1.0.0", "v1.0.3"), base_tag="v1.0.0", new_version="2.0.0")
+        self.assertFalse(plan["skip"])
+        self.assertEqual((plan["version"], plan["tag"], plan["base"], plan["bumped"]), ("2.0.0", "v2.0.0", "v1.0.0", True))
+        self.assertEqual(plan["since"], self.since[:7])          # from the notes of the OLDER base release
+        for name in ("src/common/version.py", "pyproject.toml", "uv.lock"):
+            self.assertIn("2.0.0", (self.repo / name).read_text(encoding="utf-8"), name)
+
+    def test_a_chosen_version_that_is_released_is_not_released_again(self):
+        plan = self.make_plan(released=("v1.0.0", "v2.0.0"), new_version="2.0.0")
+        self.assertTrue(plan["skip"])
+        self.assertIn('"1.0.0"', (self.repo / "src/common/version.py").read_text(encoding="utf-8"))
+
+    def test_nothing_is_bumped_when_asked_not_to(self):
+        _write(self.repo, {"src/app/x.py": "import json\n# later\n"})
+        self.commit("later")
+        self.assertTrue(self.make_plan(bump=False)["skip"])
 
     def test_outputs_for_the_workflow(self):
         plan = {"version": "1.0.1", "tag": "v1.0.1", "base": "v1.0.0", "since": "abc1234", "skip": False, "reason": "",

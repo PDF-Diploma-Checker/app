@@ -232,11 +232,20 @@ class AssistantPanel(QWidget):
         """Keep the panel in the bottom-right corner of the visible part of `view` (a QAbstractScrollArea)."""
         self._view = view
         view.installEventFilter(self)
+        view.viewport().installEventFilter(self)
+        # placing again once the resize has been handled: a timer of this widget, so that it dies with it
+        self._replace_timer = QTimer(self)
+        self._replace_timer.setSingleShot(True)
+        self._replace_timer.timeout.connect(self._place)
         self._place()
 
     def eventFilter(self, obj, event):
         if event.type() in (QEvent.Resize, QEvent.Show):
+            # the view is not resized yet when this filter sees the event, so the geometry of its viewport is the old
+            # one (the button then stayed at the place of the smaller window, in the middle of the page): place it again
+            # when the event has been handled
             self._place()
+            self._replace_timer.start(0)
         return False
 
     def _place(self):

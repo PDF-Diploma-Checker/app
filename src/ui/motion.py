@@ -451,6 +451,7 @@ class Toast(QFrame):
 
     actionClicked = Signal()
     expired = Signal()
+    closed = Signal()          # the toast is gone (hidden and about to be deleted): nobody may use it any more
 
     def __init__(self, parent, text, action_text=None, action_hint=None, timeout=6000):
         super().__init__(parent)
@@ -538,6 +539,7 @@ class Toast(QFrame):
 
     def _finish(self):
         self.hide()
+        self.closed.emit()
         if not self._acted:
             self.expired.emit()
         self.deleteLater()
@@ -555,6 +557,7 @@ class ToastHost:
             old, self._current = self._current, None
             old.dismiss(quick=True)
         toast = Toast(self._window, text, action_text, action_hint, timeout)
+        toast.closed.connect(lambda t=toast: self._forget(t))
         if on_action:
             toast.actionClicked.connect(on_action)
         if on_expire:
@@ -562,6 +565,12 @@ class ToastHost:
         self._current = toast
         toast.popup()
         return toast
+
+    def _forget(self, toast):
+        """A toast that has faded out is deleted; the host must not keep it (a later resize of the window moved it, and
+        Qt raised "Internal C++ object (Toast) already deleted")."""
+        if self._current is toast:
+            self._current = None
 
     def dismiss_current(self):
         if self._current is not None:
