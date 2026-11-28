@@ -143,6 +143,17 @@ class GlobalFindingsTest(unittest.TestCase):
         panel, _ = build_report_panel(None, lambda: None, [{"category": "TYPOS", "page": 0}])
         self.assertTrue(any("Right-click" in label.text() for label in panel.findChildren(QLabel)))
 
+    def test_abstract_word_count_shows_only_found_abstracts(self):
+        panel, _ = build_report_panel({"abstract_word_count": {"pl": 250}}, lambda: None, [])
+        texts = [label.text() for label in panel.findChildren(QLabel)]
+        self.assertIn("Abstract word count", texts)
+        self.assertIn("Streszczenie (PL)", texts)
+        self.assertIn("250 words", texts)
+        self.assertNotIn("Abstract (EN)", texts)
+        self.assertIn("At least 300 words are recommended.", texts)
+        panel, _ = build_report_panel({"abstract_word_count": {}}, lambda: None, [])
+        self.assertNotIn("Abstract word count", [label.text() for label in panel.findChildren(QLabel)])
+
     def test_global_and_bibliography_sections_follow_analysis_results(self):
         data = {"content_grade": {"grade": 80}, "statystyki_zdan": {"active_ratio": 70}}
         errors = self.errors + [{"category": "TYPOS", "page": 0}]
