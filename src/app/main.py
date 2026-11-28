@@ -103,7 +103,7 @@ def _show_update_result(result):
 
 
 def main():
-    from analysis.modules.llm.config import check_and_download_requirements, java_available
+    from analysis.modules.llm.config import check_and_download_requirements, java_problem, java_version
     from ui.main_window import PDFReader
     app = QApplication(sys.argv)
     styles.apply_global_style(app)
@@ -113,12 +113,9 @@ def main():
     if not ensure_accepted():
         process_guard.exit_now(0)
     check_and_download_requirements()
-    if not java_available():
-        QMessageBox.warning(
-            None, "Brak Javy",
-            "Nie wykryto Javy 17+. Analiza językowa (LanguageTool) nie będzie działać.\n"
-            "Zainstaluj Javę i uruchom aplikację ponownie.",
-        )
+    java_error = java_problem()
+    if java_error:
+        QMessageBox.warning(None, "Brak środowiska Java" if java_version() is None else "Nieobsługiwana wersja Javy", java_error)
     update_result = _finish_pending_update()
     window = PDFReader()
     window.show()

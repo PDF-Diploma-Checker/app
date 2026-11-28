@@ -59,7 +59,7 @@ class HardwareReport:
         """Plain-text form for the log and for bug reports."""
         lines = []
         for check in self.checks:
-            params = ", ".join(f"{k}={v}" for k, v in check.params.items())
+            params = ", ".join(f"{k}={v}" for k, v in check.params.items() if k != "howto")  # instructions, not facts
             lines.append(f"[{check.level}] {check.id}" + (f" ({params})" if params else ""))
         lines.append(f"recommended: device={self.recommended_device}, n_gpu_layers={self.recommended_layers}")
         return "\n".join(lines)
@@ -193,6 +193,7 @@ def collect_facts(model_dir=None):
         "driver_cuda": driver_cuda_version() if gpus else None,
         "torch": torch_flavour(),
         "java": config.java_available(),
+        "java_version": config.java_version(),
         "profile": config.MODEL_PROFILE,
         "models_ready": config.are_ai_models_downloaded(),
         "model_dir": str(model_dir or config.MODEL_DIR),
@@ -297,7 +298,17 @@ def diagnose(facts):
     if torch:
         checks.append(Check("torch", "info", {"flavour": torch}))
 
-    checks.append(Check("java", "ok" if facts.get("java") else "fail"))
+    java_version = facts.get("java_version")
+    if facts.get("java"):
+        checks.append(Check("java", "ok"))
+    else:
+        from analysis.modules.llm.config import JAVA_MIN_VERSION, java_howto
+        if java_version:
+            # found, but LanguageTool refuses to start on it
+            checks.append(Check("java_old", "fail", {"version": java_version, "min": JAVA_MIN_VERSION,
+                                                     "howto": java_howto()}))
+        else:
+            checks.append(Check("java", "fail", {"howto": java_howto()}))
 
     if not facts.get("models_ready"):
         free = float(facts.get("free_gb") or 0.0)

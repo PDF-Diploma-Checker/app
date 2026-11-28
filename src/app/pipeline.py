@@ -7,6 +7,7 @@ import sys
 import threading
 
 from analysis.extraction.service import ExtractionService
+from analysis.modules.llm.config import LanguageToolUnavailable, java_problem
 from analysis.modules.linguistics.linguistics_service import LinguisticsService
 from common.cancellation import check_cancelled
 from common.models import FinalReport, ModuleResult
@@ -50,6 +51,24 @@ class AnalysisPipeline:
 
         if not pdf_path or not os.path.exists(pdf_path):
             raise FileNotFoundError(f"File not found: {pdf_path}")
+
+        # before minutes of extraction and AI work: without a usable Java the language check cannot run at all
+        java_error = java_problem()
+        if java_error:
+            logger.error("[PIPELINE] Analysis stopped: %s", java_error.replace("\n", " "))
+            raise LanguageToolUnavailable(java_error)
+
+        # Start LanguageTool now, not deep inside the language thread: a failure there could only reach the user
+        # after the AI thread running next to it had finished, which takes minutes. Started once, it stays cached.
+        report_progress(8, t("progress.language_tool"))
+        from analysis.modules.linguistics.language_error_extractor import start_language_tools
+
+        with log_time(logger, "LanguageTool start"):
+            try:
+                start_language_tools()
+            except LanguageToolUnavailable as e:
+                logger.error("[PIPELINE] Analysis stopped: %s", str(e).replace("\n", " "))
+                raise
 
         report_progress(10, t("progress.extraction"))
 
@@ -133,6 +152,8 @@ class AnalysisPipeline:
 
                 return ling_matches, stats
 
+            except LanguageToolUnavailable:
+                raise                       # the whole analysis fails: a report without language findings misleads
             except Exception as e:
                 logger.error(f"[PIPELINE] Linguistic analysis error: {e}", exc_info=True)
 

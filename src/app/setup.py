@@ -1,6 +1,5 @@
 import sys
 import os
-import subprocess
 import threading
 import json
 from pathlib import Path
@@ -157,10 +156,12 @@ class SetupWizard(QDialog):
     def run_install_process(self, should_download):
         try:
             self.progress_signal.emit(10, "Sprawdzanie środowiska Java...")
-            try:
-                subprocess.run(["java", "-version"], check=True, capture_output=True)
-            except Exception:
+            from analysis.modules.llm.config import JAVA_MIN_VERSION, java_version
+            version = java_version()
+            if version is None:
                 self.progress_signal.emit(15, "Ostrzeżenie: Java nie została wykryta.")
+            elif version < JAVA_MIN_VERSION:
+                self.progress_signal.emit(15, f"Ostrzeżenie: wykryto Javę {version}, wymagana jest {JAVA_MIN_VERSION}+.")
 
             self.progress_signal.emit(30, "Sprawdzanie pakietów językowych SpaCy (PL/EN)...")
             download_specific_language()
